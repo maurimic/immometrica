@@ -671,6 +671,10 @@ STRENGE REGELN FÜR DIE EXTRAKTION:
    - In `executive_summary` NIEMALS eigenständig Verhandlungsempfehlungen, Zielangebote, Nachlässe oder CaPEx-Gesamtsummen hineinschreiben!
    - Die quantitative Berechnung von CaPEx, Zielangeboten und Nachlässen erfolgt STRIKT deterministisch durch das Rechenwerk des Backends.
    - Die `executive_summary` soll AUSSCHLIESSLICH die qualitative Due-Diligence zusammenfassen: Lagequalität, Bausubstanz, Sanierungsstand, Vermietungssituation und erforderliche Prüfschritte (z.B. Protokolle der Eigentümerversammlung, Jahresabrechnungen, Energieausweis). Schließe KEINE Verhandlungsempfehlung ab.
+9. RISIKEN & K.O.-KRITERIEN (STRIKTE SEVERITY-REGELN):
+   - Ein günstiger Kaufpreis, ein Preisniveau unter dem Marktdurchschnitt oder ein hoher Marktwert-Abschlag ist für einen Immobilien-Investor eine CHANCE, niemals ein kritisches K.O.-Risiko!
+   - Setze `severity` für Preisabweichungen oder günstige Kaufpreise NIEMALS auf 'CRITICAL', sondern maximal auf 'HIGH' oder 'MEDIUM' als Due-Diligence-Prüfhinweis (z.B. 'Auffällig günstiger Kaufpreis – Substanz, Mietverträge und WEG vor Ort prüfen').
+   - 'CRITICAL' darf AUSSCHLIESSLICH vergeben werden für echte juristische oder bauliche K.O.-Fallen: Erbpacht mit kurzer Restlaufzeit, akute Einsturzgefahr/Abrissverfügung, schwere Bergschäden oder nachweislich unbewohnbarer/gesperrter Zustand.
 
 Antworte AUSSCHLIESSLICH mit gültigem JSON:
 {{
@@ -1810,13 +1814,26 @@ def detect_hidden_problems_and_risks(insights: Dict[str, Any], property_data: Di
             continue
         if any(k in title_r.lower() for k in ["kaltmiete", "ertragslage", "ist-miete", "mietertrag", "mietangabe", "miethöhe", "mietvertrag", "renditekennzahl"]) and any("kaltmiete" in r["title"].lower() or "ertragslage" in r["title"].lower() for r in risks):
             continue
+        # Safeguard: Below-market price or low purchase price is an INVESTMENT OPPORTUNITY, NEVER a CRITICAL K.O. risk!
+        desc_r = str(rh.get("description", ""))
+        is_price_anomaly = any(k in title_r.lower() or k in desc_r.lower() for k in [
+            "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis", 
+            "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
+            "weit unter", "preis weit", "verdecktes risiko"
+        ])
+        if is_price_anomaly and sev_r == "CRITICAL":
+            sev_r = "HIGH"
+            badge_r = "🟡 Prüfhinweis (Unter Marktwert)"
+        else:
+            badge_r = str(rh.get("badge") or ("🔴 Kritisch" if sev_r == "CRITICAL" else ("🟡 Hinweis" if sev_r == "HIGH" else "ℹ️ Prüfbedarf")))
+
         if cat_r.lower() not in existing_cats or sev_r in ["HIGH", "CRITICAL"]:
             risks.append({
                 "title": title_r,
                 "severity": sev_r if sev_r in ["CRITICAL", "HIGH", "MEDIUM", "POSITIVE"] else "MEDIUM",
                 "category": cat_r,
-                "badge": str(rh.get("badge") or ("🔴 Kritisch" if sev_r == "CRITICAL" else ("🟡 Hinweis" if sev_r == "HIGH" else "ℹ️ Prüfbedarf"))),
-                "description": str(rh.get("description", "")),
+                "badge": badge_r,
+                "description": desc_r,
                 "impact": str(rh.get("impact", "")),
                 "action": str(rh.get("action", ""))
             })
@@ -2295,8 +2312,21 @@ def generate_ai_due_diligence_report(
     # --------------------------------------------------------------------------
     # STAGE 4: GANZHEITLICHE ENTSCHEIDUNG (HOLISTIC VERDICT: ZAHLEN, TEXT & BILDER)
     # --------------------------------------------------------------------------
-    critical_risks = [r for r in risks if r["severity"] == "CRITICAL"]
-    high_risks = [r for r in risks if r["severity"] == "HIGH"]
+    def _is_true_critical_deal_killer(r_obj: Dict[str, Any]) -> bool:
+        if r_obj.get("severity") != "CRITICAL":
+            return False
+        t = str(r_obj.get("title", "")).lower()
+        d = str(r_obj.get("description", "")).lower()
+        if any(k in t or k in d for k in [
+            "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis", 
+            "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
+            "weit unter", "preis weit", "verdecktes risiko"
+        ]):
+            return False
+        return True
+
+    critical_risks = [r for r in risks if _is_true_critical_deal_killer(r)]
+    high_risks = [r for r in risks if r["severity"] == "HIGH" or (r.get("severity") == "CRITICAL" and not _is_true_critical_deal_killer(r))]
     score -= len(critical_risks) * 1.5
     score -= len(high_risks) * 0.7
 

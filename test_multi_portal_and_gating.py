@@ -139,22 +139,13 @@ raw_immowelt = {
     "image_url": "https://example.com/ka3.jpg"
 }
 
-assert are_deals_matching(raw_kleinanzeigen, raw_immoscout) is True
-assert are_deals_matching(raw_kleinanzeigen, raw_immowelt) is True
+# Cross-Portal Fusion is intentionally deactivated: all listings remain completely separate
+assert are_deals_matching(raw_kleinanzeigen, raw_immoscout) is False
+assert are_deals_matching(raw_kleinanzeigen, raw_immowelt) is False
 
-fused_result = fuse_deals([raw_kleinanzeigen, raw_immoscout, raw_immowelt])
-assert len(fused_result) == 1, f"Expected 1 fused canonical deal, got {len(fused_result)}"
-canonical = fused_result[0]
-
-# Must adopt the lowest price (179.000 € from ImmoScout24)
-assert canonical["purchase_price"] == 179000.0, f"Expected best price 179000, got {canonical['purchase_price']}"
-assert canonical["source_portal"] == "ImmoScout24"
-assert canonical["commission_percent"] == 0.0
-
-# Must aggregate all 3 source portals
-portals_present = {p["portal"] for p in canonical["source_portals"]}
-assert portals_present == {"Kleinanzeigen", "ImmoScout24", "Immowelt"}, f"Portals mismatch: {portals_present}"
-print(f"[OK] Test 3: Cross-Portal Fusion fused 3 portals into 1 deal at best price {canonical['purchase_price']} EUR ({portals_present})")
+separated_result = fuse_deals([raw_kleinanzeigen, raw_immoscout, raw_immowelt])
+assert len(separated_result) == 3, f"Expected 3 independent deals, got {len(separated_result)}"
+print(f"[OK] Test 3: Cross-Portal Fusion correctly deactivated: kept all {len(separated_result)} portal listings strictly separated.")
 
 # =========================================================================
 # TEST 4: ImmoScout24 Mobile API ID Extraction & Search Adapter

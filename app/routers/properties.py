@@ -907,8 +907,21 @@ def run_property_ai_audit(
     # Stufe 2: Smart Vision Gating (Prüfung: Ist die Immobilie laut Textanalyse kaufenswert / interessant?)
     text_score = float(report.get("score") or 0.0)
     text_status = str(report.get("status") or "").upper()
+    def _is_true_critical_deal_killer(r_obj: dict) -> bool:
+        if r_obj.get("severity") != "CRITICAL":
+            return False
+        t = str(r_obj.get("title", "")).lower()
+        d = str(r_obj.get("description", "")).lower()
+        if any(k in t or k in d for k in [
+            "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis", 
+            "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
+            "weit unter", "preis weit", "verdecktes risiko"
+        ]):
+            return False
+        return True
+
     has_critical_trap = any(
-        r.get("severity") == "CRITICAL"
+        _is_true_critical_deal_killer(r)
         or any(k in str(r.get("title", "")).lower() or k in str(r.get("description", "")).lower() for k in ["erbbaurecht", "erbpacht"])
         for r in (report.get("risks") or [])
     )

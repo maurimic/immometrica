@@ -350,8 +350,22 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         audited_risks = ai_report.get("risks") or []
 
         # Check for critical risks discovered during full exposé text analysis
+        # Price anomalies / below-market prices are OPPORTUNITIES, never deal-killing critical risks!
+        def _is_true_critical_deal_killer(r_obj: Dict[str, Any]) -> bool:
+            if r_obj.get("severity") != "CRITICAL":
+                return False
+            t = str(r_obj.get("title", "")).lower()
+            d = str(r_obj.get("description", "")).lower()
+            if any(k in t or k in d for k in [
+                "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis", 
+                "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
+                "weit unter", "preis weit", "verdecktes risiko"
+            ]):
+                return False
+            return True
+
         has_critical = any(
-            r.get("severity") == "CRITICAL"
+            _is_true_critical_deal_killer(r)
             or any(k in str(r.get("title", "")).lower() or k in str(r.get("description", "")).lower() for k in ["erbbaurecht", "erbpacht"])
             for r in audited_risks
         )
@@ -416,7 +430,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             if min_discount_pct > 0 and audited_market_dev > -min_discount_pct:
                 reasons.append(f"Untermarktwert-Abschlag ({audited_market_dev:+.1f}%) erreicht nicht Mindestabschlag von -{min_discount_pct:.1f}%")
             if has_critical:
-                crit_titles = [r.get("title") for r in audited_risks if r.get("severity") == "CRITICAL"]
+                crit_titles = [r.get("title") for r in audited_risks if _is_true_critical_deal_killer(r)]
                 reasons.append(f"Kritisches K.O.-Risiko im Exposé erkannt: {', '.join(crit_titles) or 'Erbpacht / Schwerwiegender Mangel'}")
             elif audited_score < 5.0:
                 reasons.append(f"KI-Gesamtscore ungenügend ({audited_score:.1f}/10)")

@@ -145,9 +145,9 @@ def scrape_multi_portal_deals(
         raw_k = scrape_kleinanzeigen_deals(city=city, query=query, max_results=raw_fetch_count, exclude_urls=exclude_set)
         all_raw_deals = [d for d in raw_k if _matches_criteria(d)]
 
-    # Cross-Portal Deal Fusion
+    # Cross-Portal Deal Fusion is deactivated: every portal listing remains strictly independent
     fused_deals = fuse_deals(all_raw_deals)
-    logger.info(f"Cross-Portal Deal Fusion: {len(all_raw_deals)} raw deals fused into {len(fused_deals)} canonical deals.")
+    logger.info(f"Portal listings separation: {len(all_raw_deals)} deals processed independently.")
 
     return fused_deals[:max_results]
 
