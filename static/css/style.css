@@ -1,0 +1,278 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --primary-blue: #1e73b3;
+  --primary-dark: #004179;
+  --ink-dark: #17212e;
+  --slate-subtle: #f8fafc;
+  --positive-green: #1a7f47;
+  --positive-bg: #e6f4ea;
+  --negative-red: #b3261e;
+  --negative-bg: #fce8e6;
+}
+
+html.dark {
+  color-scheme: dark;
+  --slate-subtle: #0f172a;
+  --positive-bg: #064e3b;
+  --positive-green: #34d399;
+  --negative-bg: #7f1d1d;
+  --negative-red: #f87171;
+}
+
+html.dark body {
+  background-color: #0b0f19;
+  color: #f1f5f9;
+}
+
+html.dark ::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+html.dark .kanban-lane {
+  background-color: #1e293b;
+}
+
+html.dark .deal-card {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+html.dark .deal-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+}
+
+body {
+  font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  color: #1e293b;
+  background-color: #f8fafc;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Kanban Board Styling */
+.kanban-board {
+  display: flex;
+  gap: 1rem;
+  overflow-x: auto;
+  padding-bottom: 1.5rem;
+  min-height: calc(100vh - 220px);
+}
+
+.kanban-lane {
+  flex: 0 0 320px;
+  background-color: #f1f5f9;
+  border-radius: 0.75rem;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 240px);
+}
+
+.kanban-cards {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 120px;
+}
+
+.deal-card {
+  background: white;
+  border-radius: 0.5rem;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease-in-out;
+  cursor: grab;
+}
+
+.deal-card:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  transform: translateY(-2px);
+}
+
+.deal-card.dragging {
+  opacity: 0.4;
+}
+
+/* KPI Badges */
+.badge-positive {
+  background-color: var(--positive-bg);
+  color: var(--positive-green);
+  border: 1px solid rgba(26, 127, 71, 0.2);
+}
+
+.badge-negative {
+  background-color: var(--negative-bg);
+  color: var(--negative-red);
+  border: 1px solid rgba(179, 38, 30, 0.2);
+}
+
+.badge-undervalued {
+  background-color: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid rgba(3, 105, 161, 0.2);
+}
+
+.badge-zvg {
+  background-color: #fef3c7;
+  color: #92400e;
+  border: 1px solid rgba(146, 64, 14, 0.2);
+}
+
+/* Maplibre container */
+#map {
+  width: 100%;
+  height: 100%;
+  min-height: 650px;
+  border-radius: 0.75rem;
+  background-color: #f8fafc;
+}
+
+html.dark #map {
+  background-color: #0b0f19;
+}
+
+/* MapLibre controls dark mode */
+html.dark .maplibregl-ctrl-group {
+  background-color: #1e293b;
+  border: 1px solid #334155;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .maplibregl-ctrl-group button {
+  border-bottom: 1px solid #334155;
+}
+
+html.dark .maplibregl-ctrl-group button:last-child {
+  border-bottom: none;
+}
+
+html.dark .maplibregl-ctrl-group button:hover {
+  background-color: #334155;
+}
+
+html.dark .maplibregl-ctrl-icon {
+  filter: invert(1) brightness(1.2);
+}
+
+/* MapLibre Marker Position Safety: Prevent any vertical collapsing */
+.maplibregl-marker {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+.pin-badge-active {
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.9), 0 12px 20px -2px rgba(0, 0, 0, 0.4) !important;
+  transform: scale(1.25) !important;
+}
+
+.maplibregl-popup-content {
+  border-radius: 0.75rem;
+  padding: 0.85rem;
+  box-shadow: 0 12px 25px -4px rgba(0, 0, 0, 0.2);
+  font-family: 'Poppins', sans-serif;
+  max-width: 300px;
+}
+
+.maplibregl-popup-close-button {
+  top: 6px;
+  right: 6px;
+  background-color: rgba(15, 23, 42, 0.6);
+  color: #ffffff;
+  border-radius: 9999px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  line-height: 1;
+  z-index: 20;
+  transition: all 0.15s ease;
+  border: none;
+  cursor: pointer;
+}
+
+.maplibregl-popup-close-button:hover {
+  background-color: rgba(15, 23, 42, 0.9);
+  color: #ffffff;
+}
+
+html.dark .maplibregl-popup-content {
+  background-color: #0f172a;
+  color: #f1f5f9;
+  border: 1px solid #334155;
+  box-shadow: 0 12px 25px -4px rgba(0, 0, 0, 0.7);
+}
+
+html.dark .maplibregl-popup-anchor-bottom .maplibregl-popup-tip {
+  border-top-color: #0f172a;
+}
+html.dark .maplibregl-popup-anchor-top .maplibregl-popup-tip {
+  border-bottom-color: #0f172a;
+}
+html.dark .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #0f172a;
+}
+html.dark .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #0f172a;
+}
+
+/* Print Optimization for Investor Dossier */
+@media print {
+  header, nav, .no-print, button, select, input, .kanban-board, #map, .modal-backdrop-bg {
+    display: none !important;
+  }
+  body, html {
+    background: white !important;
+    color: #111827 !important;
+    font-size: 10pt !important;
+  }
+  .modal-container {
+    position: static !important;
+    inset: auto !important;
+    padding: 0 !important;
+    display: block !important;
+    background: transparent !important;
+  }
+  .modal-box {
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  .print-break-inside {
+    break-inside: avoid;
+  }
+}

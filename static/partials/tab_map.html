@@ -1,0 +1,179 @@
+    <!-- TAB 4: MAP VIEW (Interactive Location Map & Split Radar) -->
+    <div x-show="activeTab === 'map'" class="space-y-4">
+      <!-- Header Bar with Stats & Controls -->
+      <div class="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2">
+            <h2 class="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <i data-lucide="map-pin" class="w-5 h-5 text-sky-600 dark:text-sky-400"></i>
+              Interaktive Lagekarte & Immobilien-Radar
+            </h2>
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800" x-text="`${properties.filter(p => p.lat && p.lng).length} Wohnungen kartiert`">
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            OpenFreeMap Vektor-Tiles ohne externe Tracker. Klicke auf Pins oder die Wohnungsliste, um Details, KI-Audits oder den Rechner direkt zu öffnen.
+          </p>
+        </div>
+
+        <!-- Controls -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <button 
+            @click="fitAllPropertiesOnMap()" 
+            class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 shadow-sm transition-colors flex items-center gap-1.5"
+            title="Kartenansicht auf alle Wohnungen zentrieren">
+            <i data-lucide="maximize-2" class="w-3.5 h-3.5 text-sky-600 dark:text-sky-400"></i>
+            <span>Alle einpassen</span>
+          </button>
+          <button 
+            @click="updateMapMarkers(); fitAllPropertiesOnMap();" 
+            class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 shadow-sm transition-colors flex items-center gap-1.5"
+            title="Marker neu synchronisieren">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5 text-slate-500"></i>
+            <span>Aktualisieren</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Split View Grid: Left Companion Listing Column + Right Map Canvas -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+        
+        <!-- Left: Companion Listing Column (4 cols) -->
+        <div class="lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 flex flex-col h-[700px]">
+          <div class="flex items-center justify-between pb-3 mb-2 border-b border-slate-200 dark:border-slate-800">
+            <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <i data-lucide="list" class="w-3.5 h-3.5"></i>
+              Wohnungsübersicht (<span x-text="properties.length"></span>)
+            </span>
+            <span class="text-[11px] text-slate-400 dark:text-slate-500">Klick = Fokus auf Karte</span>
+          </div>
+
+          <!-- Scrollable Cards -->
+          <div class="flex-1 overflow-y-auto space-y-2.5 pr-1">
+            <template x-for="prop in properties" :key="prop.id">
+              <div 
+                :id="`map-card-${prop.id}`"
+                @click="flyToProperty(prop)" 
+                :class="selectedMapPropertyId === prop.id 
+                  ? 'border-sky-500 ring-2 ring-sky-500 bg-sky-50/90 dark:bg-sky-950/70 dark:border-sky-400 shadow-md transform scale-[1.01]' 
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 hover:bg-white dark:hover:bg-slate-800 hover:border-sky-400 dark:hover:border-sky-600 shadow-none hover:shadow'"
+                class="group p-3 rounded-lg border transition-all cursor-pointer">
+                
+                <div class="flex items-start gap-3">
+                  <!-- Thumbnail / Fallback -->
+                  <div class="w-16 h-16 rounded-md bg-slate-200 dark:bg-slate-700 flex-shrink-0 overflow-hidden relative">
+                    <template x-if="prop.image_url">
+                      <img :src="prop.image_url" alt="Thumbnail" class="w-full h-full object-cover">
+                    </template>
+                    <template x-if="!prop.image_url">
+                      <div class="w-full h-full flex items-center justify-center text-slate-400 text-xs">
+                        <i data-lucide="home" class="w-5 h-5"></i>
+                      </div>
+                    </template>
+                    <!-- Small online badge -->
+                    <span 
+                      class="absolute top-1 left-1 w-2.5 h-2.5 rounded-full ring-2 ring-white dark:ring-slate-900" 
+                      :class="prop.is_online ? 'bg-emerald-500' : 'bg-rose-500'" 
+                      :title="prop.is_online ? 'Aktiv & Online' : 'Deaktiviert'">
+                    </span>
+                  </div>
+
+                  <!-- Details -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between gap-1 mb-0.5">
+                      <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate" x-text="prop.source_portal"></span>
+                      <span 
+                        class="text-[10px] font-bold px-1.5 py-0.2 rounded flex-shrink-0" 
+                        :class="prop.monthly_cashflow >= 0 ? 'bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300' : 'bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300'"
+                        x-text="formatPercent(prop.gross_yield, 1)">
+                      </span>
+                    </div>
+
+                    <h4 class="text-xs font-bold text-slate-800 dark:text-slate-100 truncate group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors" x-text="prop.title"></h4>
+                    
+                    <div class="flex items-center justify-between gap-1 mt-0.5">
+                      <p class="text-[11px] text-slate-500 dark:text-slate-400 truncate" x-text="formatPropertyAddress(prop)"></p>
+                      <a :href="getGoogleMapsUrl(prop)" target="_blank" rel="noopener noreferrer" @click.stop class="text-[10px] font-semibold text-sky-600 dark:text-sky-400 hover:underline flex-shrink-0" title="In Google Maps öffnen">🗺️ Maps ↗</a>
+                    </div>
+                    
+                    <div class="flex items-center justify-between mt-2 pt-1 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px]">
+                      <span class="font-bold text-slate-900 dark:text-slate-100" x-text="formatCurrency(prop.purchase_price)"></span>
+                      <div class="text-right">
+                        <span 
+                          class="font-semibold text-[11px] block" 
+                          :class="prop.monthly_cashflow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'" 
+                          x-text="formatCashflow(prop.monthly_cashflow)">
+                        </span>
+                        <template x-if="prop.is_rented && prop.monthly_cashflow < 0 && (prop.ai_analysis?.metrics?.mietspiegel_analysis?.turns_profitable || (prop.ai_analysis?.metrics?.potential_monthly_cashflow >= 0 && prop.ai_analysis?.metrics?.current_monthly_rent > 0))">
+                          <span class="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 block" title="Soll-Cashflow bei Mietspiegel">
+                            🚀 <span x-text="formatCurrency(prop.ai_analysis?.metrics?.potential_monthly_cashflow)"></span>
+                          </span>
+                        </template>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
+
+                <!-- Action Button Row on Card -->
+                <div class="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                  <button 
+                    @click.stop="flyToProperty(prop)" 
+                    :class="selectedMapPropertyId === prop.id ? 'bg-sky-600 text-white font-bold' : 'bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/80 dark:hover:bg-sky-900/80 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800'"
+                    class="py-1 px-2.5 rounded text-[11px] transition-colors flex items-center gap-1 cursor-pointer"
+                    title="Auf der Karte fokussieren">
+                    <i data-lucide="map-pin" class="w-3 h-3"></i>
+                    <span>Karte</span>
+                  </button>
+                  <button 
+                    @click.stop="openDetailModal(prop)" 
+                    class="flex-1 py-1 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded text-[11px] font-semibold flex items-center justify-center gap-1 transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer">
+                    <i data-lucide="sparkles" class="w-3 h-3 text-sky-600 dark:text-sky-400"></i>
+                    <span>KI-Audit</span>
+                  </button>
+                  <button 
+                    @click.stop="sendToCalculator(prop); activeTab = 'calculator'" 
+                    class="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[11px] font-medium transition-colors border border-slate-200 dark:border-slate-700 cursor-pointer"
+                    title="Im Cashflow-Rechner öffnen">
+                    <i data-lucide="calculator" class="w-3 h-3"></i>
+                  </button>
+                  <a 
+                    :href="prop.portal_url" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    @click.stop 
+                    class="py-1 px-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[11px] font-medium transition-colors border border-slate-200 dark:border-slate-700"
+                    title="Original-Inserat aufrufen">
+                    <i data-lucide="external-link" class="w-3 h-3"></i>
+                  </a>
+                </div>
+
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Right: Map Canvas (8 cols) -->
+        <div class="lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[700px]">
+          
+          <!-- Map Legend Overlay -->
+          <div class="absolute top-4 left-4 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 shadow-md flex items-center gap-3 text-[11px]">
+            <div class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
+              <span class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm inline-block"></span>
+              <span>Positiver Cashflow</span>
+            </div>
+            <div class="w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
+            <div class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
+              <span class="w-3 h-3 rounded-full bg-sky-600 shadow-sm inline-block"></span>
+              <span>Negativer / Neutraler Cashflow</span>
+            </div>
+          </div>
+
+          <!-- Map Container -->
+          <div id="map" class="w-full h-full rounded-lg"></div>
+        </div>
+
+      </div>
+    </div>
+

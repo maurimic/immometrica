@@ -1,0 +1,367 @@
+    <!-- TAB 3: CASHFLOW CALCULATOR -->
+    <div x-show="activeTab === 'calculator'" class="space-y-6">
+      
+      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
+        <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
+          <div>
+            <h2 class="text-lg font-bold text-slate-900 dark:text-white">Immobilien-Rendite & Cashflow-Rechner</h2>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Exakte Berechnung der Kaufnebenkosten (Grunderwerbsteuer automatisch ermittelt), Annuitätendarlehen und Netto-Monatscashflow.</p>
+          </div>
+          <template x-if="calc.title && calc.title !== 'Objektkalkulation'">
+            <div class="text-right">
+              <span class="text-[11px] text-slate-400 dark:text-slate-500 block">Ausgewähltes Objekt:</span>
+              <span class="text-xs font-semibold text-slate-800 dark:text-slate-200 line-clamp-1 max-w-xs" x-text="calc.title"></span>
+            </div>
+          </template>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          
+          <!-- Input Controls -->
+          <div class="lg:col-span-7 space-y-4">
+
+            <!-- AUTOMATIC LOCATION & TAX BADGE (User request: No manual asking for Bundesland!) -->
+            <div class="p-3.5 bg-gradient-to-r from-sky-50 to-blue-50/70 dark:from-slate-800/90 dark:to-slate-800/70 border border-sky-200 dark:border-slate-700 rounded-xl space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <div class="w-6 h-6 rounded-full bg-sky-600 text-white flex items-center justify-center">
+                    <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
+                  </div>
+                  <div>
+                    <span class="text-xs font-bold text-slate-900 dark:text-white">Objektstandort & Grunderwerbsteuer</span>
+                    <span class="text-[10px] text-sky-800 dark:text-sky-300 font-semibold ml-1.5 px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/80">Automatisch zugeordnet</span>
+                  </div>
+                </div>
+
+                <!-- Verified Tax Badge -->
+                <div class="text-right">
+                  <span class="inline-flex items-center px-2.5 py-1 rounded-md bg-sky-600 text-white text-xs font-bold shadow-sm" x-text="`${formatNumber(calc.tax_rate, 1)} % GrESt`"></span>
+                </div>
+              </div>
+
+              <!-- Location Display -->
+              <div class="flex items-center justify-between text-xs text-slate-700 dark:text-slate-300 bg-white/80 dark:bg-slate-900/80 px-3 py-2 rounded-lg border border-sky-100 dark:border-slate-700">
+                <div class="flex items-center gap-1.5">
+                  <span class="font-bold text-slate-900 dark:text-white" x-text="calc.postal_code ? `${calc.postal_code} ${calc.city}` : calc.city || 'Standort'"></span>
+                  <span class="text-slate-400">•</span>
+                  <span class="font-semibold text-sky-900 dark:text-sky-300" x-text="calc.state"></span>
+                </div>
+                <div class="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <i data-lucide="check-circle" class="w-3 h-3 text-emerald-600 dark:text-emerald-400"></i>
+                  <span>Steuersatz aktiv</span>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between pt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                <span>✓ Grunderwerbsteuer direkt aus den Objektdaten übernommen</span>
+                <button @click="calc.manual_state_override = !calc.manual_state_override" class="text-sky-600 dark:text-sky-400 hover:text-sky-800 dark:hover:text-sky-300 font-semibold underline">
+                  <span x-text="calc.manual_state_override ? 'Ausblenden' : 'Bundesland manuell testen'"></span>
+                </button>
+              </div>
+
+              <!-- Optional manual override fallback -->
+              <div x-show="calc.manual_state_override" class="pt-2 border-t border-sky-200 dark:border-slate-700 mt-2">
+                <label class="block text-[11px] font-semibold text-slate-600 dark:text-slate-300 mb-1">Manuelle Auswahl (falls kein Objekt verknüpft):</label>
+                <select x-model="calc.state" class="w-full text-xs rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100">
+                  <template x-for="s in states" :key="s.name">
+                    <option :value="s.name" x-text="`${s.name} (${formatNumber(s.tax, 1)} % GrESt)`"></option>
+                  </template>
+                </select>
+              </div>
+            </div>
+            
+            <!-- Price & Rent Inputs -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Kaufpreis (€)</label>
+                <input type="number" x-model="calc.price" class="w-full text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 py-2 px-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500">
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Monatliche Kaltmiete (€)</label>
+                <input type="number" x-model="calc.rent" class="w-full text-sm font-semibold rounded-lg border border-slate-300 dark:border-slate-700 py-2 px-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500">
+                <template x-if="calc.expected_rent > 0">
+                  <div class="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] bg-slate-50 dark:bg-slate-800/80 p-1.5 rounded border border-slate-200 dark:border-slate-700">
+                    <span class="text-slate-600 dark:text-slate-300 font-medium" x-text="`Mietspiegel: ${formatCurrency(calc.expected_rent)}/M`"></span>
+                    <button type="button" @click="setMietspiegelRent(calc.expected_rent)" class="text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 font-semibold underline flex items-center gap-1 cursor-pointer">
+                      <span>🎯 Auf Mietspiegel setzen</span>
+                    </button>
+                  </div>
+                </template>
+              </div>
+
+              <div>
+                <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">Wohnfläche (m²)</label>
+                <input type="number" x-model="calc.living_space" class="w-full text-sm rounded-lg border border-slate-300 dark:border-slate-700 py-2 px-3 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500">
+              </div>
+            </div>
+
+            <!-- Financing settings -->
+            <div class="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 space-y-3">
+              <div class="flex items-center justify-between">
+                <h4 class="text-xs font-bold uppercase text-slate-600 dark:text-slate-300 tracking-wider">Finanzierung & Nebenkosten</h4>
+                <div class="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-400 font-semibold">
+                  <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Bauzinsen online live</span>
+                </div>
+              </div>
+
+              <!-- Live Mortgage Rates Bar -->
+              <div class="p-3 bg-sky-50/80 dark:bg-sky-950/40 rounded-lg border border-sky-200 dark:border-sky-800/60 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div class="flex items-center gap-1.5 font-semibold text-sky-950 dark:text-sky-200">
+                    <span class="text-base">⚡</span>
+                    <span>Aktueller Bauzins-Benchmark:</span>
+                    <span class="font-extrabold text-slate-900 dark:text-white" x-text="`${formatNumber(liveRates.default_nominal_rate || 3.93, 2)} % p.a.`"></span>
+                    <span class="text-[10px] text-sky-700 dark:text-sky-300 font-normal" x-text="`(Effektiv: ${formatNumber(liveRates.default_effective_rate || 4.03, 2)} %)`"></span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400" x-text="`Stand: ${liveRates.as_of_date || 'Tagesaktuell'} (${liveRates.source_name || 'Dr. Klein'})`"></span>
+                    <button type="button" @click="fetchLiveMortgageRates(true)" class="p-1 text-sky-600 dark:text-sky-400 hover:text-sky-800 hover:bg-sky-100 dark:hover:bg-sky-900/60 rounded cursor-pointer" title="Zinsen jetzt live online aktualisieren">
+                      <i data-lucide="refresh-cw" class="w-3 h-3" :class="liveRates.loading ? 'animate-spin' : ''"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1.5 text-[11px] pt-1 border-t border-sky-200/60 dark:border-sky-800/40">
+                  <span class="text-slate-500 dark:text-slate-400 text-[10px] font-medium mr-1">Zinsbindung wählen:</span>
+                  <template x-for="term in liveRates.rates_by_term" :key="term.years">
+                    <button type="button" 
+                            @click="setMortgageTerm(term)" 
+                            :class="Number(calc.interest_rate) === Number(term.nominal_rate) ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-sky-400'"
+                            class="px-2 py-0.5 rounded text-[11px] transition-all cursor-pointer">
+                      <span x-text="`${term.years}J: ${formatNumber(term.nominal_rate, 2)} %`"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Eigenkapital (%)</label>
+                  <input type="number" x-model="calc.equity_value" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                </div>
+
+                <div>
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">Zinssatz (% p.a.)</label>
+                    <template x-if="Number(calc.interest_rate) === Number(liveRates.default_nominal_rate)">
+                      <span class="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">✓ Live-Zins aktiv</span>
+                    </template>
+                  </div>
+                  <input type="number" step="0.01" x-model="calc.interest_rate" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                </div>
+
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Tilgung (% p.a.)</label>
+                  <input type="number" step="0.1" x-model="calc.repayment_rate" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Sanierungskosten / CaPEx (€)</label>
+                  <input type="number" x-model="calc.renovation_costs" class="w-full text-sm font-semibold rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="0">
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Nicht umlegbare Kosten (€/M)</label>
+                  <input type="number" x-model="calc.additional_costs" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                  <template x-if="calc.hausgeld_total > 0">
+                    <span class="text-[10px] text-amber-600 dark:text-amber-400 block mt-0.5" x-text="`Exposé-Hausgeld: ${formatCurrency(calc.hausgeld_total)}/M (~35 % nicht uml.)`"></span>
+                  </template>
+                </div>
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Maklerprovision (%)</label>
+                  <input type="number" step="0.01" x-model="calc.commission_percent" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                </div>
+              </div>
+            </div>
+
+            <!-- AfA & Real Estate Tax Optimizer (V+V) -->
+            <div class="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                  <h4 class="text-xs font-bold uppercase text-slate-700 dark:text-slate-200 tracking-wider">AfA & Steuereffekt einberechnen (V+V)</h4>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" x-model="calc.include_afa" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  <span class="ml-2 text-xs font-semibold text-slate-700 dark:text-slate-300" x-text="calc.include_afa ? 'Aktiv' : 'Inaktiv'"></span>
+                </label>
+              </div>
+
+              <div x-show="calc.include_afa" x-transition class="space-y-3 pt-2 border-t border-slate-200 dark:border-slate-700">
+                <!-- Aufteilung Gebäude- vs. Bodenwertanteil -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <div class="flex justify-between items-center mb-1">
+                      <label class="text-xs font-medium text-slate-600 dark:text-slate-300">Gebäudeanteil (%)</label>
+                      <span class="text-xs font-bold text-sky-600 dark:text-sky-400" x-text="`${calc.building_share_percent}%`"></span>
+                    </div>
+                    <input type="range" min="10" max="95" step="1" x-model.number="calc.building_share_percent" class="w-full accent-sky-600 cursor-pointer">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                      Bodenanteil: <strong x-text="`${100 - calc.building_share_percent}%`"></strong> (Boden ist nicht abschreibbar)
+                    </span>
+                  </div>
+
+                  <div>
+                    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Persönlicher Grenzsteuersatz (%)</label>
+                    <input type="number" min="0" max="50" step="1" x-model.number="calc.marginal_tax_rate" class="w-full text-sm font-semibold rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white" placeholder="42">
+                    <span class="text-[10px] text-slate-500 dark:text-slate-400 block mt-0.5">Üblich: 35 % bis 42 % (Spitzensteuersatz)</span>
+                  </div>
+                </div>
+
+                <!-- Abschreibungsmethode & Nutzungsdauer / Gutachten -->
+                <div>
+                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1.5">Abschreibungsart / Nutzungsdauer:</label>
+                  <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5 mb-2">
+                    <button type="button" @click="setDepreciationPreset('standard', 50)" :class="calc.depreciation_years === 50 ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'" class="p-1.5 rounded text-[11px] text-center transition-all cursor-pointer">
+                      <span>Standard 2 %</span>
+                      <span class="block text-[9px] opacity-80">50 Jahre linear</span>
+                    </button>
+                    <button type="button" @click="setDepreciationPreset('gutachten25', 25)" :class="calc.depreciation_years === 25 ? 'bg-emerald-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'" class="p-1.5 rounded text-[11px] text-center transition-all cursor-pointer">
+                      <span>Gutachten 4 %</span>
+                      <span class="block text-[9px] opacity-80">25 J. Restnutzung</span>
+                    </button>
+                    <button type="button" @click="setDepreciationPreset('gutachten20', 20)" :class="calc.depreciation_years === 20 ? 'bg-emerald-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'" class="p-1.5 rounded text-[11px] text-center transition-all cursor-pointer">
+                      <span>Gutachten 5 %</span>
+                      <span class="block text-[9px] opacity-80">20 J. Restnutzung</span>
+                    </button>
+                    <button type="button" @click="setDepreciationPreset('neubau', 33.33)" :class="calc.depreciation_years === 33.33 ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'" class="p-1.5 rounded text-[11px] text-center transition-all cursor-pointer">
+                      <span>Neubau 3 %</span>
+                      <span class="block text-[9px] opacity-80">ab 2023</span>
+                    </button>
+                  </div>
+
+                  <!-- Manuelle Eingabe Nutzungsdauer für Gutachten -->
+                  <div class="flex items-center gap-2 p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
+                    <span class="text-xs text-slate-600 dark:text-slate-400">Individuelle Nutzungsdauer (Gutachten):</span>
+                    <input type="number" min="5" max="100" step="1" x-model.number="calc.depreciation_years" class="w-16 text-xs font-bold rounded border border-slate-300 dark:border-slate-600 py-1 px-1.5 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white text-center">
+                    <span class="text-xs text-slate-500">Jahre</span>
+                    <span class="ml-auto text-xs font-semibold text-emerald-600 dark:text-emerald-400" x-text="`= ${(100 / (calc.depreciation_years || 50)).toFixed(2)} % AfA / Jahr`"></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Result KPI Display -->
+          <div class="lg:col-span-5 bg-gradient-to-br from-slate-900 to-slate-800 text-white p-6 rounded-xl shadow-lg flex flex-col justify-between">
+            <template x-if="calc.result">
+              <div class="space-y-6">
+                <div>
+                  <span class="text-xs uppercase font-semibold tracking-wider text-slate-400" x-text="calc.include_afa ? 'Effektiver Cashflow nach Steuern (V+V)' : 'Monatlicher Netto-Cashflow (vor Steuern)'"></span>
+                  <div class="text-4xl font-extrabold mt-1" :class="(calc.include_afa ? calc.result.monthly_cashflow_after_tax : calc.result.monthly_cashflow) >= 0 ? 'text-emerald-400' : 'text-rose-400'"
+                       x-text="`${(calc.include_afa ? calc.result.monthly_cashflow_after_tax : calc.result.monthly_cashflow) >= 0 ? '+' : ''}${formatCurrency(calc.include_afa ? calc.result.monthly_cashflow_after_tax : calc.result.monthly_cashflow)}`">
+                  </div>
+                  <div class="text-xs text-slate-400 mt-1 flex items-center justify-between">
+                    <span x-text="`Jahres-Cashflow: ${formatCurrency(calc.include_afa ? calc.result.annual_cashflow_after_tax : calc.result.annual_cashflow)}`"></span>
+                    <template x-if="calc.include_afa">
+                      <span class="text-sky-300 font-medium" x-text="`vor Steuern: ${formatCurrency(calc.result.monthly_cashflow)}/M`"></span>
+                    </template>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 py-4 border-y border-slate-700/60">
+                  <div>
+                    <span class="text-xs text-slate-400">Bruttomietrendite</span>
+                    <div class="text-xl font-bold text-sky-400" x-text="formatPercent(calc.result.gross_yield, 2)"></div>
+                  </div>
+                  <div>
+                    <span class="text-xs text-slate-400">Eigenkapitalrendite</span>
+                    <div class="text-xl font-bold text-emerald-400" x-text="formatPercent(calc.result.cash_on_cash, 1)"></div>
+                  </div>
+                  <div>
+                    <span class="text-xs text-slate-400">Monatliche Bankrate</span>
+                    <div class="text-base font-semibold" x-text="formatCurrency(calc.result.monthly_rate)"></div>
+                  </div>
+                  <div>
+                    <span class="text-xs text-slate-400">Kaufpreisfaktor</span>
+                    <div class="text-base font-semibold" x-text="`${formatNumber(calc.result.multiplier, 1)}x`"></div>
+                  </div>
+                </div>
+
+                <!-- Detailed Breakdown -->
+                <div class="space-y-1.5 text-xs text-slate-300">
+                  <div class="flex justify-between">
+                    <span>Eingesetztes Eigenkapital:</span>
+                    <span class="font-semibold text-white" x-text="formatCurrency(calc.result.actual_equity_invested)"></span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Darlehensbetrag (Bank):</span>
+                    <span class="font-semibold text-white" x-text="formatCurrency(calc.result.loan_amount)"></span>
+                  </div>
+                  <div class="flex justify-between" x-show="calc.renovation_costs > 0">
+                    <span class="text-amber-300 font-medium">Sanierungskosten (CaPEx):</span>
+                    <span class="font-bold text-amber-300" x-text="formatCurrency(calc.renovation_costs)"></span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span>Kaufnebenkosten gesamt:</span>
+                    <span class="font-semibold text-white" x-text="formatCurrency(calc.result.total_buy_costs)"></span>
+                  </div>
+                  <div class="flex justify-between pl-3 text-slate-400">
+                    <span x-text="`- Grunderwerbsteuer (${calc.tax_rate}%):`"></span>
+                    <span x-text="formatCurrency(calc.result.buy_costs_details.transfer_tax)"></span>
+                  </div>
+                  <div class="flex justify-between pl-3 text-slate-400">
+                    <span>- Notar & Grundbuch (2%):</span>
+                    <span x-text="formatCurrency(calc.result.buy_costs_details.notary_costs)"></span>
+                  </div>
+                  <div class="flex justify-between pl-3 text-slate-400">
+                    <span>- Maklerprovision:</span>
+                    <span x-text="formatCurrency(calc.result.buy_costs_details.broker_costs)"></span>
+                  </div>
+                  <div class="flex justify-between font-bold pt-1.5 border-t border-slate-700 text-white">
+                    <span>Gesamtinvestition (inkl. NK & CaPEx):</span>
+                    <span class="text-sky-400 font-extrabold" x-text="formatCurrency(calc.result.total_investment)"></span>
+                  </div>
+
+                  <!-- AfA & Steueraufschlüsselung (V+V) -->
+                  <template x-if="calc.include_afa && calc.result">
+                    <div class="pt-3 mt-3 border-t border-slate-700 space-y-2">
+                      <div class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center justify-between">
+                        <span class="flex items-center gap-1.5">
+                          <i data-lucide="scale" class="w-3.5 h-3.5"></i>
+                          <span>Steuer- & AfA-Effekt (V+V)</span>
+                        </span>
+                        <span class="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-mono text-[10px]" x-text="`${calc.result.afa_rate_percent}% AfA (${calc.result.depreciation_years} J.)`"></span>
+                      </div>
+                      <div class="flex justify-between pl-2 text-slate-300">
+                        <span>Gebäude-Bemessungsgrundlage (<span x-text="`${calc.result.building_share_percent}%`"></span>):</span>
+                        <span class="font-medium text-white" x-text="formatCurrency(calc.result.depreciable_base)"></span>
+                      </div>
+                      <div class="flex justify-between pl-2 text-slate-300">
+                        <span>Jährliche Gebäude-AfA:</span>
+                        <span class="font-semibold text-emerald-300" x-text="`${formatCurrency(calc.result.annual_afa)} / J. (${formatCurrency(calc.result.monthly_afa)} / M)`"></span>
+                      </div>
+                      <div class="flex justify-between pl-2 text-slate-300">
+                        <span>Abzugsfähige Bankzinsen (1. Jahr):</span>
+                        <span class="font-medium text-white" x-text="formatCurrency(calc.result.annual_interest)"></span>
+                      </div>
+                      <div class="flex justify-between pl-2 text-slate-300">
+                        <span>Steuerliches Ergebnis (V+V):</span>
+                        <span class="font-bold" :class="calc.result.taxable_income_vv < 0 ? 'text-amber-300' : 'text-slate-200'" x-text="`${formatCurrency(calc.result.taxable_income_vv)} / Jahr ${calc.result.taxable_income_vv < 0 ? '(Steuerverlust)' : '(Überschuss)'}`"></span>
+                      </div>
+                      <div class="flex justify-between items-center pl-2 font-bold bg-emerald-950/60 p-2.5 rounded-lg border border-emerald-500/40 text-emerald-300 text-xs">
+                        <div>
+                          <span>Monatlicher Steuereffekt:</span>
+                          <span class="block text-[10px] font-normal text-emerald-400/80" x-text="`${calc.result.marginal_tax_rate}% Grenzsteuersatz`"></span>
+                        </div>
+                        <span class="text-sm font-extrabold" x-text="`${calc.result.monthly_tax_effect >= 0 ? '+' : ''}${formatCurrency(calc.result.monthly_tax_effect)} / Monat ${calc.result.monthly_tax_effect >= 0 ? '(Erstattung)' : '(Steuerlast)'}`"></span>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+
+              </div>
+            </template>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+

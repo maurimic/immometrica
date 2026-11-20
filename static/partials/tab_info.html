@@ -1,0 +1,362 @@
+    <!-- TAB 5: INFO & ANLEITUNG (Inkl. Leitfaden & MCP-Server Unterseite) -->
+    <div x-show="activeTab === 'info'" class="space-y-6">
+      
+      <!-- Unterseiten-Navigation für Info & Anleitung -->
+      <div class="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-3 no-print">
+        <button @click="infoSubTab = 'guide'; setTimeout(() => lucide.createIcons(), 50)"
+                :class="(!infoSubTab || infoSubTab === 'guide') ? 'bg-sky-600 text-white font-bold shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
+                class="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
+          <i data-lucide="book-open" class="w-4 h-4"></i>
+          <span>System-Handbuch & Leitfaden</span>
+        </button>
+
+        <button @click="infoSubTab = 'mcp'; setTimeout(() => lucide.createIcons(), 50)"
+                :class="infoSubTab === 'mcp' ? 'bg-sky-600 text-white font-bold shadow-sm' : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'"
+                class="px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer">
+          <i data-lucide="bot" class="w-4 h-4"></i>
+          <span>Model Context Protocol (MCP Server)</span>
+        </button>
+      </div>
+
+      <!-- UNTERSEITE 1: LEITFADEN & SYSTEM-HANDBUCH -->
+      <div x-show="!infoSubTab || infoSubTab === 'guide'" class="space-y-6">
+        
+        <!-- Hero Banner -->
+        <div class="bg-gradient-to-r from-slate-900 via-sky-950 to-slate-900 rounded-2xl p-6 sm:p-8 text-white border border-sky-800/40 shadow-md">
+          <div class="max-w-4xl">
+          <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/20 border border-sky-400/30 text-sky-300 text-xs font-semibold mb-3">
+            <i data-lucide="info" class="w-3.5 h-3.5"></i>
+            <span>System-Handbuch & Investoren-Guide</span>
+          </div>
+          <h2 class="text-2xl sm:text-3xl font-extrabold tracking-tight">ImmoMetrica: Funktionsweise, 40+ Portale & Sprengnetter</h2>
+          <p class="text-sm text-slate-300 mt-2 leading-relaxed">
+            Alles, was Du über unsere Datenquellen, die Sprengnetter-Marktwertprüfung, den AfA-Steuereffekt und den schnellen Workflow wissen musst – in kurzen, präzisen Schritten.
+          </p>
+          <div class="flex items-center flex-wrap gap-2.5 mt-5">
+            <button @click="activeTab = 'feed'" class="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold shadow-sm transition-all flex items-center gap-2 cursor-pointer">
+              <i data-lucide="search" class="w-3.5 h-3.5"></i>
+              <span>Direkt zu den Deals</span>
+            </button>
+            <button @click="activeTab = 'calculator'" class="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold border border-white/20 transition-all flex items-center gap-2 cursor-pointer">
+              <i data-lucide="calculator" class="w-3.5 h-3.5"></i>
+              <span>Zum Cashflow- & AfA-Rechner</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grid: 40+ Portale vs. Sprengnetter -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Kasten 1: Was sind die 40+ Portale? -->
+        <div class="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-sky-100 dark:bg-sky-950 flex items-center justify-center text-sky-600 dark:text-sky-400 shrink-0">
+              <i data-lucide="globe" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900 dark:text-slate-100">Was sind diese 40+ Portale?</h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Deutschlands umfassendste Immobilien-Metasuche auf einen Blick.</p>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            Statt 10 verschiedene Apps und Tabs manuell zu durchsuchen, bündelt ImmoMetrica den gesamten deutschen Immobilienmarkt in einem einzigen Live-Feed:
+          </p>
+
+          <div class="space-y-3">
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                <span>Kleinanzeigen & Marktplätze (Privat & Provisionsfrei)</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Kleinanzeigen ist Deutschlands reichweitenstärkster Marktplatz für private Verkäufer. Hier finden sich die meisten <strong>provisionsfreien Deals</strong> (0 % Maklercourtage) und oft ungeschliffene Diamanten deutlich unter dem Marktwert.
+              </p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-sky-500"></span>
+                <span>Große Immobilienbörsen (Immowelt, Immonet, ImmoScout24)</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Klassische Maklerplattformen, Genossenschaften und Großanbieter. ImmoMetrica filtert automatisch teure provisionsüberladene Lockangebote heraus und markiert echte Renditeobjekte.
+              </p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-amber-500"></span>
+                <span>Zwangsversteigerungen (ZVG-Portale der Amtsgerichte)</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Amtliche Notverkäufe direkt aus den Justizportalen der Bundesländer. Bietet Gelegenheiten, Objekte bei der 50-%- oder 70-%-Grenze weit unter dem amtlichen Verkehrswert zu ersteigern.
+              </p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
+                <span>Bankennetzwerke & regionale Zeitungsverlage</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Sparkassen-Immobilien (LBS), Volks- und Raiffeisenbanken (VR), Postbank, DAVE sowie über 30 regionale Tageszeitungsverlage (lokale Anzeigenblätter abseits der großen Portale).
+              </p>
+            </div>
+          </div>
+
+          <div class="p-2.5 rounded-lg bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 text-[11px] text-sky-800 dark:text-sky-300">
+            <strong>Intelligente Deduplizierung:</strong> Wenn dieselbe Wohnung auf 3 verschiedenen Portalen mit abweichenden Preisen inseriert ist, führt das System diese zusammen und zeigt Dir immer den günstigsten Primärpreis.
+          </div>
+        </div>
+
+        <!-- Kasten 2: Was ist der Sprengnetter? -->
+        <div class="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-xl bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+              <i data-lucide="bar-chart-2" class="w-5 h-5"></i>
+            </div>
+            <div>
+              <h3 class="text-base font-bold text-slate-900 dark:text-slate-100">Was ist der Sprengnetter?</h3>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Der Goldstandard deutscher Banken und Gutachter für Wertermittlung.</p>
+            </div>
+          </div>
+
+          <p class="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+            <strong>Sprengnetter</strong> ist Deutschlands renommiertester Daten- und Softwareanbieter für professionelle Immobilienbewertung. Nahezu alle deutschen Kreditinstitute (Sparkassen, Genossenschaftsbanken, Großbanken) nutzen Sprengnetter-Marktdaten zur Beleihungswertermittlung:
+          </p>
+
+          <div class="space-y-3">
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-500"></i>
+                <span>Reale Transaktionsdaten statt Wunschpreise</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Viele Inserate im Internet spiegeln nur die Hoffnungen der Verkäufer wider. Sprengnetter-Benchmarks basieren auf tatsächlichen Kaufverträgen der Gutachterausschüsse und verifizierten Mietspiegeln.
+              </p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <i data-lucide="target" class="w-4 h-4 text-sky-500"></i>
+                <span>Marktwertprüfung & Unter-Marktwert-Indikator</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                ImmoMetrica vergleicht den aufgerufenen Quadratmeterpreis sofort mit dem regionalen Marktwert. Steht dort z. B. <strong>„-14 % unter Marktwert“</strong>, kaufst Du mit sofortigem Wert-Puffer ein.
+              </p>
+            </div>
+
+            <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/70 text-xs">
+              <div class="font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <i data-lucide="trending-up" class="w-4 h-4 text-emerald-500"></i>
+                <span>Ist-Miete vs. Soll-Marktpotenzial</span>
+              </div>
+              <p class="text-slate-600 dark:text-slate-400 mt-1 leading-relaxed">
+                Liegt die aktuelle Kaltmiete unter der Sprengnetter-Mietpreisspanne der Mikrolage, zeigt das Tool Dir genau, welches Mietsteigerungspotenzial bei Neuvermietung oder Indexanpassung besteht.
+              </p>
+            </div>
+          </div>
+
+          <div class="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-[11px] text-emerald-800 dark:text-emerald-300">
+            <strong>Banken-Vorteil:</strong> Wenn Dein ermitteltes Objekt den Sprengnetter-Benchmark erfüllt, finanziert die Bank den Kauf in der Regel schneller und zu deutlich besseren Zinskonditionen.
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Sektion 3: Wie benutzt man das Gesamtsystem in kurzen Sätzen? -->
+      <div class="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5">
+        <div>
+          <h3 class="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+            <i data-lucide="zap" class="w-5 h-5 text-amber-500"></i>
+            Wie benutzt man das Ganze? (Schnellanleitung in kurzen Sätzen)
+          </h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Vom ersten Klick bis zum Notar-Dossier in 5 klaren Schritten.</p>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+          <!-- Step 1 -->
+          <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center">1</span>
+              <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Deals finden</h4>
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+              Gib Stadt oder PLZ ein und nutze 1-Klick-Filter (z. B. <em>Rendite &gt; 6%</em> oder <em>Provisionsfrei</em>), um sofort die lukrativsten Wohnungen zu isolieren.
+            </p>
+          </div>
+
+          <!-- Step 2 -->
+          <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center">2</span>
+              <i data-lucide="shield-check" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Live & KI-Audit</h4>
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+              Prüfe mit einem Klick, ob das Inserat noch online ist. Starte das <strong>KI-Audit</strong>, um versteckte Risiken im Text und das Verhandlungs-Gegenangebot aufzudecken.
+            </p>
+          </div>
+
+          <!-- Step 3 -->
+          <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center">3</span>
+              <i data-lucide="camera" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Fotos scannen</h4>
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+              Lass die Vision-KI die Inseratsfotos analysieren. Du erhältst sofort eine Bauteil-Bewertung (Bad, Fenster, Böden) und die geschätzten Sanierungskosten (CaPEx).
+            </p>
+          </div>
+
+          <!-- Step 4 -->
+          <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-full bg-sky-600 text-white font-bold text-xs flex items-center justify-center">4</span>
+              <i data-lucide="calculator" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Cashflow & AfA</h4>
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+              Übernimm das Objekt in den Rechner. Schalte die AfA ein (z. B. 2 % normal oder 25 Jahre per Gutachten), um den <strong>Cashflow nach Steuern</strong> inkl. Rückerstattung zu sehen.
+            </p>
+          </div>
+
+          <!-- Step 5 -->
+          <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">5</span>
+              <i data-lucide="kanban" class="w-4 h-4 text-slate-400"></i>
+            </div>
+            <h4 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Deal abschließen</h4>
+            <p class="text-xs text-slate-600 dark:text-slate-300 leading-snug">
+              Verschiebe den Deal im Kanban-Board von <em>Besichtigung</em> bis <em>Notar</em>. Drucke das fertige Investoren-Dossier mit einem Klick für Deine finanzierende Bank aus.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sektion 4: Häufige Investorenfragen (AfA, Gutachten, Steuern) -->
+      <div class="bg-white dark:bg-slate-900 rounded-xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <h3 class="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+          <i data-lucide="help-circle" class="w-5 h-5 text-sky-600 dark:text-sky-400"></i>
+          Wichtige Fragen zu Steuern, AfA & Restnutzungsdauer-Gutachten
+        </h3>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          <div class="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <h4 class="font-bold text-slate-900 dark:text-slate-100">Warum wird der Bodenanteil nicht abgeschrieben?</h4>
+            <p class="text-slate-600 dark:text-slate-400 leading-relaxed">
+              Grund und Boden verbraucht sich gemäß § 7 EStG nicht. Daher wird beim Kauf der Gesamtkaufpreis aufgeteilt (in der Regel 70–80 % Gebäude und 20–30 % Bodenwert). Nur auf den Gebäudeanteil sowie die anteiligen Kaufnebenkosten und Sanierungskosten darfst Du die jährliche AfA ansetzen.
+            </p>
+          </div>
+
+          <div class="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <h4 class="font-bold text-slate-900 dark:text-slate-100">Was bringt ein Restnutzungsdauer-Gutachten (§ 7 Abs. 4 Satz 2 EStG)?</h4>
+            <p class="text-slate-600 dark:text-slate-400 leading-relaxed">
+              Statt der gesetzlichen 50 Jahre (2 % AfA) weist ein zertifizierter Bausachverständiger nach, dass die Immobilie z. B. nur noch 25 Jahre wirtschaftlich nutzbar ist. Dadurch verdoppelt sich Deine jährliche Abschreibung auf <strong>4,0 % p.a.</strong> (bei 20 Jahren sogar 5,0 %). Das führt zu hohen steuerlichen Verlusten bei den Einkünften aus V+V und spült monatlich echtes Geld als Steuererstattung auf Dein Konto.
+            </p>
+          </div>
+
+          <div class="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <h4 class="font-bold text-slate-900 dark:text-slate-100">Was ist der Unterschied zwischen Cashflow vor und nach Steuern?</h4>
+            <p class="text-slate-600 dark:text-slate-400 leading-relaxed">
+              Der Cashflow vor Steuern ist rein operativ: Miete abzüglich Bankrate (Zins + Tilgung) und nicht umlegbare Kosten. Der Cashflow nach Steuern berücksichtigt zusätzlich, dass Du Schuldzinsen und Gebäude-AfA von Deinem übrigen Einkommen (z. B. Gehalt) steuermindernd absetzen kannst. Ein Deal mit -30 € vor Steuern kann nach Steuern +80 € monatlichen Überschuss abwerfen.
+            </p>
+          </div>
+
+          <div class="p-3.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-1.5">
+            <h4 class="font-bold text-slate-900 dark:text-slate-100">Was bedeutet die 15-%-Grenze bei Sanierungskosten?</h4>
+            <p class="text-slate-600 dark:text-slate-400 leading-relaxed">
+              Wenn Du innerhalb der ersten 3 Jahre nach Kauf mehr als 15 % des Gebäudewerts für Sanierungen (ohne MwSt.) ausgibst, gelten diese Kosten als <em>anschaffungsnahe Herstellungskosten</em>. Sie dürfen dann nicht sofort als Erhaltungsaufwand voll abgesetzt werden, sondern erhöhen die AfA-Bemessungsgrundlage und werden über die Nutzungsdauer abgeschrieben.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      </div> <!-- Ende Unterseite 1 (infoSubTab === 'guide') -->
+
+      <!-- UNTERSEITE 2: MODEL CONTEXT PROTOCOL (MCP SERVER) -->
+      <div x-show="infoSubTab === 'mcp'" class="space-y-6">
+        
+        <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6 space-y-6">
+          <div class="flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/10 border border-sky-400/20 text-sky-600 dark:text-sky-400 text-xs font-semibold mb-2">
+                <i data-lucide="bot" class="w-3.5 h-3.5"></i>
+                <span>Agenten-Schnittstelle & Developer API</span>
+              </div>
+              <h2 class="text-xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                Model Context Protocol (MCP) Server
+              </h2>
+              <p class="text-xs text-slate-500 dark:text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                Verbinde Deinen AI-Assistenten (Claude Desktop, Cursor, Antigravity, Google Gemini) direkt mit Deiner ImmoMetrica-Datenbank für automatisierte Dealsuche, Finanzanalysen und Kaufangebots-Erstellung.
+              </p>
+            </div>
+          </div>
+
+          <!-- Token Box -->
+          <div class="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="block text-xs font-semibold text-slate-700 dark:text-slate-300">Dein persönlicher API-Token</label>
+              <span class="text-[11px] font-mono text-slate-500 dark:text-slate-400" x-text="`Quota: ${mcpQuotaUsed} / ${mcpQuotaLimit} verbraucht`"></span>
+            </div>
+            <div class="flex items-center gap-2">
+              <input type="text" readonly :value="mcpToken" placeholder="Lade Token..." class="font-mono text-xs bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded px-3 py-2 flex-1 text-slate-800 dark:text-slate-200">
+              <button @click="regenerateMcpToken()" :disabled="mcpRegenerating" title="Neuen Token erzeugen" class="px-3 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer">
+                <i data-lucide="refresh-cw" class="w-4 h-4" :class="{ 'animate-spin': mcpRegenerating }"></i>
+                <span class="hidden sm:inline">Neu generieren</span>
+              </button>
+              <button @click="copyMcpSnippet()" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white text-xs font-semibold rounded shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer">
+                <i data-lucide="copy" class="w-4 h-4"></i>
+                <span x-text="mcpCopied ? 'Kopiert!' : 'MCP Konfiguration kopieren'"></span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Code Snippet -->
+          <div>
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-200 mb-2">Claude Desktop & Cursor Konfigurations-JSON</h3>
+            <pre class="bg-slate-900 text-slate-100 p-4 rounded-lg text-xs font-mono overflow-x-auto leading-relaxed border border-slate-800" x-text="mcpSnippet || 'Lade MCP Konfiguration...'"></pre>
+          </div>
+
+          <!-- Available Tools Overview -->
+          <div class="space-y-3 pt-4 border-t border-slate-200 dark:border-slate-800">
+            <h3 class="text-sm font-bold text-slate-800 dark:text-slate-200">Verfügbare MCP-Tools für Agenten</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 text-xs">
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">search_deals</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Sucht live über 40+ Portale nach Rendite, Stadt, Unter-Marktwert und Cashflow-Kriterien.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">calculate_cashflow</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Berechnet Notarkosten, Grunderwerbsteuer, Bankrate, Annuität und Eigenkapitalrendite.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">get_deal_details</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Liefert Kataster-Flurstücke, Vermarktungshistorie und Notizen zu einer Liegenschaft.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">get_city_benchmarks</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Holt regionale Mietspiegel- und m²-Kaufpreisdaten im Sprengnetter-Standard ab.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">audit_property_ai</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Führt DEKRA-zertifiziertes KI-Audit mit Sanierungsbudget (BKI) und Preisverhandlung durch.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">generate_purchase_offer</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Erstellt rechtssichere Unterlagen-Anforderungs-E-Mail und Letter of Intent (LOI).</p>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+

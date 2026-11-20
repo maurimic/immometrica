@@ -1,0 +1,35 @@
+name: Auto Deploy to Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Deploy ImmoMetrica on Server
+        run: |
+          echo "Starting automated deployment for ImmoMetrica on $(hostname)..."
+          if [ -d "$HOME/immometrica" ]; then
+            cd "$HOME/immometrica"
+          elif [ -d "/opt/immometrica" ]; then
+            cd "/opt/immometrica"
+          else
+            echo "ImmoMetrica directory not found in $HOME or /opt!"
+            exit 1
+          fi
+          
+          echo "Pulling latest changes from GitHub..."
+          git fetch origin main
+          git reset --hard origin/main
+          
+          echo "Building updated Docker container..."
+          docker compose build
+          
+          echo "Starting containers..."
+          docker compose up -d --remove-orphans
+          
+          echo "ImmoMetrica deployment completed successfully!"

@@ -1,0 +1,429 @@
+    <!-- TAB 1: DEALFEED & SEARCH -->
+    <div x-show="activeTab === 'feed'" class="space-y-6">
+      
+      <!-- Filter Bar -->
+      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 space-y-4 transition-colors">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          
+          <!-- Search input with Suchen (DB) & Live-Metasuche (Web) Buttons -->
+          <div class="lg:col-span-3">
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Stichwort / PLZ / Ort</label>
+              <span class="text-[10px] text-slate-400 dark:text-slate-500">DB filtern oder live neue Deals finden</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <div class="relative flex-1">
+                <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." class="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
+              </div>
+              <button @click="fetchProperties()" class="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
+                <i data-lucide="filter" class="w-3.5 h-3.5"></i>
+                <span>Filter</span>
+              </button>
+              <button @click="triggerLiveScrape(filters.q)" :disabled="isScraping" class="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer transform hover:scale-[1.02]" title="Neue Live-Deals über Portale (Kleinanzeigen, ImmoScout24, Immowelt) suchen & importieren">
+                <i data-lucide="globe" class="w-3.5 h-3.5" :class="isScraping ? 'animate-spin' : ''"></i>
+                <span x-text="isScraping ? 'Suche...' : 'Neue Deals suchen'"></span>
+              </button>
+              <button @click="openUrlImportModal()" class="px-3 py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer transform hover:scale-[1.02]" title="Exposé-Link von Kleinanzeigen, ImmoScout24 oder Immowelt direkt importieren & analysieren">
+                <i data-lucide="link" class="w-3.5 h-3.5"></i>
+                <span>Link importieren</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Bundesland Filter -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Bundesland</label>
+            <select x-model="filters.state" class="w-full py-1.5 px-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <option value="">Alle Bundesländer</option>
+              <template x-for="s in states" :key="s.name">
+                <option :value="s.name" x-text="`${s.name} (${s.tax}%)`"></option>
+              </template>
+            </select>
+          </div>
+
+          <!-- Objekttyp -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Objekttyp</label>
+            <select x-model="filters.property_type" class="w-full py-1.5 px-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+              <option value="all">Alle Immobilientypen</option>
+              <option value="Mehrfamilienhaus">Mehrfamilienhaus</option>
+              <option value="Eigentumswohnung">Eigentumswohnung</option>
+              <option value="Einfamilienhaus">Einfamilienhaus</option>
+            </select>
+          </div>
+
+          <!-- Max Preis -->
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Max. Kaufpreis (€)</label>
+            <input type="number" x-model.debounce.300ms="filters.max_price" placeholder="z.B. 400000" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+
+          <!-- Min Rendite & Rendite-Basis -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Min. Rendite (%)</label>
+              <select x-model="filters.yield_basis" @change="fetchProperties()" class="text-[10px] font-semibold py-0.5 px-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:ring-1 focus:ring-sky-500 cursor-pointer" title="Rendite-Basis für Filterung">
+                <option value="any">Ist oder Mietspiegel (Soll)</option>
+                <option value="actual">Nur Ist-Miete</option>
+                <option value="potential">Nur Mietspiegel (Soll)</option>
+              </select>
+            </div>
+            <input type="number" step="0.5" x-model.debounce.300ms="filters.min_yield" @input="fetchProperties()" placeholder="z.B. 5.0" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+          </div>
+
+        </div>
+
+        <!-- Checkbox Quick Filters & Live-Scrape Action -->
+        <div class="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-100 dark:border-slate-800">
+          <div class="flex flex-wrap items-center gap-3">
+            
+            <!-- Online status filter (User requested) -->
+            <label class="inline-flex items-center text-xs font-semibold cursor-pointer bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-800">
+              <input type="checkbox" x-model="filters.online_only" class="rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500 h-4 w-4">
+              <span class="ml-2 text-emerald-900 dark:text-emerald-300 flex items-center gap-1">
+                <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Nur geprüfte, aktive Online-Deals
+              </span>
+            </label>
+
+            <label class="inline-flex items-center text-xs font-medium cursor-pointer">
+              <input type="checkbox" x-model="filters.positive_cashflow" class="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4">
+              <span class="ml-2 text-slate-700 dark:text-slate-300">Nur positiver Cashflow</span>
+            </label>
+
+            <label class="inline-flex items-center text-xs font-medium cursor-pointer">
+              <input type="checkbox" x-model="filters.undervalued_only" class="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4">
+              <span class="ml-2 text-slate-700 dark:text-slate-300">Unter Marktwert (Sprengnetter)</span>
+            </label>
+
+            <label class="inline-flex items-center text-xs font-medium cursor-pointer">
+              <input type="checkbox" x-model="filters.foreclosure_only" class="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4">
+              <span class="ml-2 text-slate-700 dark:text-slate-300">Zwangsversteigerungen (ZVG)</span>
+            </label>
+
+            <label class="inline-flex items-center text-xs font-medium cursor-pointer">
+              <input type="checkbox" x-model="filters.private_only" class="rounded border-slate-300 text-sky-600 focus:ring-sky-500 h-4 w-4">
+              <span class="ml-2 text-slate-700 dark:text-slate-300">Provisionsfrei / Privat</span>
+            </label>
+          </div>
+
+          <!-- Reset & Sort Buttons -->
+          <div class="flex items-center gap-2">
+            
+            <button @click="resetFilters()" title="Alle Filter zurücksetzen" class="px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors">
+              <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 inline"></i>
+              <span>Filter zurücksetzen</span>
+            </button>
+
+            <!-- Sort options -->
+            <div class="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-200 dark:border-slate-700">
+              <span class="text-xs text-slate-500 dark:text-slate-400">Sortieren:</span>
+              <select x-model="filters.sort_by" class="text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 py-1 px-2">
+                <option value="gross_yield">Höchste Rendite (Ist)</option>
+                <option value="potential_yield">Höchste Mietspiegel-Rendite (Soll)</option>
+                <option value="monthly_cashflow">Bester Cashflow</option>
+                <option value="market_deviation">Größter Marktwert-Abschlag</option>
+                <option value="purchase_price">Günstigster Kaufpreis</option>
+                <option value="price_per_sqm">Günstigster m²-Preis</option>
+              </select>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 1-KLICK SCHNELLAUSWAHL PRESETS -->
+        <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/80 no-print text-xs">
+          <span class="font-semibold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
+            <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i>
+            <span>Schnellauswahl:</span>
+          </span>
+
+          <button @click="applyPreset('all')" class="px-2.5 py-1 font-medium rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">
+            🌟 Alle Deals (<span x-text="properties.length"></span>)
+          </button>
+
+          <button @click="applyPreset('top_yield')" class="px-2.5 py-1 font-semibold rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 transition-colors">
+            🔥 Top-Rendite (> 6%)
+          </button>
+
+          <button @click="applyPreset('positive_cashflow')" class="px-2.5 py-1 font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors">
+            💰 Positiver Cashflow
+          </button>
+
+          <button @click="applyPreset('private')" class="px-2.5 py-1 font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 transition-colors">
+            🏷️ Provisionsfrei & Privat
+          </button>
+
+          <button @click="applyPreset('undervalued')" class="px-2.5 py-1 font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors">
+            📉 Unter Marktwert (Sprengnetter)
+          </button>
+
+          <button @click="applyPreset('online')" class="px-2.5 py-1 font-semibold rounded-lg bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors">
+            🟢 Nur aktive Online-Deals
+          </button>
+        </div>
+      </div>
+
+      <!-- Properties Results View -->
+      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden transition-colors">
+        
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-left text-xs">
+            <thead class="bg-slate-50 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 font-semibold uppercase tracking-wider">
+              <tr>
+                <th class="py-3 px-3.5 min-w-[280px]">Immobilie / Quelle</th>
+                <th class="py-3 px-3.5 min-w-[140px] whitespace-nowrap">Live-Status</th>
+                <th class="py-3 px-3.5 min-w-[130px]">Lage & PLZ</th>
+                <th class="py-3 px-3.5 min-w-[110px]">Fläche & Zimmer</th>
+                <th class="py-3 px-3.5 min-w-[130px]">Kaufpreis & Historie</th>
+                <th class="py-3 px-3.5 min-w-[140px]">Marktwert (Sprengnetter)</th>
+                <th class="py-3 px-3.5 min-w-[100px]">Bruttorendite</th>
+                <th class="py-3 px-3.5 min-w-[120px]">Monatl. Cashflow</th>
+                <th class="py-3 px-3.5 min-w-[170px]">KI-Audit & Risiken</th>
+                <th class="py-3 px-4 min-w-[210px] text-right sticky right-0 bg-slate-50 dark:bg-slate-800 z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)]">Aktionen</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-slate-900">
+              <template x-for="prop in properties" :key="prop.id">
+                <tr class="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 transition-colors group">
+                  
+                  <!-- Title & Source -->
+                  <td class="py-3 px-3.5 min-w-[280px] max-w-md">
+                    <div class="flex items-start gap-2">
+                      <button @click="toggleFavorite(prop)" class="mt-0.5 text-slate-300 hover:text-amber-500 transition-colors">
+                        <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-500 fill-amber-500' : ''"></i>
+                      </button>
+                      <div>
+                        <a :href="'?deal=' + prop.id + '&view=audit'" @click.prevent="openDetailModal(prop, 'audit')" class="font-semibold text-slate-900 dark:text-slate-100 hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug" x-text="prop.title"></a>
+                        <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                          <template x-if="getSourcePortalsList(prop).length > 1">
+                            <div class="inline-flex items-center gap-1 flex-wrap">
+                              <template x-for="p in getSourcePortalsList(prop)" :key="p.portal">
+                                <a :href="p.url" target="_blank" @click.stop class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold border transition-colors"
+                                   :class="getPortalBadgeClass(p.portal)" :title="`Auf ${p.portal} öffnen`">
+                                  <span x-text="p.portal"></span>
+                                  <i data-lucide="external-link" class="w-2.5 h-2.5"></i>
+                                </a>
+                              </template>
+                            </div>
+                          </template>
+                          <template x-if="getSourcePortalsList(prop).length <= 1">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300" x-text="prop.source_portal"></span>
+                          </template>
+                          <template x-if="prop.is_private">
+                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
+                              🏷️ Provisionsfrei
+                            </span>
+                          </template>
+                          <span class="text-[10px] text-slate-400" x-text="`Vor ${prop.days_online} Tagen`"></span>
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+
+                  <!-- Live Online Status -->
+                  <td class="py-3 px-3.5 whitespace-nowrap">
+                    <div class="flex items-center gap-1.5">
+                      <template x-if="prop.is_online">
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                          Aktiv & Online
+                        </span>
+                      </template>
+                      <template x-if="!prop.is_online">
+                        <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800" :title="prop.status_message">
+                          <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                          Deaktiviert
+                        </span>
+                      </template>
+
+                      <!-- Single Property Live Check Button -->
+                      <button @click.stop="checkPropertyAvailability(prop)" title="Live auf Portal prüfen" class="p-1 rounded text-slate-400 hover:text-sky-600 hover:bg-slate-100 dark:hover:bg-slate-800">
+                        <i data-lucide="refresh-cw" class="w-3 h-3" :class="prop.checking ? 'animate-spin text-sky-600' : ''"></i>
+                      </button>
+
+                      <!-- Quick Delete Button for Deactivated Deals -->
+                      <template x-if="!prop.is_online">
+                        <button @click.stop="deleteProperty(prop.id, $event)" title="Deaktivierten Deal löschen" class="p-1 rounded text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors">
+                          <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-500"></i>
+                        </button>
+                      </template>
+                    </div>
+                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="prop.last_checked_at ? `Geprüft: ${prop.last_checked_at.slice(11,16)} Uhr` : 'Geprüft'"></div>
+                  </td>
+
+                  <!-- Location & Postal Code -->
+                  <td class="py-3 px-3.5">
+                    <div class="flex items-center gap-1.5 group cursor-pointer" @click="showPropertyOnMap(prop)" title="Auf interaktiver Karte zentrieren">
+                      <div>
+                        <div class="font-medium text-slate-800 dark:text-slate-200 group-hover:text-sky-600 dark:group-hover:text-sky-400 transition-colors" x-text="prop.city"></div>
+                        <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="`${prop.postal_code} • ${prop.state}`"></div>
+                        <a :href="getGoogleMapsUrl(prop)" target="_blank" rel="noopener noreferrer" @click.stop class="inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold text-sky-600 dark:text-sky-400 hover:underline" title="In Google Maps öffnen">
+                          <span>🗺️ Maps</span>
+                          <span class="text-[9px]">↗</span>
+                        </a>
+                      </div>
+                      <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 group-hover:text-sky-600 dark:group-hover:text-sky-400 opacity-60 group-hover:opacity-100 transition-all"></i>
+                    </div>
+                  </td>
+
+                  <!-- Space & Rooms -->
+                  <td class="py-3 px-3.5">
+                    <div class="font-semibold text-slate-800 dark:text-slate-200" x-text="formatSqM(prop.living_space)"></div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="`${formatRooms(prop.rooms)} • Bj. ${prop.year_built || '-'}`"></div>
+                  </td>
+
+                  <!-- Price & Price Drop -->
+                  <td class="py-3 px-3.5">
+                    <div class="font-bold text-slate-900 dark:text-slate-100 text-sm" x-text="formatCurrency(prop.purchase_price)"></div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="`${formatNumber(prop.purchase_price / prop.living_space, 0)} €/m²`"></div>
+                    <template x-if="prop.price_drop_amount > 0">
+                      <span class="inline-block mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1 rounded" x-text="`-${formatNumber(prop.price_drop_percent, prop.price_drop_percent % 1 === 0 ? 0 : 1)} % gesenkt`"></span>
+                    </template>
+                  </td>
+
+                  <!-- Sprengnetter Valuation -->
+                  <td class="py-3 px-3.5">
+                    <div class="font-semibold text-slate-800 dark:text-slate-200" x-text="formatCurrency(prop.market_value)"></div>
+                    <div class="mt-0.5">
+                      <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold" 
+                            :class="prop.market_deviation_percent < -5 ? 'bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'"
+                            x-text="formatDeviation(prop.market_deviation_percent)">
+                      </span>
+                      <span class="text-[10px] text-slate-500 dark:text-slate-400 ml-1" x-text="prop.market_deviation_percent < -5 ? 'unter Marktwert' : 'zum Marktwert'"></span>
+                    </div>
+                  </td>
+
+                  <!-- Gross Yield -->
+                  <td class="py-3 px-3.5">
+                    <div class="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                      <span x-text="formatPercent(prop.gross_yield, 2)"></span>
+                      <span x-show="!prop.is_rented" class="text-[9px] font-bold text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-950 px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-800" title="Kalkulierte Soll-Rendite bei Neuvermietung (Sprengnetter Benchmark)">SOLL</span>
+                      <span x-show="prop.is_rented && !(prop.current_rent > 0 && prop.ai_analysis?.metrics?.rent_is_verified !== false)" class="text-[9px] font-bold text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-950 px-1.5 py-0.5 rounded border border-amber-300 dark:border-amber-800" title="Vermietet, aber keine Kaltmiete im Exposé genannt – ausgewiesene Rendite ist eine Soll-Schätzung (Sprengnetter Benchmark)">SOLL</span>
+                      <span x-show="prop.is_rented && prop.current_rent > 0 && prop.ai_analysis?.metrics?.rent_is_verified !== false" class="text-[9px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950 px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-800" title="Verifizierte Ist-Rendite (Aktuell vermietet mit belegter Ist-Miete)">IST</span>
+                    </div>
+                    <div class="text-[10px] text-slate-500 dark:text-slate-400 flex flex-col mt-0.5">
+                      <template x-if="prop.is_rented && prop.current_rent > 0 && prop.ai_analysis?.metrics?.rent_is_verified !== false">
+                        <span x-text="`Ist: ${formatCurrency(prop.current_rent)}/M`" class="font-semibold text-emerald-600 dark:text-emerald-400"></span>
+                      </template>
+                      <template x-if="prop.is_rented && !(prop.current_rent > 0 && prop.ai_analysis?.metrics?.rent_is_verified !== false)">
+                        <span class="font-medium text-amber-600 dark:text-amber-400" title="Im Exposé als vermietet gemeldet, aber ohne Kaltmieten-Angabe">Vermietet (Ist: k. A.)</span>
+                      </template>
+                      <template x-if="!prop.is_rented">
+                        <span class="font-medium text-slate-500 dark:text-slate-400">Ist: Unvermietet (0 €)</span>
+                      </template>
+                      <template x-if="prop.is_rented && prop.current_rent > 0 && prop.potential_gross_yield > prop.gross_yield">
+                        <span x-text="`Soll: ${formatCurrency(prop.expected_rent)}/M (${formatPercent(prop.potential_gross_yield, 1)})`" class="text-sky-600 dark:text-sky-400 font-semibold" title="Mietspiegel-Potenzial bei Neuvermietung"></span>
+                      </template>
+                      <template x-if="!(prop.is_rented && prop.current_rent > 0 && prop.potential_gross_yield > prop.gross_yield)">
+                        <span x-text="`Soll: ${formatCurrency(prop.expected_rent)}/M`" class="text-slate-400" title="Sprengnetter Marktbenchmark bei Neuvermietung"></span>
+                      </template>
+                    </div>
+                  </td>
+
+                  <!-- Monthly Cashflow -->
+                  <td class="py-3 px-3.5">
+                    <div class="font-bold text-sm" :class="prop.monthly_cashflow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'" 
+                         x-text="formatCashflow(prop.monthly_cashflow, false)">
+                    </div>
+                    <span class="text-[10px] uppercase tracking-wide font-semibold block" :class="prop.monthly_cashflow >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'"
+                          x-text="prop.monthly_cashflow >= 0 ? 'Positiver CF' : 'Negativer CF'">
+                    </span>
+                    <template x-if="prop.is_rented && prop.monthly_cashflow < 0 && (prop.ai_analysis?.metrics?.mietspiegel_analysis?.turns_profitable || (prop.ai_analysis?.metrics?.potential_monthly_cashflow >= 0 && prop.ai_analysis?.metrics?.current_monthly_rent > 0))">
+                      <span class="inline-flex items-center gap-0.5 mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 whitespace-nowrap" title="Cashflow bei Anhebung auf örtlichen Mietspiegel">
+                        🚀 <span x-text="`Soll: ${formatCurrency(prop.ai_analysis?.metrics?.potential_monthly_cashflow)}`"></span>
+                      </span>
+                    </template>
+                  </td>
+
+                  <!-- KI-Audit & Risiken -->
+                  <td class="py-3 px-3.5 whitespace-nowrap">
+                    <template x-if="prop.ai_analysis">
+                      <div @click="openDetailModal(prop, 'audit')" class="cursor-pointer group" title="KI-Audit öffnen">
+                        <div class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-bold transition-all shadow-2xs group-hover:scale-105"
+                             :class="{
+                               'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300': prop.ai_analysis.status === 'GREEN',
+                               'bg-amber-50 dark:bg-amber-950/70 border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300': prop.ai_analysis.status === 'YELLOW',
+                               'bg-rose-50 dark:bg-rose-950/70 border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300': prop.ai_analysis.status === 'RED'
+                             }">
+                          <span>🤖</span>
+                          <span x-text="`${formatNumber(prop.ai_analysis.score, 1)} / 10`"></span>
+                        </div>
+                        <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 flex items-center gap-1 flex-wrap">
+                          <span :class="prop.ai_analysis.risks.length > 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-emerald-600 dark:text-emerald-400'" x-text="`${prop.ai_analysis.risks.length} Risiken`"></span>
+                          <span>•</span>
+                          <span x-text="`CaPEx ${formatCurrency(prop.ai_analysis.capex.total_capex)}`"></span>
+                          <template x-if="prop.image_analysis">
+                            <span class="ml-1 font-semibold text-sky-600 dark:text-sky-400" x-text="`• 📸 ${formatNumber(prop.image_analysis.overall_visual_score, 1)}`" title="Visueller IST-Zustand aus Bildanalyse"></span>
+                          </template>
+                        </div>
+                      </div>
+                    </template>
+                    <template x-if="!prop.ai_analysis">
+                      <button @click.stop="openDetailModal(prop, 'audit')" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 hover:bg-sky-100 dark:hover:bg-sky-900 border border-sky-200 dark:border-sky-800 transition-colors cursor-pointer" title="KI-Audit starten">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+                        <span>KI prüfen</span>
+                      </button>
+                    </template>
+                  </td>
+
+                  <!-- Actions (Sticky Right) -->
+                  <td class="py-3 px-4 text-right sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)] whitespace-nowrap">
+                    <div class="flex items-center justify-end gap-1.5">
+                      <a :href="prop.portal_url" target="_blank" title="Direkt zum Original-Angebot aufrufen" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-800 rounded-lg shadow-2xs transition-colors">
+                        <i data-lucide="external-link" class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400"></i>
+                        <span>Zum Angebot</span>
+                      </a>
+                      <button @click.stop="sendToCalculator(prop)" title="Im Cashflow-Rechner öffnen" class="p-1.5 rounded-lg hover:bg-sky-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer">
+                        <i data-lucide="calculator" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
+                      </button>
+                      <button @click.stop="openDetailModal(prop, 'audit')" title="KI-Audit & Details anzeigen" class="p-1.5 rounded-lg hover:bg-sky-50 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-sky-600 dark:hover:text-sky-400 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer">
+                        <i data-lucide="sparkles" class="w-4 h-4 text-sky-600"></i>
+                      </button>
+                      <button @click.stop="deleteProperty(prop.id, $event)" title="Diesen Deal löschen" class="p-1.5 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/60 text-slate-400 hover:text-rose-600 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-rose-500"></i>
+                      </button>
+                    </div>
+                  </td>
+
+                </tr>
+              </template>
+            </tbody>
+          </table>
+
+          <!-- Empty State with 1-Click Live Search Trigger -->
+          <div x-show="!loading && properties.length === 0" class="p-10 text-center space-y-4">
+            <div class="w-16 h-16 mx-auto rounded-2xl bg-sky-50 dark:bg-sky-950/60 border border-sky-200 dark:border-sky-800 flex items-center justify-center text-3xl shadow-inner">
+              🔍
+            </div>
+            <div>
+              <h4 class="text-base font-bold text-slate-800 dark:text-slate-100">
+                <span x-show="filters.q">Keine gespeicherten Deals für „<span x-text="filters.q" class="text-sky-600 dark:text-sky-400"></span>“ in der Datenbank</span>
+                <span x-show="!filters.q">Keine Immobilien für die aktuellen Filterkriterien gefunden</span>
+              </h4>
+              <p class="text-xs text-slate-500 dark:text-slate-400 max-w-lg mx-auto mt-1">
+                <span x-show="filters.q">Du kannst jetzt sofort live über 40+ Portale (Kleinanzeigen, etc.) nach frischen Wohnungsangeboten für diesen Ort suchen und automatisch importieren lassen.</span>
+                <span x-show="!filters.q">Passe deine Filter an oder starte eine Live-Metasuche über Portale für eine beliebige deutsche Stadt.</span>
+              </p>
+            </div>
+            <div class="flex items-center justify-center gap-3 pt-2">
+              <button 
+                @click="triggerLiveScrape(filters.q || 'Dortmund')" 
+                class="px-5 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-md flex items-center gap-2 transition-all transform hover:scale-105 cursor-pointer">
+                <i data-lucide="globe" class="w-4 h-4"></i>
+                <span x-text="filters.q ? `Jetzt Live-Deals für „${filters.q}“ suchen` : 'Neue Deals suchen'"></span>
+              </button>
+              <button 
+                @click="resetFilters()" 
+                class="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer">
+                Filter zurücksetzen
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
