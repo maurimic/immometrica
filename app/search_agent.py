@@ -150,9 +150,11 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
 
     city = profile.get("city", "").strip()
     search_query = profile.get("search_query", "").strip()
+    radius_km = int(profile.get("radius_km") or 25)
     max_price = float(profile.get("max_price") or 0.0)
     max_price_per_sqm = float(profile.get("max_price_per_sqm") or 0.0)
     min_yield = float(profile.get("min_yield") or 0.0)
+    yield_basis = str(profile.get("yield_basis") or "any").strip().lower()
     min_discount_pct = float(profile.get("min_discount_pct") or 0.0)
     min_rooms = float(profile.get("min_rooms") or 1.0)
     min_living_space = float(profile.get("min_living_space") or 0.0)
@@ -230,18 +232,31 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             mark_listing_seen(portal_url, profile_id, "dropped_stage1_property_type")
             continue
 
-        # Value-Add & Mietspiegel-Schutz:
-        # Immobilien mit niedriger Ist-Miete, die bei Mietspiegel-Anpassung min_yield erreichen,
-        # dürfen keinesfalls verworfen werden!
+        # Strikte Stadtgrenzen-Prüfung wenn Radius = 0 km gewählt wurde
+        if radius_km == 0 and city:
+            deal_c = str(deal.get("city") or "").lower().strip()
+            target_c = city.lower().strip()
+            if target_c and target_c not in deal_c and deal_c not in target_c:
+                filtered_stage1_2 += 1
+                mark_listing_seen(portal_url, profile_id, "dropped_stage1_city_boundary")
+                continue
+
+        # Stage 1 Rendite-Vorfilter: Berücksichtigt konfigurierte Rendite-Basis ('actual', 'potential', 'any')
         if min_yield > 0:
             from app.valuation import get_mietspiegel_size_benchmark, evaluate_property_valuation
             deal_city = deal.get("city") or city
             actual_yield = raw_yield
 
-            # 1. Erwartete Benchmark-Rendite
+            # 1. Erwartete Benchmark-Rendite (mit Baujahr & Zustand falls im Inserat vorhanden)
             exp_rent = float(deal.get("expected_rent") or 0.0)
             if exp_rent <= 0 and raw_price > 0 and raw_sqm > 0:
-                val = evaluate_property_valuation(city=deal_city, living_space=raw_sqm, purchase_price=raw_price)
+                val = evaluate_property_valuation(
+                    city=deal_city,
+                    living_space=raw_sqm,
+                    purchase_price=raw_price,
+                    year_built=deal.get("year_built"),
+                    condition=deal.get("condition")
+                )
                 exp_rent = float(val.get("expected_rent_monthly") or 0.0)
             expected_yield = round(((exp_rent * 12.0) / raw_price) * 100.0, 2) if raw_price > 0 else 0.0
 
@@ -252,7 +267,15 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 ms_monthly = float(ms.get("expected_sqm_rent") or 0.0) * raw_sqm
                 mietspiegel_size_yield = round(((ms_monthly * 12.0) / raw_price) * 100.0, 2)
 
-            effective_yield = max(actual_yield, expected_yield, mietspiegel_size_yield)
+            potential_yield = max(expected_yield, mietspiegel_size_yield)
+
+            if yield_basis == "actual":
+                effective_yield = actual_yield
+            elif yield_basis == "potential":
+                effective_yield = potential_yield
+            else: # "any" (Standard: Ist- ODER Mietspiegel-Potenzial)
+                effective_yield = max(actual_yield, potential_yield)
+
             if effective_yield < min_yield:
                 filtered_stage1_2 += 1
                 mark_listing_seen(portal_url, profile_id, "dropped_stage1_yield")
@@ -355,12 +378,13 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             or audited_score >= 6.0
         )
 
-        # Stage 4 Value-Add & Mietspiegel-Schutz
-        from app.valuation import get_mietspiegel_size_benchmark
-        ms_s4 = get_mietspiegel_size_benchmark(city=deal.get("city", city), living_space=audited_sqm)
-        ms_sqm_s4 = float(ms_s4.get("expected_sqm_rent") or 0.0)
-        ms_yield_s4 = round(((ms_sqm_s4 * audited_sqm * 12.0) / audited_price) * 100.0, 2) if audited_price > 0 else 0.0
-        eff_audited_yield = max(audited_yield, audited_potential_yield, ms_yield_s4)
+        # Stage 4: Verbindlicher Abgleich gegen die Renditevorgaben des Ankaufsprofils ('actual', 'potential', 'any')
+        if yield_basis == "actual":
+            eff_audited_yield = audited_yield
+        elif yield_basis == "potential":
+            eff_audited_yield = audited_potential_yield
+        else: # "any" (Standard: Höhere Rendite aus Ist und verifiziertem Mietspiegel-Potenzial)
+            eff_audited_yield = max(audited_yield, audited_potential_yield)
 
         meets_profile_limits = (
             (max_price <= 0 or audited_price <= max_price)
@@ -383,7 +407,12 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             if min_living_space > 0 and audited_sqm < min_living_space:
                 reasons.append(f"Wohnfläche ({audited_sqm:.0f} m²) unter Profil-Minimum ({min_living_space:.0f} m²)")
             if min_yield > 0 and eff_audited_yield < min_yield:
-                reasons.append(f"Bruttorendite ({eff_audited_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
+                if yield_basis == "actual":
+                    reasons.append(f"Ist-Bruttorendite ({audited_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
+                elif yield_basis == "potential":
+                    reasons.append(f"Mietspiegel-Potenzialrendite ({audited_potential_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
+                else:
+                    reasons.append(f"Weder Ist-Rendite ({audited_yield:.1f}%) noch Mietspiegel-Rendite ({audited_potential_yield:.1f}%) erreichen Profil-Ziel ({min_yield:.1f}%)")
             if min_discount_pct > 0 and audited_market_dev > -min_discount_pct:
                 reasons.append(f"Untermarktwert-Abschlag ({audited_market_dev:+.1f}%) erreicht nicht Mindestabschlag von -{min_discount_pct:.1f}%")
             if has_critical:
@@ -495,9 +524,40 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             continue
 
         # =====================================================================
-        # STAGE 6: ADMISSION TO ACTIVE PIPELINE & TELEGRAM PUSH ALERT
-        # Deal is fully validated through text audit AND visual image inspection!
+        # STAGE 6: FINAL GATEKEEPER CHECK & ADMISSION TO PIPELINE / TELEGRAM
+        # Verified check: Ensure audited yield strictly meets profile requirement
         # =====================================================================
+        if min_yield > 0:
+            yield_passed = False
+            if yield_basis == "actual":
+                yield_passed = (audited_yield >= min_yield)
+            elif yield_basis == "potential":
+                yield_passed = (audited_potential_yield >= min_yield)
+            else: # "any"
+                yield_passed = (max(audited_yield, audited_potential_yield) >= min_yield)
+
+            if not yield_passed:
+                rej = f"Geprüfte Rendite verfehlt Mindestrendite ({audited_yield:.1f}% Ist / {audited_potential_yield:.1f}% Mietspiegel < {min_yield:.1f}%)"
+                mark_listing_seen(portal_url, profile_id, "dropped_final_yield")
+                conn = get_connection()
+                c = conn.cursor()
+                if ai_report:
+                    ai_report["pipeline_decision"] = {
+                        "stage": "archiv",
+                        "reason": rej,
+                        "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+                    }
+                    c.execute(
+                        "UPDATE properties SET pipeline_stage = 'archiv', status_message = ?, ai_analysis = ? WHERE id = ?",
+                        (rej, json.dumps(ai_report, ensure_ascii=False), prop_id)
+                    )
+                else:
+                    c.execute("UPDATE properties SET pipeline_stage = 'archiv', status_message = ? WHERE id = ?", (rej, prop_id))
+                conn.commit()
+                conn.close()
+                logger.info(f"Final Gatekeeper: Deal #{prop_id} rejected from alerts/telegram ({rej}).")
+                continue
+
         mark_listing_seen(portal_url, profile_id, "qualified")
         target_stage = "merkliste" if (audited_score >= 8.0 or visual_score >= 8.5) else "neu"
         qualification_text = f"Qualifiziert: Score {audited_score:.1f}/10, Rendite {audited_yield:.1f}%, Cashflow {audited_cashflow:+,.0f} €/M"

@@ -172,6 +172,7 @@ def init_db():
         max_price REAL DEFAULT 0,
         max_price_per_sqm REAL DEFAULT 0,
         min_yield REAL DEFAULT 0.0,
+        yield_basis TEXT DEFAULT 'any',
         min_discount_pct REAL DEFAULT 0.0,
         min_rooms REAL DEFAULT 1.0,
         min_living_space REAL DEFAULT 0.0,
@@ -248,6 +249,11 @@ def init_db():
     )
     """)
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_seen_listings_profile ON seen_listings (profile_id)")
+
+    try:
+        cursor.execute("ALTER TABLE search_profiles ADD COLUMN yield_basis TEXT DEFAULT 'any'")
+    except sqlite3.OperationalError:
+        pass
 
     conn.commit()
 
@@ -684,28 +690,45 @@ def get_search_profile_by_id(profile_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    if val is None or val == "":
+        return default
+    try:
+        return int(float(val))
+    except (ValueError, TypeError):
+        return default
+
 def save_search_profile(data: Dict[str, Any]) -> int:
     conn = get_connection()
     c = conn.cursor()
     c.execute("""
         INSERT INTO search_profiles (
             name, city, postal_code, radius_km, max_price, max_price_per_sqm,
-            min_yield, min_discount_pct, min_rooms, min_living_space,
+            min_yield, yield_basis, min_discount_pct, min_rooms, min_living_space,
             property_type, search_query, is_active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
-        data.get("name", "Neues Suchprofil"),
-        data.get("city", "Dortmund"),
-        data.get("postal_code", ""),
-        int(data.get("radius_km", 25)),
-        float(data.get("max_price", 0.0)),
-        float(data.get("max_price_per_sqm", 0.0)),
-        float(data.get("min_yield", 0.0)),
-        float(data.get("min_discount_pct", 0.0)),
-        float(data.get("min_rooms", 1.0)),
-        float(data.get("min_living_space", 0.0)),
-        data.get("property_type", "all"),
-        data.get("search_query", ""),
+        str(data.get("name") or "Neues Suchprofil").strip(),
+        str(data.get("city") or "Dortmund").strip(),
+        str(data.get("postal_code") or "").strip(),
+        _safe_int(data.get("radius_km"), 25),
+        _safe_float(data.get("max_price"), 0.0),
+        _safe_float(data.get("max_price_per_sqm"), 0.0),
+        _safe_float(data.get("min_yield"), 0.0),
+        str(data.get("yield_basis") or "any").strip().lower(),
+        _safe_float(data.get("min_discount_pct"), 0.0),
+        _safe_float(data.get("min_rooms"), 1.0),
+        _safe_float(data.get("min_living_space"), 0.0),
+        str(data.get("property_type") or "all"),
+        str(data.get("search_query") or "").strip(),
         1 if data.get("is_active", True) else 0
     ))
     new_id = c.lastrowid
@@ -719,15 +742,26 @@ def update_search_profile(profile_id: int, data: Dict[str, Any]) -> bool:
     c = conn.cursor()
     fields = [
         "name", "city", "postal_code", "radius_km", "max_price", "max_price_per_sqm",
-        "min_yield", "min_discount_pct", "min_rooms", "min_living_space",
+        "min_yield", "yield_basis", "min_discount_pct", "min_rooms", "min_living_space",
         "property_type", "search_query", "is_active", "deals_found_count", "last_run_at"
     ]
+    numeric_floats = {"max_price", "max_price_per_sqm", "min_yield", "min_discount_pct", "min_rooms", "min_living_space"}
+    numeric_ints = {"radius_km", "deals_found_count"}
     updates = []
     values = []
     for f in fields:
         if f in data:
+            raw_val = data[f]
+            if f in numeric_floats:
+                val = _safe_float(raw_val, 0.0)
+            elif f in numeric_ints:
+                val = _safe_int(raw_val, 0)
+            elif f == "is_active":
+                val = 1 if raw_val else 0
+            else:
+                val = str(raw_val) if raw_val is not None else ""
             updates.append(f"{f} = ?")
-            values.append(data[f])
+            values.append(val)
     if not updates:
         conn.close()
         return False
@@ -899,12 +933,12 @@ def record_deal_alert(alert_data: Dict[str, Any]) -> int:
         alert_data["portal_url"],
         alert_data.get("title", "Immobilienangebot"),
         alert_data.get("city", ""),
-        float(alert_data.get("price", 0.0)),
-        float(alert_data.get("living_space", 0.0)),
-        float(alert_data.get("price_per_sqm", 0.0)),
-        float(alert_data.get("gross_yield", 0.0)),
-        float(alert_data.get("market_discount_pct", 0.0)),
-        float(alert_data.get("monthly_cashflow", 0.0)),
+        _safe_float(alert_data.get("price"), 0.0),
+        _safe_float(alert_data.get("living_space"), 0.0),
+        _safe_float(alert_data.get("price_per_sqm"), 0.0),
+        _safe_float(alert_data.get("gross_yield"), 0.0),
+        _safe_float(alert_data.get("market_discount_pct"), 0.0),
+        _safe_float(alert_data.get("monthly_cashflow"), 0.0),
         alert_data.get("ai_verdict", ""),
         1 if alert_data.get("has_critical_risks") else 0,
         1 if alert_data.get("sent_to_telegram") else 0,
@@ -915,6 +949,31 @@ def record_deal_alert(alert_data: Dict[str, Any]) -> int:
     conn.commit()
     conn.close()
     return new_id
+
+
+def delete_deal_alert(alert_id: int) -> bool:
+    """Deletes a single deal alert by ID from the deal_alerts stream."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM deal_alerts WHERE id = ?", (alert_id,))
+    conn.commit()
+    success = c.rowcount > 0
+    conn.close()
+    return success
+
+
+def clear_deal_alerts(profile_id: Optional[int] = None) -> int:
+    """Deletes all deal alerts, optionally filtered by profile_id. Returns number of deleted rows."""
+    conn = get_connection()
+    c = conn.cursor()
+    if profile_id:
+        c.execute("DELETE FROM deal_alerts WHERE profile_id = ?", (profile_id,))
+    else:
+        c.execute("DELETE FROM deal_alerts")
+    conn.commit()
+    deleted_count = c.rowcount
+    conn.close()
+    return deleted_count
 
 
 # ==============================================================================

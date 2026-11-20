@@ -55,7 +55,7 @@ def calculate_cashflow(
     rent: float,
     equity_value: float = 20.0,
     equity_type: str = "percent", # "percent" or "amount"
-    interest_rate: float = 3.5,     # Zinssatz in %
+    interest_rate: Optional[float] = None, # Zinssatz in % (None = Dr. Klein Tagesaktueller 10J-Benchmark)
     repayment_rate: float = 2.0,    # Tilgungssatz in %
     additional_costs: float = 50.0, # Nicht umlegbare Bewirtschaftungskosten (Hausgeld/Instandhaltung)
     renovation_costs: float = 0.0,  # Sanierungskosten

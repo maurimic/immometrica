@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from typing import Optional
 import os
 
-from app.database import init_db
+from app.database import init_db, set_system_setting
 from app.routers import properties, pipeline, calculations, export, settings, alerts, auth
 from app.scheduler import start_background_scheduler, stop_background_scheduler
 from app import mcp_server
@@ -32,9 +32,25 @@ app.add_middleware(
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
+
+    # Auto-detect incoming public base URL from browser traffic
+    try:
+        if path in ("/", "/login") or path.startswith("/deal/") or path.startswith("/property/"):
+            host_hdr = request.headers.get("x-forwarded-host") or request.headers.get("host")
+            proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+            if host_hdr:
+                cleaned_host = host_hdr.split(",")[0].strip()
+                detected_url = f"{proto}://{cleaned_host}".rstrip("/")
+                is_local = any(cleaned_host.startswith(p) for p in ["127.0.0.1", "localhost", "0.0.0.0", "192.168.", "10."])
+                if not is_local:
+                    set_system_setting("last_server_base_url", detected_url)
+                else:
+                    set_system_setting("last_local_base_url", detected_url)
+    except Exception:
+        pass
     # Public endpoints that don't require session authentication
     if (
-        path in ("/login", "/favicon.ico", "/docs", "/openapi.json", "/ping", "/health", "/api/health")
+        path in ("/login", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/docs", "/openapi.json", "/ping", "/health", "/api/health")
         or path.startswith("/static")
         or path.startswith("/api/auth")
         or path.startswith("/mcp")
@@ -66,6 +82,24 @@ app.include_router(mcp_server.router)
 @app.get("/health")
 def health_check():
     return {"status": "ok", "app": "immometrica", "version": "2.0.0"}
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon_ico():
+    ico_path = os.path.join(static_dir, "favicon.ico")
+    if os.path.exists(ico_path):
+        return FileResponse(ico_path, media_type="image/x-icon")
+    svg_path = os.path.join(static_dir, "favicon.svg")
+    return FileResponse(svg_path, media_type="image/svg+xml")
+
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon_svg():
+    svg_path = os.path.join(static_dir, "favicon.svg")
+    return FileResponse(svg_path, media_type="image/svg+xml")
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+def apple_touch_icon():
+    p = os.path.join(static_dir, "apple-touch-icon.png")
+    return FileResponse(p, media_type="image/png")
 
 @app.on_event("startup")
 async def on_startup():

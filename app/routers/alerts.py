@@ -5,8 +5,11 @@ Manages search profiles, manual and scheduled crawler execution, alert feed, and
 
 import json
 import asyncio
+import logging
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Body
+
+logger = logging.getLogger("immometrica.alerts")
 
 from app.database import (
     get_search_profiles,
@@ -15,10 +18,12 @@ from app.database import (
     update_search_profile,
     delete_search_profile,
     get_deal_alerts,
+    delete_deal_alert,
+    clear_deal_alerts,
     get_system_setting,
     set_system_setting
 )
-from app.telegram_notifier import test_telegram_connection
+from app.telegram_notifier import test_telegram_connection, get_base_url
 from app.search_agent import execute_search_profile, execute_all_active_profiles
 from app.scheduler import is_crawler_busy
 
@@ -52,22 +57,26 @@ def list_profiles():
 @router.post("/profiles")
 def create_profile(payload: Dict[str, Any] = Body(...)):
     """Creates a new investor search profile."""
-    name = payload.get("name", "").strip()
-    city = payload.get("city", "").strip()
+    name = str(payload.get("name") or "").strip()
+    city = str(payload.get("city") or "").strip()
 
     if not name:
         raise HTTPException(status_code=400, detail="Name des Suchprofils erforderlich.")
     if not city:
         raise HTTPException(status_code=400, detail="Zielstadt erforderlich.")
 
-    new_id = save_search_profile(payload)
-    created = get_search_profile_by_id(new_id)
+    try:
+        new_id = save_search_profile(payload)
+        created = get_search_profile_by_id(new_id)
 
-    return {
-        "success": True,
-        "message": f"Suchprofil '{name}' erfolgreich angelegt.",
-        "profile": created
-    }
+        return {
+            "success": True,
+            "message": f"Suchprofil '{name}' erfolgreich angelegt.",
+            "profile": created
+        }
+    except Exception as e:
+        logger.error(f"Error creating search profile: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Fehler beim Erstellen des Suchprofils: {str(e)}")
 
 
 @router.get("/profiles/{profile_id}")
@@ -86,16 +95,22 @@ def update_profile(profile_id: int, payload: Dict[str, Any] = Body(...)):
     if not existing:
         raise HTTPException(status_code=404, detail=f"Suchprofil #{profile_id} nicht gefunden.")
 
-    updated = update_search_profile(profile_id, payload)
-    if not updated:
-        raise HTTPException(status_code=400, detail="Keine gültigen Felder zur Aktualisierung übergeben.")
+    try:
+        updated = update_search_profile(profile_id, payload)
+        if not updated:
+            raise HTTPException(status_code=400, detail="Keine gültigen Felder zur Aktualisierung übergeben.")
 
-    p = get_search_profile_by_id(profile_id)
-    return {
-        "success": True,
-        "message": f"Suchprofil #{profile_id} erfolgreich aktualisiert.",
-        "profile": p
-    }
+        p = get_search_profile_by_id(profile_id)
+        return {
+            "success": True,
+            "message": f"Suchprofil #{profile_id} erfolgreich aktualisiert.",
+            "profile": p
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating search profile #{profile_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Fehler beim Aktualisieren des Suchprofils: {str(e)}")
 
 
 @router.delete("/profiles/{profile_id}")
@@ -200,6 +215,27 @@ def get_alert_feed(
     }
 
 
+@router.delete("/feed/{alert_id}")
+def remove_deal_alert(alert_id: int):
+    """Deletes a specific deal alert from the stream."""
+    success = delete_deal_alert(alert_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Deal-Alert #{alert_id} nicht gefunden.")
+    return {"success": True, "message": f"Deal-Alert #{alert_id} erfolgreich gelöscht."}
+
+
+@router.delete("/feed")
+def clear_all_feed_alerts(profile_id: Optional[int] = Query(None, description="Optional profile ID filter")):
+    """Deletes all deal alerts, or all alerts for a specific profile."""
+    deleted_count = clear_deal_alerts(profile_id=profile_id)
+    scope = f"für Profil #{profile_id}" if profile_id else "insgesamt"
+    return {
+        "success": True,
+        "deleted_count": deleted_count,
+        "message": f"{deleted_count} Deal-Alerts {scope} gelöscht."
+    }
+
+
 # ==============================================================================
 # 4. SETTINGS & TELEGRAM INTEGRATION
 # ==============================================================================
@@ -225,6 +261,7 @@ def get_alert_settings():
         "telegram_configured": bool(tg_token and tg_chat_id),
         "telegram_masked_token": mask_token(tg_token),
         "telegram_chat_id": tg_chat_id,
+        "app_base_url": get_base_url(),
         "crawler_interval_minutes": int(interval) if interval and interval.isdigit() else 30,
         "crawler_active": active_str in ("1", "true", "True"),
         "crawler_last_run": last_run,
@@ -244,6 +281,10 @@ def save_alert_settings(payload: Dict[str, Any] = Body(...)):
     if "telegram_chat_id" in payload and payload["telegram_chat_id"] is not None:
         raw_cid = str(payload["telegram_chat_id"]).strip()
         set_system_setting("telegram_chat_id", raw_cid)
+
+    if "app_base_url" in payload and payload["app_base_url"] is not None:
+        raw_url = str(payload["app_base_url"]).strip().rstrip("/")
+        set_system_setting("app_base_url", raw_url)
 
     if "crawler_interval_minutes" in payload:
         try:

@@ -69,6 +69,14 @@ window.immoCalculatorModule = {
     this.calc.mietspiegel_analysis = prop.ai_analysis?.metrics?.mietspiegel_analysis || prop.ai_analysis?.mietspiegel_analysis || null;
     this.calc.living_space = prop.living_space;
     this.calc.commission_percent = prop.commission_percent !== undefined ? prop.commission_percent : 3.57;
+
+    // Use consistent live interest rate matching the AI audit
+    if (prop.ai_analysis?.metrics?.applied_interest_rate) {
+      this.calc.interest_rate = Number(prop.ai_analysis.metrics.applied_interest_rate);
+    } else if (this.liveRates?.default_nominal_rate) {
+      this.calc.interest_rate = Number(this.liveRates.default_nominal_rate);
+    }
+
     const hgExplicit = prop.ai_analysis?.insights?.has_explicit_hausgeld;
     const hgVal = Number(prop.ai_analysis?.insights?.hausgeld || 0);
     const hgNonRec = Number(prop.ai_analysis?.insights?.hausgeld_non_recoverable || 0);
@@ -89,6 +97,11 @@ window.immoCalculatorModule = {
     // Auto-resolve Grunderwerbsteuer directly from property data without user prompt
     await this.resolveLocationTax();
 
+    // Ensure the modal view was pushed to history so browser Back returns directly to it
+    if (this.detailModalOpen && this.selectedProperty) {
+      this.syncUrl(true);
+    }
+    this.detailModalOpen = false;
     this.activeTab = 'calculator';
     this.runCalculator();
   },

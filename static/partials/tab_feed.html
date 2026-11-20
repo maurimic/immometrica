@@ -13,7 +13,7 @@
             </div>
             <div class="flex items-center gap-1.5">
               <div class="relative flex-1">
-                <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." class="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
+                <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." autocomplete="off" name="deal_search_query" class="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
                 <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
               </div>
               <button @click="fetchProperties()" class="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
@@ -56,7 +56,7 @@
           <!-- Max Preis -->
           <div>
             <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300 mb-1">Max. Kaufpreis (€)</label>
-            <input type="number" x-model.debounce.300ms="filters.max_price" placeholder="z.B. 400000" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <input type="number" x-model.debounce.300ms="filters.max_price" placeholder="z.B. 400000" autocomplete="off" name="deal_max_price" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
           </div>
 
           <!-- Min Rendite & Rendite-Basis -->
@@ -69,7 +69,7 @@
                 <option value="potential">Nur Mietspiegel (Soll)</option>
               </select>
             </div>
-            <input type="number" step="0.5" x-model.debounce.300ms="filters.min_yield" @input="fetchProperties()" placeholder="z.B. 5.0" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+            <input type="number" step="0.5" x-model.debounce.300ms="filters.min_yield" @input="fetchProperties()" placeholder="z.B. 5.0" autocomplete="off" name="deal_min_yield" class="w-full py-1.5 px-3 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
           </div>
 
         </div>

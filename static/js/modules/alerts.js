@@ -34,6 +34,7 @@ window.immoAlertsModule = {
     max_price: '',
     max_price_per_sqm: '',
     min_yield: '',
+    yield_basis: 'any',
     min_discount_pct: '',
     min_rooms: 1,
     min_living_space: '',
@@ -75,6 +76,7 @@ window.immoAlertsModule = {
       max_price: '',
       max_price_per_sqm: '',
       min_yield: 6.0,
+      yield_basis: 'any',
       min_discount_pct: 10.0,
       min_rooms: 1,
       min_living_space: 40,
@@ -99,6 +101,7 @@ window.immoAlertsModule = {
       max_price: profile.max_price || '',
       max_price_per_sqm: profile.max_price_per_sqm || '',
       min_yield: profile.min_yield || '',
+      yield_basis: profile.yield_basis || 'any',
       min_discount_pct: profile.min_discount_pct || '',
       min_rooms: profile.min_rooms || 1,
       min_living_space: profile.min_living_space || '',
@@ -118,24 +121,49 @@ window.immoAlertsModule = {
       return;
     }
     try {
-      const payload = { ...this.profileFormData };
+      const payload = {
+        name: String(this.profileFormData.name || '').trim(),
+        city: String(this.profileFormData.city || '').trim(),
+        postal_code: String(this.profileFormData.postal_code || '').trim(),
+        radius_km: Number(this.profileFormData.radius_km) || 25,
+        max_price: this.profileFormData.max_price !== '' && !isNaN(Number(this.profileFormData.max_price)) ? Number(this.profileFormData.max_price) : 0,
+        max_price_per_sqm: this.profileFormData.max_price_per_sqm !== '' && !isNaN(Number(this.profileFormData.max_price_per_sqm)) ? Number(this.profileFormData.max_price_per_sqm) : 0,
+        min_yield: this.profileFormData.min_yield !== '' && !isNaN(Number(this.profileFormData.min_yield)) ? Number(this.profileFormData.min_yield) : 0,
+        yield_basis: String(this.profileFormData.yield_basis || 'any').trim().toLowerCase(),
+        min_discount_pct: this.profileFormData.min_discount_pct !== '' && !isNaN(Number(this.profileFormData.min_discount_pct)) ? Number(this.profileFormData.min_discount_pct) : 0,
+        min_rooms: Number(this.profileFormData.min_rooms) || 1,
+        min_living_space: this.profileFormData.min_living_space !== '' && !isNaN(Number(this.profileFormData.min_living_space)) ? Number(this.profileFormData.min_living_space) : 0,
+        property_type: this.profileFormData.property_type || 'all',
+        search_query: String(this.profileFormData.search_query || '').trim(),
+        is_active: Boolean(this.profileFormData.is_active)
+      };
+
+      let res, data;
       if (this.editingProfile && this.editingProfile.id) {
-        const res = await fetch(`/api/alerts/profiles/${this.editingProfile.id}`, {
+        res = await fetch(`/api/alerts/profiles/${this.editingProfile.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.detail || 'Fehler beim Aktualisieren');
       } else {
-        const res = await fetch('/api/alerts/profiles', {
+        res = await fetch('/api/alerts/profiles', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
-        if (!data.success) throw new Error(data.detail || 'Fehler beim Anlegen');
       }
+
+      const resText = await res.text();
+      try {
+        data = JSON.parse(resText);
+      } catch {
+        throw new Error(resText || `Serverfehler (${res.status})`);
+      }
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.detail || data.message || `Fehler beim Speichern (${res.status})`);
+      }
+
       this.searchProfileModalOpen = false;
       await this.loadAlertsData();
       setTimeout(() => {
@@ -334,6 +362,65 @@ window.immoAlertsModule = {
       }
 
       window.open(alertItem.portal_url, '_blank');
+    }
+  },
+
+  async deleteDealAlert(alertId) {
+    if (!alertId) return;
+    try {
+      const res = await fetch(`/api/alerts/feed/${alertId}`, { method: 'DELETE' });
+      let data = {};
+      try { data = await res.json(); } catch (_) {}
+      if (res.ok) {
+        this.alertFeed = (this.alertFeed || []).filter(a => a.id !== alertId);
+        setTimeout(() => {
+          if (window.lucide) window.lucide.createIcons();
+        }, 50);
+      } else {
+        alert('Fehler beim Löschen des Alert-Eintrags: ' + (data.detail || res.statusText));
+      }
+    } catch (e) {
+      alert('Verbindungsfehler beim Löschen des Alerts: ' + e.message);
+    }
+  },
+
+  async clearAllDealAlerts(profileId = null) {
+    const activeFilter = profileId || this.alertFilterProfileId;
+    const targetScope = activeFilter 
+      ? 'für das ausgewählte Profil' 
+      : 'aus dem gesamten Deal-Alert-Feed';
+    const count = activeFilter 
+      ? (this.alertFeed || []).filter(a => String(a.profile_id) === String(activeFilter)).length 
+      : (this.alertFeed || []).length;
+    
+    if (count === 0) {
+      alert('Es sind keine Einträge zum Löschen vorhanden.');
+      return;
+    }
+
+    if (!confirm(`Möchtest du wirklich alle ${count} Einträge ${targetScope} unwiderruflich löschen?`)) {
+      return;
+    }
+
+    try {
+      const url = activeFilter ? `/api/alerts/feed?profile_id=${activeFilter}` : '/api/alerts/feed';
+      const res = await fetch(url, { method: 'DELETE' });
+      let data = {};
+      try { data = await res.json(); } catch (_) {}
+      if (res.ok) {
+        if (activeFilter) {
+          this.alertFeed = (this.alertFeed || []).filter(a => String(a.profile_id) !== String(activeFilter));
+        } else {
+          this.alertFeed = [];
+        }
+        setTimeout(() => {
+          if (window.lucide) window.lucide.createIcons();
+        }, 50);
+      } else {
+        alert('Fehler beim Leeren des Feeds: ' + (data.detail || res.statusText));
+      }
+    } catch (e) {
+      alert('Verbindungsfehler beim Leeren des Feeds: ' + e.message);
     }
   },
 

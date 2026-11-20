@@ -1920,6 +1920,18 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     total_capex = capex.get("total_capex", 0.0)
     effective_total_investment = round(price + ancillary_costs + total_capex, 2)
 
+    capex_amount = float(total_capex or 0.0)
+    cf_data_capex = calculate_cashflow(
+        price=price,
+        rent=rent_for_cf,
+        city=city,
+        state=state,
+        living_space=sqm,
+        commission_percent=commission_pct,
+        additional_costs=non_rec_monthly,
+        renovation_costs=capex_amount
+    ) if capex_amount > 0 else cf_data
+
     monthly_hausgeld = float(insights.get("hausgeld") or 250.0)
     non_recoverable_annual = non_rec_monthly * 12.0 if insights.get("has_explicit_hausgeld") else (monthly_hausgeld * 12.0 * 0.35)
     net_rental_income = (annual_rent if annual_rent > 0 else potential_annual_rent) - non_recoverable_annual
@@ -2055,6 +2067,13 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         "effective_total_investment": effective_total_investment,
         "monthly_cashflow": cf_data.get("monthly_cashflow", 0.0),
         "potential_monthly_cashflow": potential_monthly_cashflow,
+        "monthly_cashflow_with_capex": cf_data_capex.get("monthly_cashflow", cf_data.get("monthly_cashflow", 0.0)),
+        "monthly_rate_with_capex": cf_data_capex.get("monthly_rate", cf_data.get("monthly_rate", 0.0)),
+        "applied_interest_rate": cf_data.get("interest_rate", 3.93),
+        "applied_repayment_rate": cf_data.get("repayment_rate", 2.0),
+        "loan_amount": cf_data.get("loan_amount", 0.0),
+        "monthly_rate": cf_data.get("monthly_rate", 0.0),
+        "additional_costs": cf_data.get("additional_costs", non_rec_monthly),
         "annual_cashflow": cf_data.get("annual_cashflow", 0.0),
         "grunderwerbsteuer_rate": cf_data.get("transfer_tax_rate", 6.5),
         "is_profitable_at_mietspiegel": is_profitable_at_mietspiegel,

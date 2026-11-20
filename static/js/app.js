@@ -2,7 +2,15 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('immoApp', () => {
     const baseApp = {
       // Navigation tabs: 'feed', 'board', 'calculator', 'map', 'alerts', 'info'
-      activeTab: 'feed',
+      activeTab: (() => {
+        try {
+          const tab = new URLSearchParams(window.location.search).get('tab');
+          if (tab && ['feed', 'board', 'calculator', 'map', 'alerts', 'info'].includes(tab)) {
+            return tab;
+          }
+        } catch (e) {}
+        return 'feed';
+      })(),
     infoSubTab: 'guide', // 'guide' (Leitfaden/Handbuch) or 'mcp' (Model Context Protocol)
     viewMode: 'table', // 'table' or 'grid'
 
@@ -26,6 +34,7 @@ document.addEventListener('alpine:init', () => {
     isAnalyzingImages: false,
     showFullDesc: false,
     theme: localStorage.getItem('immo_theme') || 'system',
+    _isPopStateNavigation: false,
 
     // Kaufangebot / Letter of Intent (LOI) & Unterlagen-Anfrage State
 
@@ -104,6 +113,9 @@ document.addEventListener('alpine:init', () => {
         }
       });
 
+      // Initialize URL Routing & Deep Linking immediately before async data calls
+      this.initRouter();
+
       this.checkSavedApiKey();
       await this.fetchLiveMortgageRates();
       await this.fetchProperties();
@@ -146,12 +158,18 @@ document.addEventListener('alpine:init', () => {
         this.runCalculator();
       });
 
-      // Initialize URL Routing & Deep Linking
-      this.initRouter();
-
-      // Watch activeTab to sync URL parameter
-      this.$watch('activeTab', (val) => {
-        this.syncUrl(false);
+      // Watch activeTab to sync URL parameter and refresh views
+      this.$watch('activeTab', async (val) => {
+        if (!this._isPopStateNavigation) {
+          this.syncUrl(true);
+        }
+        if (val === 'alerts') {
+          if (typeof this.loadAlertsData === 'function') {
+            await this.loadAlertsData();
+          }
+        }
+        setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 50);
+        setTimeout(() => { if (window.lucide) window.lucide.createIcons(); }, 200);
         if (val === 'map' && this.mapInstance) {
           this.updateMapMarkers();
         }
@@ -492,7 +510,9 @@ document.addEventListener('alpine:init', () => {
       this.detailModalOpen = false;
       this.selectedProperty = null;
       this.isModalFullscreen = false;
-      this.syncUrl(false);
+      if (!this._isPopStateNavigation) {
+        this.syncUrl(true);
+      }
     },
 
     initRouter() {
@@ -568,39 +588,46 @@ document.addEventListener('alpine:init', () => {
     },
 
     handlePopState() {
-      const params = new URLSearchParams(window.location.search);
-      const pathParts = window.location.pathname.split('/').filter(Boolean);
-      let dealFromPath = null;
-      if (pathParts.length >= 2 && (pathParts[0] === 'deal' || pathParts[0] === 'property')) {
-        dealFromPath = pathParts[1];
-      }
-
-      const dealId = params.get('deal') || params.get('id') || dealFromPath;
-      const view = params.get('view') || 'audit';
-      const tab = params.get('tab');
-
-      if (tab && ['feed', 'board', 'calculator', 'map', 'alerts', 'info'].includes(tab)) {
-        this.activeTab = tab;
-      }
-
-      if (dealId) {
-        const numId = Number(dealId);
-        if (!this.selectedProperty || this.selectedProperty.id !== numId) {
-          this.openDealById(numId, view, false);
-        } else {
-          this.detailModalOpen = true;
-          this.modalActiveSection = view;
-          if (view === 'audit') {
-            this.scrollToSection('ki-audit-section', false);
-          } else if (view === 'gallery') {
-            this.scrollToSection('gallery-section', false);
-          }
+      this._isPopStateNavigation = true;
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const pathParts = window.location.pathname.split('/').filter(Boolean);
+        let dealFromPath = null;
+        if (pathParts.length >= 2 && (pathParts[0] === 'deal' || pathParts[0] === 'property')) {
+          dealFromPath = pathParts[1];
         }
-      } else if (this.detailModalOpen) {
-        this.detailModalOpen = false;
-        this.selectedProperty = null;
-        this.isModalFullscreen = false;
-        document.title = 'ImmoMetrica - Intelligente Immobilien-Analyse';
+
+        const dealId = params.get('deal') || params.get('id') || dealFromPath;
+        const view = params.get('view') || 'audit';
+        const tab = params.get('tab');
+
+        if (tab && ['feed', 'board', 'calculator', 'map', 'alerts', 'info'].includes(tab)) {
+          this.activeTab = tab;
+        }
+
+        if (dealId) {
+          const numId = Number(dealId);
+          if (!this.selectedProperty || this.selectedProperty.id !== numId) {
+            this.openDealById(numId, view, false);
+          } else {
+            this.detailModalOpen = true;
+            this.modalActiveSection = view;
+            if (view === 'audit') {
+              this.scrollToSection('ki-audit-section', false);
+            } else if (view === 'gallery') {
+              this.scrollToSection('gallery-section', false);
+            }
+          }
+        } else if (this.detailModalOpen) {
+          this.detailModalOpen = false;
+          this.selectedProperty = null;
+          this.isModalFullscreen = false;
+          document.title = 'ImmoMetrica - Intelligente Immobilien-Analyse';
+        }
+      } finally {
+        setTimeout(() => {
+          this._isPopStateNavigation = false;
+        }, 80);
       }
     },
 

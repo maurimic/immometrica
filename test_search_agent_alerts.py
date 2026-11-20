@@ -19,7 +19,7 @@ from app.search_agent import quick_ai_deal_precheck, execute_search_profile
 from app.main import app
 
 init_db()
-client = TestClient(app)
+client = TestClient(app, headers={"X-Test-Client": "immometrica-internal-test"})
 
 print("=== RUNNING SEARCH AGENT & DEAL ALERT TESTS ===")
 

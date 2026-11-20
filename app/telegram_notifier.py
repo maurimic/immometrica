@@ -9,8 +9,70 @@ import requests
 import html
 import logging
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 logger = logging.getLogger("immometrica.telegram")
+
+
+def get_base_url() -> str:
+    """
+    Ermittelt die öffentliche Basis-URL der ImmoMetrica-Instanz:
+    1. Umgebungsvariable APP_BASE_URL / BASE_URL / PUBLIC_URL (os.environ)
+    2. Datenbank-Einstellung 'app_base_url' (manuell im UI gepflegt)
+    3. Lokale .env Datei
+    4. Automatisch erfasste Domain ('last_server_base_url' oder 'last_local_base_url')
+    5. Fallback je nach Umgebung (Server / Docker vs. Lokal 127.0.0.1:8000)
+    """
+    # 1. Environment variables from runtime / container
+    for env_var in ["APP_BASE_URL", "BASE_URL", "PUBLIC_URL", "SERVER_URL"]:
+        val = os.getenv(env_var)
+        if val and val.strip():
+            return val.strip().rstrip("/")
+
+    # 2. Check database settings (manually saved in UI)
+    try:
+        from app.database import get_system_setting
+        db_val = get_system_setting("app_base_url")
+        if db_val and db_val.strip():
+            return db_val.strip().rstrip("/")
+    except Exception:
+        pass
+
+    # 3. Check local .env file
+    try:
+        from app.auth import _read_env_file, LOCAL_ENV_PATH
+        env_vars = _read_env_file(LOCAL_ENV_PATH)
+        for k in ["APP_BASE_URL", "BASE_URL", "PUBLIC_URL"]:
+            if env_vars.get(k):
+                return env_vars[k].strip().rstrip("/")
+    except Exception:
+        pass
+
+    # 4. Check auto-detected domains
+    try:
+        from app.database import get_system_setting
+        is_prod = (
+            os.getenv("ENV") == "production"
+            or os.path.exists("/data/immometrica.db")
+            or os.getenv("DOCKER_CONTAINER") == "1"
+        )
+        if is_prod:
+            server_url = get_system_setting("last_server_base_url")
+            if server_url and server_url.strip():
+                return server_url.strip().rstrip("/")
+        else:
+            local_url = get_system_setting("last_local_base_url")
+            if local_url and local_url.strip():
+                return local_url.strip().rstrip("/")
+    except Exception:
+        pass
+
+    # 5. Fallback based on port
+    port = os.getenv("PORT", "8000")
+    host = os.getenv("HOST", "127.0.0.1")
+    if host in ["0.0.0.0", ""]:
+        host = "127.0.0.1"
+    return f"http://{host}:{port}"
 
 def _fmt_currency(val: Any) -> str:
     try:
@@ -26,7 +88,7 @@ def _fmt_de(val: Any, decimals: int = 1) -> str:
     except Exception:
         return str(val)
 
-def test_telegram_connection(bot_token: str, chat_id: str) -> Dict[str, Any]:
+def test_telegram_connection(bot_token: str, chat_id: str, base_url: Optional[str] = None) -> Dict[str, Any]:
     """
     Verifies the Telegram Bot token via getMe and dispatches a test message to the specified chat_id.
     """
@@ -38,6 +100,10 @@ def test_telegram_connection(bot_token: str, chat_id: str) -> Dict[str, Any]:
             "success": False,
             "error": "Bot-Token und Chat-ID müssen angegeben werden."
         }
+
+    if not base_url:
+        base_url = get_base_url()
+    base_url = (base_url or "").rstrip("/")
 
     # 1. Verify Bot Token
     try:
@@ -52,10 +118,12 @@ def test_telegram_connection(bot_token: str, chat_id: str) -> Dict[str, Any]:
         return {"success": False, "error": f"Verbindungsfehler zu Telegram: {str(e)}"}
 
     # 2. Dispatch Test Message
+    url_hint = f"\n\n🔗 <b>Ziel-Adresse für KI-Audits:</b> <code>{base_url}</code>" if base_url else ""
     test_text = (
         "✅ <b>ImmoMetrica Deal-Alert System verbunden!</b>\n\n"
         f"Hallo! Dieser Chat ist nun mit deinem ImmoMetrica-Suchagenten verknüpft (Bot: @{bot_user}).\n"
-        "Ab sofort erhältst du hier blitzschnelle Push-Alerts bei neuen Untermarktwert-Angeboten und Rendite-Objekten inklusive KI-Vorabcheck."
+        "Ab sofort erhältst du hier blitzschnelle Push-Alerts bei neuen Untermarktwert-Angeboten und Rendite-Objekten inklusive direktem Link zum KI-Audit und zum Original-Exposé."
+        f"{url_hint}"
     )
 
     try:
@@ -90,16 +158,22 @@ def send_deal_telegram_alert(
     chat_id: str,
     deal: Dict[str, Any],
     ai_verdict: str,
-    profile_name: str = "Suchprofil"
+    profile_name: str = "Suchprofil",
+    base_url: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Sends a formatted real estate deal push alert to Telegram.
+    Includes direct link to the local or server ImmoMetrica AI Audit as well as the portal listing.
     """
     token = (bot_token or "").strip()
     cid = (chat_id or "").strip()
 
     if not token or not cid:
         return {"success": False, "error": "Keine Telegram-Zugangsdaten konfiguriert."}
+
+    if not base_url:
+        base_url = get_base_url()
+    base_url = (base_url or "").rstrip("/")
 
     # Block test deals or unit test runs from ever sending live notifications to Telegram
     portal_url_lower = (deal.get("portal_url") or "").lower()
@@ -125,6 +199,7 @@ def send_deal_telegram_alert(
     address = html.escape(deal.get("address", city))
     portal_url = deal.get("portal_url", "")
     safe_profile = html.escape(profile_name)
+    property_id = deal.get("property_id") or deal.get("id")
 
     price = float(deal.get("purchase_price") or deal.get("price") or 0.0)
     sqm = float(deal.get("living_space") or 0.0)
@@ -164,8 +239,17 @@ def send_deal_telegram_alert(
         f"<i>{clean_ai_verdict}</i>\n",
     ]
 
+    link_items = []
+    if property_id and base_url:
+        audit_url = f"{base_url}/deal/{property_id}?view=audit"
+        link_items.append(f"🔬 <a href=\"{audit_url}\"><b>Direkt zum KI-Audit in ImmoMetrica</b></a>")
+
     if portal_url:
-        lines.append(f"🔗 <a href=\"{portal_url}\">Zum Original-Exposé aufrufen</a>")
+        link_items.append(f"🌐 <a href=\"{portal_url}\">Zum Original-Exposé aufrufen</a>")
+
+    if link_items:
+        lines.append("──────────────────────")
+        lines.extend(link_items)
 
     message_text = "\n".join(lines)
 

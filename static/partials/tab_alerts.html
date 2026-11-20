@@ -1,7 +1,7 @@
     <!-- ========================================================================= -->
     <!-- TAB: SUCHAGENT & DEAL-ALERTS (TELEGRAM & HINTERGRUND-CRAWLER)             -->
     <!-- ========================================================================= -->
-    <div x-show="activeTab === 'alerts'" class="space-y-6" style="display: none;">
+    <div x-show="activeTab === 'alerts'" x-cloak class="space-y-6">
       
       <!-- Top Action Banner -->
       <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-800 relative overflow-hidden">
@@ -76,8 +76,8 @@
               
               <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
                 <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">Gezielte KI-Prüfung</div>
-                <div class="text-sm sm:text-base font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5">
-                  <span x-text="`${lastScanStats.text_ai_calls || 0} Text / ${lastScanStats.vision_ai_calls || 0} Bild`"></span>
+                <div class="text-sm sm:text-base font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5" :title="`${lastScanStats.text_ai_calls || 0} Exposé-Texte analysiert, ${lastScanStats.vision_ai_calls || 0} vollständige Bilderserien (Fotogalerien) geprüft`">
+                  <span x-text="`${lastScanStats.text_ai_calls || 0} Exposé / ${lastScanStats.vision_ai_calls || 0} Galerie`"></span>
                 </div>
               </div>
 
@@ -145,7 +145,7 @@
                 <!-- Filter Criteria Chips -->
                 <div class="flex flex-wrap gap-1.5 text-[11px]">
                   <template x-if="prof.min_yield > 0">
-                    <span class="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold" x-text="`Rendite: ≥ ${prof.min_yield}%`"></span>
+                    <span class="px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold" x-text="`Rendite: ≥ ${prof.min_yield}% ${prof.yield_basis === 'actual' ? '(Ist)' : (prof.yield_basis === 'potential' ? '(Mietspiegel)' : '')}`"></span>
                   </template>
                   <template x-if="prof.min_discount_pct > 0">
                     <span class="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-semibold" x-text="`Abschlag: ≥ ${prof.min_discount_pct}%`"></span>
@@ -172,15 +172,32 @@
                   <div class="text-[10px]" x-text="prof.last_run_at ? `Letzter Scan: ${formatScanTimestamp(prof.last_run_at)}` : 'Noch nicht gescannt'"></div>
                 </div>
 
-                <div class="flex items-center gap-1">
-                  <button @click="runSearchProfiles(prof.id)" :disabled="scanningProfiles && runningProfileId === prof.id" class="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-sky-600" title="Jetzt für dieses Profil scannen">
-                    <i data-lucide="play" class="w-4 h-4" :class="scanningProfiles && runningProfileId === prof.id ? 'animate-spin text-sky-600' : ''"></i>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <button @click="runSearchProfiles(prof.id)" :disabled="scanningProfiles && runningProfileId === prof.id"
+                          class="p-2 rounded-lg text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 border border-sky-200 dark:border-sky-800 transition-colors cursor-pointer shadow-2xs"
+                          title="Jetzt für dieses Profil scannen">
+                    <svg class="w-4 h-4" :class="scanningProfiles && runningProfileId === prof.id ? 'animate-spin text-sky-600' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <polygon points="6 3 20 12 6 21 6 3"/>
+                    </svg>
                   </button>
-                  <button @click="openEditProfileModal(prof)" class="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-sky-600" title="Profil bearbeiten">
-                    <i data-lucide="edit-2" class="w-4 h-4"></i>
+                  <button @click="openEditProfileModal(prof)"
+                          class="p-2 rounded-lg text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer shadow-2xs"
+                          title="Profil bearbeiten">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                      <path d="m15 5 4 4"/>
+                    </svg>
                   </button>
-                  <button @click="deleteProfile(prof)" class="p-1.5 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-600" title="Profil löschen">
-                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                  <button @click="deleteProfile(prof)"
+                          class="p-2 rounded-lg text-rose-500 hover:text-rose-600 bg-slate-50 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 transition-colors cursor-pointer shadow-2xs"
+                          title="Profil löschen">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 6h18"/>
+                      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/>
+                      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                      <line x1="10" x2="10" y1="11" x2="17"/>
+                      <line x1="14" x2="14" y1="11" x2="17"/>
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -224,7 +241,13 @@
                     <span class="text-emerald-600 dark:text-emerald-400 font-mono text-[11px] ml-2" x-text="`(${alertSettings.telegram_masked_token})`"></span>
                   </template>
                 </label>
-                <input type="password" x-model="telegramInputToken" placeholder="z. B. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 font-mono text-xs">
+                <input type="password" 
+                       x-model="telegramInputToken" 
+                       name="telegram_bot_token_field"
+                       autocomplete="new-password"
+                       data-lpignore="true"
+                       placeholder="z. B. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ" 
+                       class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 font-mono text-xs">
                 <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">Erstelle einen kostenlosen Bot bei <strong>@BotFather</strong> in Telegram und kopiere den Token hierhin.</p>
               </div>
 
@@ -331,7 +354,7 @@
             <p class="text-xs text-slate-500 dark:text-slate-400">Übersicht aller Deals, die deine Filterkriterien erfüllt haben, inklusive KI-Vorabcheck.</p>
           </div>
 
-          <!-- Profile Filter Selector -->
+          <!-- Profile Filter Selector & Clear Feed Button -->
           <div class="flex items-center gap-2">
             <span class="text-xs text-slate-500 dark:text-slate-400">Filter:</span>
             <select x-model="alertFilterProfileId" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-sky-500">
@@ -340,6 +363,14 @@
                 <option :value="p.id" x-text="p.name"></option>
               </template>
             </select>
+            <template x-if="alertFeed.length > 0">
+              <button @click="clearAllDealAlerts()"
+                      class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer"
+                      :title="alertFilterProfileId ? 'Alle Alerts für dieses Profil löschen' : 'Den gesamten Alert-Feed leeren'">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-500"></i>
+                <span x-text="alertFilterProfileId ? 'Profil-Alerts löschen' : 'Alle Alerts löschen'"></span>
+              </button>
+            </template>
           </div>
         </div>
 
@@ -434,6 +465,10 @@
                     <i data-lucide="external-link" class="w-3.5 h-3.5 text-slate-500"></i>
                     <span>Exposé</span>
                   </a>
+                  <button @click="deleteDealAlert(alt.id)" title="Diesen Alert-Eintrag löschen" class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 bg-slate-50 dark:bg-slate-800/80 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-300 dark:hover:border-rose-800 transition-colors cursor-pointer">
+                    <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-500"></i>
+                    <span class="hidden sm:inline">Löschen</span>
+                  </button>
                 </div>
               </div>
 
