@@ -360,7 +360,9 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
         resp = requests.get(clean_url, headers=BROWSER_HEADERS, timeout=10.0)
         if resp.status_code != 200:
             return {
-                "success": True,
+                "success": False,
+                "status_code": resp.status_code,
+                "error": f"Immowelt blockiert den Zugriff oder Inserat nicht erreichbar (HTTP {resp.status_code} Bot-Schutz).",
                 "title": f"Immowelt Exposé #{expose_id[:8]}",
                 "description": f"Exposé auf Immowelt: {clean_url}",
                 "portal": "Immowelt"
@@ -397,6 +399,7 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
         # If JSON was parsed successfully, extract structured metadata
         if classified:
             sections = classified.get("sections") or {}
+            raw_d = classified.get("rawData") or {}
 
             # A. Full Description (main description + areaDescription + extendedInfoDescription)
             desc_sec = sections.get("description") or {}
@@ -452,38 +455,91 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                         gallery_images.append(clean_u)
             main_image = gallery_images[0] if gallery_images else ""
 
-            # D. Hardfacts (Price, Sqm, Rooms)
-            hardfacts = sections.get("hardfacts") or {}
+            # D. Hardfacts (Price, Sqm, Rooms) - Supports both camelCase 'hardFacts' and lowercase 'hardfacts'
+            hardfacts = sections.get("hardFacts") or sections.get("hardfacts") or {}
             facts = hardfacts.get("facts") or []
             price_val = 0.0
             sqm_val = 0.0
-            rooms_val = 1.0
+            rooms_val = 0.0
             year_built_val = None
 
-            price_obj = hardfacts.get("price") or {}
-            if isinstance(price_obj, dict) and price_obj.get("value"):
+            # D1. Purchase Price from rawData, sections.price, or hardfacts
+            if raw_d.get("Preis"):
                 try:
-                    price_val = float(price_obj["value"])
+                    price_val = float(raw_d["Preis"])
                 except Exception:
                     pass
 
+            if price_val <= 0:
+                price_obj = sections.get("price") or hardfacts.get("price") or {}
+                if isinstance(price_obj, dict):
+                    if price_obj.get("value"):
+                        try:
+                            price_val = float(price_obj["value"])
+                        except Exception:
+                            pass
+                    if price_val <= 0:
+                        price_str = price_obj.get("base", {}).get("main", {}).get("value", {}).get("main", {}).get("value", "")
+                        m_pr = re.search(r'([\d\.]+)', price_str)
+                        if m_pr:
+                            try:
+                                price_val = float(m_pr.group(1).replace(".", ""))
+                            except Exception:
+                                pass
+
+            # D2. Living Space
             for f in facts:
                 f_type = str(f.get("type", "")).lower()
                 f_val = str(f.get("value", ""))
-                if "living" in f_type or "area" in f_type or "m²" in f_val:
-                    m_sqm = re.search(r'([\d,\.]+)', f_val)
+                f_split = str(f.get("splitValue", ""))
+                if "livingspace" in f_type or "living" in f_type or "area" in f_type or "m²" in f_val:
+                    cand_text = f_split if f_split else f_val
+                    m_sqm = re.search(r'([\d,\.]+)', cand_text)
                     if m_sqm:
-                        sqm_val = float(m_sqm.group(1).replace(".", "").replace(",", "."))
-                elif "room" in f_type or "zimmer" in str(f.get("label", "")).lower():
-                    m_r = re.search(r'([\d,\.]+)', f_val)
-                    if m_r:
-                        rooms_val = float(m_r.group(1).replace(",", "."))
+                        try:
+                            sqm_val = float(m_sqm.group(1).replace(".", "").replace(",", "."))
+                        except Exception:
+                            pass
+
+            if sqm_val <= 0:
+                sqm_range = raw_d.get("Wohnflaeche_Range", "")
+                if sqm_range:
+                    m_s = re.search(r'(\d+)', sqm_range)
+                    if m_s:
+                        try:
+                            sqm_val = float(m_s.group(1))
+                        except Exception:
+                            pass
+
+            # D3. Rooms
+            if raw_d.get("Raeume"):
+                try:
+                    rooms_val = float(raw_d["Raeume"])
+                except Exception:
+                    pass
+
+            if rooms_val <= 0:
+                for f in facts:
+                    f_type = str(f.get("type", "")).lower()
+                    f_val = str(f.get("value", ""))
+                    f_split = str(f.get("splitValue", ""))
+                    if "room" in f_type or "zimmer" in str(f.get("label", "")).lower():
+                        cand_r = f_split if f_split else f_val
+                        m_r = re.search(r'([\d,\.]+)', cand_r)
+                        if m_r:
+                            try:
+                                rooms_val = float(m_r.group(1).replace(",", "."))
+                            except Exception:
+                                pass
+
+            if rooms_val <= 0:
+                rooms_val = 1.0
 
             # E. Location
             loc_sec = sections.get("location") or {}
             addr_obj = loc_sec.get("address") or {}
-            city = addr_obj.get("city") or ""
-            plz = addr_obj.get("zipCode", "")
+            city = addr_obj.get("city") or raw_d.get("city") or ""
+            plz = addr_obj.get("zipCode") or raw_d.get("PLZ") or ""
             district = addr_obj.get("district", "")
 
             # F. Energy Certificate

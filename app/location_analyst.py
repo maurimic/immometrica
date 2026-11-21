@@ -343,7 +343,7 @@ def analyze_property_location_and_pois(
     ins = insights or {}
     portal_addr = (property_data.get("address") or "").strip()
     cand_addr = (ins.get("corrected_address") or "").strip()
-    city = (ins.get("corrected_city") or property_data.get("city") or "Dortmund").strip()
+    city = (ins.get("corrected_city") or property_data.get("city") or "").strip()
     district = (ins.get("district") or "").strip()
 
     portal_is_exact, portal_prec = check_address_is_exact(portal_addr, city=city)

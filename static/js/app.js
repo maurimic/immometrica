@@ -46,6 +46,11 @@ document.addEventListener('alpine:init', () => {
       timer: null
     },
 
+    // Portal Health & Canary Alert State
+    portalHealth: null,
+    portalAlert: null,
+    canaryChecking: false,
+
     // Filter state
     filters: {
       q: '',
@@ -124,6 +129,8 @@ document.addEventListener('alpine:init', () => {
       this.runCalculator();
       await this.loadAlertsData();
       await this.fetchMcpStatus();
+      await this.fetchPortalHealth();
+      setInterval(() => this.fetchPortalHealth(), 120000);
       
       // Watch filters
       this.$watch('filters', () => {
@@ -228,6 +235,67 @@ document.addEventListener('alpine:init', () => {
       this.$nextTick(() => {
         if (window.lucide) window.lucide.createIcons();
       });
+    },
+
+    async fetchPortalHealth() {
+      try {
+        const resp = await fetch('/api/portal-health');
+        if (resp.ok) {
+          const data = await resp.json();
+          this.portalHealth = data;
+          this.portalAlert = data.alert && data.alert.active ? data.alert : null;
+          this.$nextTick(() => {
+            if (window.lucide) window.lucide.createIcons();
+          });
+        }
+      } catch (e) {
+        console.error('Error fetching portal health:', e);
+      }
+    },
+
+    async runCanaryCheck(interactive = true) {
+      if (this.canaryChecking) return;
+      this.canaryChecking = true;
+      if (interactive) {
+        this.showToast('Canary-Prüfung aller Portale (Kleinanzeigen, ImmoScout24, Immowelt) läuft...', 'info');
+      }
+      try {
+        const resp = await fetch('/api/portal-health/check', { method: 'POST' });
+        if (resp.ok) {
+          const data = await resp.json();
+          this.portalHealth = data;
+          this.portalAlert = data.alert_active ? {
+            active: true,
+            title: data.overall === 'critical' ? '🚨 Kritischer Portal-Ausfall' : '⚠️ Portal-Warnung: Scraper eingeschränkt',
+            message: data.alert_message,
+            level: data.overall
+          } : null;
+          if (interactive) {
+            if (data.overall === 'healthy') {
+              this.showToast('Alle 3 Portale (Kleinanzeigen, ImmoScout24, Immowelt) sind voll erreichbar & auslesbar!', 'success');
+            } else {
+              this.showToast(`Portal-Einschränkung erkannt (${data.overall}): ${data.alert_message}`, 'warning');
+            }
+          }
+        } else {
+          if (interactive) this.showToast('Fehler bei der Portal-Health-Prüfung', 'error');
+        }
+      } catch (e) {
+        if (interactive) this.showToast('Verbindungsfehler bei der Portal-Prüfung', 'error');
+      } finally {
+        this.canaryChecking = false;
+      }
+    },
+
+    async dismissPortalAlert() {
+      if (this.portalAlert) {
+        this.portalAlert.active = false;
+      }
+      try {
+        await fetch('/api/portal-health/dismiss', { method: 'POST' });
+      } catch (e) {
+        console.error('Error dismissing portal alert:', e);
+      }
     },
 
     async triggerLiveScrape(targetCity = null) {

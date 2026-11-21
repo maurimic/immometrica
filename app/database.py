@@ -717,7 +717,7 @@ def save_search_profile(data: Dict[str, Any]) -> int:
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         str(data.get("name") or "Neues Suchprofil").strip(),
-        str(data.get("city") or "Dortmund").strip(),
+        str(data.get("city") or "").strip(),
         str(data.get("postal_code") or "").strip(),
         _safe_int(data.get("radius_km"), 25),
         _safe_float(data.get("max_price"), 0.0),

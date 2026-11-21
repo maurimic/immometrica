@@ -191,9 +191,9 @@ def scrape_kleinanzeigen_deals(
                         rooms = float(room_match.group(1).replace(",", "."))
                     except ValueError:
                         pass
-    
+
             if sqm <= 0:
-                sqm = max(30.0, round(price / 3000.0, 1))
+                continue
     
             # Extract image
             img_elem = art.find("img")

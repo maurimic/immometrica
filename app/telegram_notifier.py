@@ -10,6 +10,7 @@ import html
 import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
+from datetime import datetime
 
 logger = logging.getLogger("immometrica.telegram")
 
@@ -272,4 +273,77 @@ def send_deal_telegram_alert(
             return {"success": False, "error": err}
     except Exception as e:
         logger.error(f"Telegram exception: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def send_system_telegram_alert(
+    title: str,
+    message: str,
+    portal: Optional[str] = None,
+    error_details: Optional[str] = None,
+    level: str = "warning",
+    bot_token: Optional[str] = None,
+    chat_id: Optional[str] = None,
+    base_url: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Sends an automated system notification to Telegram when a scraper failure,
+    portal layout change, or bot protection restriction is detected.
+    """
+    if os.getenv("TESTING") == "1":
+        return {"success": True, "skipped_testing": True}
+
+    from app.database import get_system_setting
+
+    token = (bot_token or get_system_setting("telegram_bot_token") or os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
+    cid = (chat_id or get_system_setting("telegram_chat_id") or os.getenv("TELEGRAM_CHAT_ID") or "").strip()
+
+    if not token or not cid:
+        logger.info("Telegram alert skipped: bot_token or chat_id not configured.")
+        return {"success": False, "error": "Telegram Zugangsdaten nicht hinterlegt."}
+
+    if not base_url:
+        base_url = get_base_url()
+    base_url = (base_url or "").rstrip("/")
+
+    icon = "🚨" if level == "critical" else "⚠️"
+    now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+
+    lines = [
+        f"{icon} <b>System-Warnung: ImmoMetrica Scraper</b>",
+        f"<b>{html.escape(title)}</b>",
+        "",
+        f"<b>Meldung:</b> {html.escape(message)}"
+    ]
+    if portal:
+        lines.append(f"<b>Betroffenes Portal:</b> <code>{html.escape(portal)}</code>")
+    if error_details:
+        lines.append(f"<b>Fehler-Details:</b> <code>{html.escape(str(error_details)[:300])}</code>")
+    lines.append(f"<b>Zeitpunkt:</b> {now_str}")
+
+    if base_url:
+        lines.append("")
+        lines.append("──────────────────────")
+        lines.append(f"🔗 <a href=\"{base_url}\"><b>ImmoMetrica Dashboard öffnen</b></a>")
+
+    payload_text = "\n".join(lines)
+
+    try:
+        send_url = f"https://api.telegram.org/bot{token}/sendMessage"
+        resp = requests.post(send_url, json={
+            "chat_id": cid,
+            "text": payload_text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }, timeout=8.0)
+        res_data = resp.json()
+        if res_data.get("ok"):
+            logger.info(f"System alert successfully sent to Telegram chat {cid}: {title}")
+            return {"success": True}
+        else:
+            err = res_data.get("description", "Unknown Telegram API error")
+            logger.warning(f"Failed to send system alert to Telegram: {err}")
+            return {"success": False, "error": err}
+    except Exception as e:
+        logger.error(f"Error dispatching system Telegram alert: {e}")
         return {"success": False, "error": str(e)}

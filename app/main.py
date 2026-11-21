@@ -6,7 +6,7 @@ from typing import Optional
 import os
 
 from app.database import init_db, set_system_setting
-from app.routers import properties, pipeline, calculations, export, settings, alerts, auth
+from app.routers import properties, pipeline, calculations, export, settings, alerts, auth, portal_health
 from app.scheduler import start_background_scheduler, stop_background_scheduler
 from app import mcp_server
 from app.auth import get_current_user
@@ -76,6 +76,7 @@ app.include_router(calculations.router)
 app.include_router(export.router)
 app.include_router(settings.router)
 app.include_router(alerts.router)
+app.include_router(portal_health.router)
 app.include_router(mcp_server.router)
 
 @app.get("/api/health")

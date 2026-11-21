@@ -28,10 +28,24 @@ CITY_BENCHMARKS = {
 DEFAULT_BENCHMARK = {"avg_sqm_buy": 3100.0, "avg_sqm_rent": 10.50, "avg_yield": 4.06, "state": "Nordrhein-Westfalen"}
 
 def get_city_benchmark(city: str) -> Dict[str, Any]:
+    if not city:
+        return {**DEFAULT_BENCHMARK, "city": "Unbekannt", "state": "Deutschland"}
+
     for known_city, data in CITY_BENCHMARKS.items():
         if known_city.lower() in city.lower() or city.lower() in known_city.lower():
             return {**data, "city": known_city}
-    return {**DEFAULT_BENCHMARK, "city": city}
+
+    # Dynamically resolve state for any German city instead of hardcoding NRW
+    resolved_state = "Deutschland"
+    try:
+        from app.geo_resolver import resolve_location_and_tax
+        geo = resolve_location_and_tax(city=city)
+        if geo and geo.get("state"):
+            resolved_state = geo["state"]
+    except Exception:
+        pass
+
+    return {**DEFAULT_BENCHMARK, "city": city, "state": resolved_state}
 
 def get_mietspiegel_size_benchmark(
     city: str,

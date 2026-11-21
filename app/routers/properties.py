@@ -1417,7 +1417,9 @@ def trigger_live_scrape(payload: Dict[str, Any] = Body(...), request: Request = 
     """
     from app.scraper import scrape_multi_portal_deals, import_scraped_deals_returning_ids
 
-    city = payload.get("city", "Essen").strip()
+    city = (payload.get("city") or "").strip()
+    if not city:
+        raise HTTPException(status_code=400, detail="Bitte geben Sie eine Stadt für die Live-Suche an.")
     query = payload.get("query", "").strip()
     limit = int(payload.get("limit", 30))
     analyze_ai = bool(payload.get("analyze_with_ai", True))
@@ -1546,57 +1548,63 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     lat = None
     lng = None
     gallery_images = []
+    details: Dict[str, Any] = {}
 
     if "immobilienscout24.de" in url_lower:
         source_portal = "ImmoScout24"
         scout_res = fetch_immoscout_expose(raw_url)
-        if scout_res.get("success"):
-            title = scout_res.get("title") or title
-            description = scout_res.get("description") or ""
-            addr_str = scout_res.get("address") or ""
-            address = addr_str
-            lat = scout_res.get("lat")
-            lng = scout_res.get("lng")
-            if scout_res.get("price", 0) > 0:
-                price = scout_res["price"]
-            if scout_res.get("living_space", 0) > 0:
-                sqm = scout_res["living_space"]
-            if scout_res.get("rooms", 0) > 0:
-                rooms = scout_res["rooms"]
-            if scout_res.get("pictures"):
-                gallery_images = scout_res["pictures"]
-                img_url = gallery_images[0]
-            details = scout_res.get("details") or {}
-            for k, v in details.items():
-                if price <= 0 and any(x in k.lower() for x in ["kaufpreis", "preis"]):
-                    m = re.search(r"([\d\.]+)", str(v))
-                    if m:
-                        try:
-                            price = float(m.group(1).replace(".", ""))
-                        except ValueError:
-                            pass
-                elif sqm <= 0 and any(x in k.lower() for x in ["wohnfläche", "fläche"]):
-                    m = re.search(r"([\d,\.]+)", str(v))
-                    if m:
-                        try:
-                            sqm = float(m.group(1).replace(".", "").replace(",", "."))
-                        except ValueError:
-                            pass
-                elif rooms <= 0 and "zimmer" in k.lower():
-                    m = re.search(r"([\d,\.]+)", str(v))
-                    if m:
-                        try:
-                            rooms = float(m.group(1).replace(",", "."))
-                        except ValueError:
-                            pass
-            plz_m = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", addr_str)
-            if plz_m:
-                postal_code = plz_m.group(1)
-                city = plz_m.group(2)
+        if not scout_res.get("success"):
+            err_msg = scout_res.get("error") or "ImmoScout24 Inserat konnte nicht ausgelesen werden (möglicherweise offline oder ungültige Scout-ID)."
+            raise HTTPException(status_code=422, detail=f"Import fehlgeschlagen: {err_msg}")
+        title = scout_res.get("title") or title
+        description = scout_res.get("description") or ""
+        addr_str = scout_res.get("address") or ""
+        address = addr_str
+        lat = scout_res.get("lat")
+        lng = scout_res.get("lng")
+        if scout_res.get("price", 0) > 0:
+            price = scout_res["price"]
+        if scout_res.get("living_space", 0) > 0:
+            sqm = scout_res["living_space"]
+        if scout_res.get("rooms", 0) > 0:
+            rooms = scout_res["rooms"]
+        if scout_res.get("pictures"):
+            gallery_images = scout_res["pictures"]
+            img_url = gallery_images[0]
+        details = scout_res.get("details") or {}
+        for k, v in details.items():
+            if price <= 0 and any(x in k.lower() for x in ["kaufpreis", "preis"]):
+                m = re.search(r"([\d\.]+)", str(v))
+                if m:
+                    try:
+                        price = float(m.group(1).replace(".", ""))
+                    except ValueError:
+                        pass
+            elif sqm <= 0 and any(x in k.lower() for x in ["wohnfläche", "fläche"]):
+                m = re.search(r"([\d,\.]+)", str(v))
+                if m:
+                    try:
+                        sqm = float(m.group(1).replace(".", "").replace(",", "."))
+                    except ValueError:
+                        pass
+            elif rooms <= 0 and "zimmer" in k.lower():
+                m = re.search(r"([\d,\.]+)", str(v))
+                if m:
+                    try:
+                        rooms = float(m.group(1).replace(",", "."))
+                    except ValueError:
+                        pass
+        plz_m = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", addr_str)
+        if plz_m:
+            postal_code = plz_m.group(1)
+            city = plz_m.group(2)
 
     elif "immowelt.de" in url_lower:
         source_portal = "Immowelt"
         iw_res = fetch_immowelt_expose(raw_url)
+        if not iw_res.get("success"):
+            err_msg = iw_res.get("error") or "Immowelt Inserat konnte nicht ausgelesen werden (möglicherweise offline oder Zugriff blockiert)."
+            raise HTTPException(status_code=422, detail=f"Import fehlgeschlagen: {err_msg}")
         title = iw_res.get("title") or "Immowelt Angebot"
         description = iw_res.get("description") or ""
         if iw_res.get("price", 0) > 0:
@@ -1626,10 +1634,13 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
         if "kleinanzeigen" in url_lower:
             source_portal = "Kleinanzeigen"
         live_check = check_portal_url_live(raw_url, source_portal)
+        if not live_check.get("is_online"):
+            status_msg = live_check.get("status_message") or "Inserat ist offline oder nicht erreichbar."
+            raise HTTPException(status_code=422, detail=f"Import fehlgeschlagen: {status_msg}")
         if live_check.get("title"):
             title = live_check["title"]
         if live_check.get("price", 0) > 0:
-            price = live_check["price"]
+            price = float(live_check["price"])
         description = live_check.get("description") or ""
         lat = live_check.get("lat")
         lng = live_check.get("lng")
@@ -1639,6 +1650,12 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
             city = live_check["locality"]
         if live_check.get("street_address"):
             address = live_check["street_address"]
+        if live_check.get("gallery_images"):
+            gallery_images = live_check["gallery_images"]
+            if live_check.get("image_url"):
+                img_url = live_check["image_url"]
+            elif gallery_images:
+                img_url = gallery_images[0]
         details = live_check.get("details") or {}
         for k, v in details.items():
             if "preis" in k.lower():
@@ -1672,8 +1689,6 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
                 price = float(p_match.group(1).replace(".", ""))
             except ValueError:
                 pass
-    if price <= 0:
-        price = 150000.0
 
     if sqm <= 0:
         sq_match = re.search(r"(\d+(?:[\.,]\d+)?)\s*m²", combined_all, re.IGNORECASE)
@@ -1682,16 +1697,33 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
                 sqm = float(sq_match.group(1).replace(".", "").replace(",", "."))
             except ValueError:
                 pass
-    if sqm <= 0:
-        sqm = max(30.0, round(price / 2500.0, 1))
 
     if not city:
         plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]{2,30})", combined_all)
         if plz_match:
             postal_code = plz_match.group(1)
             city = plz_match.group(2)
-        else:
-            city = "Dortmund"
+
+    # 4. Strict Validation: Fail fast with clear error message instead of dummy fallbacks
+    missing_fields = []
+    if price <= 0:
+        missing_fields.append("Kaufpreis")
+    if sqm <= 0:
+        missing_fields.append("Wohnfläche")
+    if not city:
+        missing_fields.append("Stadt/Ort")
+
+    if missing_fields:
+        err_detail = f"Die folgenden Pflichtangaben konnten aus dem Inserat nicht ausgelesen werden: {', '.join(missing_fields)}."
+        try:
+            from app.portal_health import record_portal_incident
+            record_portal_incident(source_portal, "Schema-/Parsing-Abweichung", err_detail)
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=422,
+            detail=f"Import fehlgeschlagen: {err_detail} Bitte prüfen Sie das Inserat auf dem Portal."
+        )
 
     geo_info = resolve_location_and_tax(postal_code=postal_code, city=city)
     state = geo_info["state"]

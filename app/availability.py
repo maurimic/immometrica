@@ -160,7 +160,9 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                     "details": scout_res.get("details", {}),
                     "lat": scout_res.get("lat"),
                     "lng": scout_res.get("lng"),
-                    "street_address": scout_res.get("address")
+                    "street_address": scout_res.get("address"),
+                    "image_url": scout_res["pictures"][0] if scout_res.get("pictures") else "",
+                    "gallery_images": scout_res.get("pictures", [])
                 }
             else:
                 return {
@@ -195,7 +197,23 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                     "details": iw_res.get("details", {}),
                     "lat": iw_res.get("lat"),
                     "lng": iw_res.get("lng"),
-                    "street_address": iw_res.get("address")
+                    "street_address": iw_res.get("address"),
+                    "postal_code": iw_res.get("postal_code", ""),
+                    "locality": iw_res.get("city", ""),
+                    "image_url": iw_res.get("image_url") or (iw_res["images"][0] if iw_res.get("images") else ""),
+                    "gallery_images": iw_res.get("images", [])
+                }
+            else:
+                st = iw_res.get("status_code", 404)
+                return {
+                    "is_online": False,
+                    "availability_status": "offline" if st in [404, 410] else "unverified_bot_restricted",
+                    "status_code": st,
+                    "status_message": iw_res.get("error", "Immowelt Inserat offline oder nicht erreichbar"),
+                    "last_checked_at": now_iso,
+                    "live_search_url": live_fallback,
+                    "description": "",
+                    "details": {}
                 }
 
     try:
@@ -370,6 +388,21 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                         if len(parts) == 2:
                             extracted_details[parts[0]] = parts[1]
 
+                # Extract images (og:image and gallery)
+                ad_images = []
+                og_img = soup.find("meta", property="og:image")
+                if og_img and og_img.get("content"):
+                    c_url = og_img["content"].strip()
+                    if c_url and c_url.startswith("http") and "placeholder" not in c_url:
+                        ad_images.append(c_url)
+
+                gallery_box = soup.find(id="viewad-gallery") or soup.find(id="viewad-image") or soup.find(class_=re.compile(r"galleryimage|viewad-gallery"))
+                if gallery_box:
+                    for img in gallery_box.find_all("img"):
+                        src = img.get("src") or img.get("data-imgsrc") or img.get("data-src")
+                        if src and src.startswith("http") and "placeholder" not in src and src not in ad_images:
+                            ad_images.append(src)
+
                 return {
                     "is_online": True,
                     "availability_status": "online",
@@ -386,6 +419,8 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                     "street_address": geo_meta.get("street_address"),
                     "postal_code": geo_meta.get("postal_code"),
                     "locality": geo_meta.get("locality"),
+                    "image_url": ad_images[0] if ad_images else "",
+                    "gallery_images": ad_images
                 }
 
         # 2. Immowelt & ImmoScout DOM check

@@ -63,6 +63,26 @@ async def _crawler_loop():
                     finally:
                         _is_running_scan = False
 
+            # Periodic Portal Health / Canary Check (every 6 hours or upon initial start)
+            last_canary_str = get_system_setting("portal_health_last_check")
+            should_run_canary = False
+            if not last_canary_str:
+                should_run_canary = True
+            else:
+                try:
+                    last_canary_dt = datetime.strptime(last_canary_str, "%Y-%m-%d %H:%M:%S")
+                    if (datetime.now() - last_canary_dt).total_seconds() >= (6 * 3600):
+                        should_run_canary = True
+                except Exception:
+                    should_run_canary = True
+
+            if should_run_canary:
+                try:
+                    from app.portal_health import run_canary_checks
+                    await asyncio.to_thread(run_canary_checks)
+                except Exception as e:
+                    logger.error(f"Error during background portal canary check: {e}")
+
         except asyncio.CancelledError:
             logger.info("Crawler scheduler loop cancelled.")
             break

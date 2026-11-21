@@ -85,6 +85,27 @@
           <span x-text="checkingAll ? 'Prüfe Portale...' : 'Live-Status prüfen'"></span>
         </button>
 
+        <!-- Portal Health & Scraper Canary Status Badge -->
+        <button @click="runCanaryCheck(true)" :disabled="canaryChecking" 
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shadow-2xs cursor-pointer"
+                :class="(!portalHealth || portalHealth.overall === 'healthy') 
+                  ? 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700' 
+                  : (portalHealth.overall === 'critical' 
+                    ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800 hover:bg-rose-100' 
+                    : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border-amber-300 dark:border-amber-800 hover:bg-amber-100')"
+                :title="canaryChecking ? 'Canary-Check läuft...' : 'Portal-Health-Status: Kleinanzeigen, ImmoScout24 & Immowelt. Klicken für Live-Prüfung'">
+          <span class="w-2 h-2 rounded-full shrink-0" 
+                :class="(!portalHealth || portalHealth.overall === 'healthy') ? 'bg-emerald-500' : (portalHealth.overall === 'critical' ? 'bg-rose-500 animate-ping' : 'bg-amber-500')"></span>
+          <svg x-show="canaryChecking" class="w-3.5 h-3.5 animate-spin text-sky-600 dark:text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <span x-show="!canaryChecking" class="inline-flex items-center">
+            <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+          </span>
+          <span x-text="canaryChecking ? 'Prüfe...' : ((!portalHealth || portalHealth.overall === 'healthy') ? 'Portale: OK' : (portalHealth.overall === 'critical' ? 'Portal gestört!' : 'Portal Warnung'))"></span>
+        </button>
+
         <!-- Bulk Delete Deactivated Deals Button (User requested) -->
         <button @click="deleteOfflineProperties()" title="Löscht alle offline / deaktivierten Deals auf einmal aus der Datenbank" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 border border-rose-300 dark:border-rose-800 rounded-lg shadow-2xs transition-colors whitespace-nowrap">
           <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-600 dark:text-rose-400"></i>
@@ -182,6 +203,54 @@
 
   <!-- MAIN BODY CONTAINER -->
   <main class="flex-1 w-full max-w-[1920px] mx-auto p-4 sm:p-6 lg:p-8 xl:px-10">
+
+    <!-- PORTAL HEALTH & SCRAPER CANARY ALERT BANNER (Global Startpage Notification) -->
+    <template x-if="portalAlert && portalAlert.active">
+      <div class="mb-5 p-4 rounded-xl border shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 transition-all"
+           :class="portalAlert.level === 'critical'
+             ? 'bg-rose-50 dark:bg-rose-950/70 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-100'
+             : 'bg-amber-50 dark:bg-amber-950/70 border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100'">
+        <div class="flex items-start gap-3">
+          <div class="p-2 rounded-lg shrink-0 mt-0.5"
+               :class="portalAlert.level === 'critical' ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300' : 'bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300'">
+            <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h4 class="text-sm font-bold tracking-tight" x-text="portalAlert.title || '⚠️ Portal-Warnung: Scraper eingeschränkt'"></h4>
+              <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded tracking-wider"
+                    :class="portalAlert.level === 'critical' ? 'bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200' : 'bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200'"
+                    x-text="portalAlert.level === 'critical' ? 'Ausfall' : 'Warnung'"></span>
+            </div>
+            <p class="text-xs mt-1 text-slate-700 dark:text-slate-300 font-medium leading-relaxed" x-text="portalAlert.message"></p>
+            <div class="mt-1 flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+              <span class="flex items-center gap-1">
+                <i data-lucide="bell" class="w-3 h-3 text-sky-600"></i>
+                <span>Push-Benachrichtigung an Telegram gesendet</span>
+              </span>
+              <template x-if="portalHealth && portalHealth.last_checked_at">
+                <span>Geprüft: <span x-text="portalHealth.last_checked_at"></span></span>
+              </template>
+            </div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 self-end sm:self-center shrink-0">
+          <button @click="runCanaryCheck(true)" :disabled="canaryChecking" class="px-3 py-1.5 text-xs font-bold rounded-lg border bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors shadow-2xs flex items-center gap-1.5 cursor-pointer">
+            <svg x-show="canaryChecking" class="w-3.5 h-3.5 animate-spin text-sky-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span x-show="!canaryChecking" class="inline-flex items-center">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            </span>
+            <span x-text="canaryChecking ? 'Prüfe Portale...' : 'Jetzt neu prüfen'"></span>
+          </button>
+          <button @click="dismissPortalAlert()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer" title="Benachrichtigung schließen">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </template>
 
         <!-- TAB 1: DEALFEED & SEARCH -->
     <div x-show="activeTab === 'feed'" class="space-y-6">

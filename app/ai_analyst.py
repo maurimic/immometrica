@@ -1670,7 +1670,7 @@ def detect_hidden_problems_and_risks(insights: Dict[str, Any], property_data: Di
     Berücksichtigt explizit Paket-Risiken (z. B. Hausgeld > Kaltmiete), GEG, WEG & Provisionsfreiheit.
     """
     risks = []
-    price = float(property_data.get("purchase_price", 100000.0) or 100000.0)
+    price = float(property_data.get("purchase_price") or 0.0)
     year_built = int(insights.get("year_built_extracted") or property_data.get("year_built") or 1975)
 
     # 0. Kritisches Paket-/Cashflow-Risiko: Hausgeld > Ist-Kaltmiete!
@@ -1850,10 +1850,20 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     Berechnet alle Investoren-Kennzahlen auf Basis der verifizierten Exposé-Daten
     (inkl. Paket-Summierung und strikter Trennung von IST vs. SOLL-Benchmark).
     """
-    price = float(property_data.get("purchase_price", 100000.0) or 100000.0)
-    sqm = float(property_data.get("living_space", 65.0) or 65.0)
-    city = insights.get("corrected_city") or property_data.get("city", "Essen")
-    state = property_data.get("state", "Nordrhein-Westfalen")
+    price = float(property_data.get("purchase_price") or 0.0)
+    sqm = float(property_data.get("living_space") or 0.0)
+    city = str(insights.get("corrected_city") or property_data.get("city") or "").strip()
+    state = str(property_data.get("state") or "").strip()
+    if not state and city:
+        try:
+            from app.geo_resolver import resolve_location_and_tax
+            geo = resolve_location_and_tax(city=city)
+            if geo and geo.get("state"):
+                state = geo["state"]
+        except Exception:
+            pass
+    if not state:
+        state = "Deutschland"
     year_built = int(insights.get("year_built_extracted") or property_data.get("year_built") or 1980)
 
     benchmark = evaluate_property_valuation(city, sqm, price, year_built=year_built)
