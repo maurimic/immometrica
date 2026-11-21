@@ -54,12 +54,13 @@ def fetch_immowelt_html(url: str, timeout: float = 12.0) -> requests.Response:
         gateway_timeout = max(timeout, 35.0)
 
         if service == "zenrows":
-            gateway_url = f"https://api.zenrows.com/v1/?apikey={scraper_key}&url={encoded_url}&js_render=true&premium_proxy=true&proxy_country=de"
+            gateway_url = f"https://api.zenrows.com/v1/?apikey={scraper_key}&url={encoded_url}&premium_proxy=true&proxy_country=de"
         elif service == "scrapingbee":
-            gateway_url = f"https://app.scrapingbee.com/api/v1/?api_key={scraper_key}&url={encoded_url}&render_js=true&country_code=de"
+            gateway_url = f"https://app.scrapingbee.com/api/v1/?api_key={scraper_key}&url={encoded_url}&country_code=de"
         else:
-            # Default: ScraperAPI (supports country_code=de & render=true for DataDome JS resolution)
-            gateway_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de&render=true"
+            # Default: ScraperAPI (supports country_code=de & premium=true for residential DE IP without slow JS rendering overhead)
+            render_param = "&render=true" if os.getenv("SCRAPER_RENDER", "").lower() == "true" else ""
+            gateway_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de&premium=true{render_param}"
 
         logger.info(f"Routing Immowelt request through {service} gateway...")
         return requests.get(gateway_url, timeout=gateway_timeout)
@@ -678,17 +679,93 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                 "portal": "Immowelt"
             }
 
-        # Fallback to HTML BeautifulSoup
+        # Fallback to HTML BeautifulSoup & Regex extraction if JSON state was not present (e.g. hydrated client DOM)
         soup = BeautifulSoup(html, "html.parser")
         h1 = soup.find("h1")
-        title = h1.text.strip() if h1 else f"Immowelt Exposé #{expose_id[:8]}"
+        title_tag = soup.find("title")
+        raw_title_text = title_tag.text.strip() if title_tag else (h1.text.strip() if h1 else f"Immowelt Exposé #{expose_id[:8]}")
         desc_elem = soup.find(class_=re.compile(r"description|section-content|text-content"))
-        desc = desc_elem.get_text("\n", strip=True) if desc_elem else title
+        desc = desc_elem.get_text("\n", strip=True) if desc_elem else raw_title_text
+
+        # Extract Price from Title, Meta tags, and Text
+        fb_price = 0.0
+        meta_desc = soup.find("meta", attrs={"name": "description"})
+        meta_desc_str = meta_desc["content"] if (meta_desc and "content" in meta_desc.attrs) else ""
+        text_corpus = f"{raw_title_text} {meta_desc_str} {soup.get_text(' ', strip=True)[:5000]}"
+
+        m_pr = re.search(r'(?:kaufpreis|preis|kauf)?[:\s]*([\d\.]+)\s*€', text_corpus, re.IGNORECASE)
+        if m_pr:
+            try:
+                p_cand = float(m_pr.group(1).replace(".", ""))
+                if p_cand > 10000:
+                    fb_price = p_cand
+            except Exception:
+                pass
+        
+        if fb_price <= 0:
+            m_pr2 = re.search(r'(\d{4,9})\s*€', raw_title_text)
+            if m_pr2:
+                try:
+                    fb_price = float(m_pr2.group(1))
+                except Exception:
+                    pass
+
+        # Extract Living Space
+        fb_sqm = 0.0
+        m_sq = re.search(r'([\d,\.]+)\s*m²', text_corpus, re.IGNORECASE)
+        if m_sq:
+            try:
+                s_cand = float(m_sq.group(1).replace(".", "").replace(",", "."))
+                if 10 <= s_cand <= 2000:
+                    fb_sqm = s_cand
+            except Exception:
+                pass
+
+        # Extract Rooms
+        fb_rooms = 1.0
+        m_rm = re.search(r'([\d,\.]+)\s*(?:zimmer|zi\b)', text_corpus, re.IGNORECASE)
+        if m_rm:
+            try:
+                r_cand = float(m_rm.group(1).replace(",", "."))
+                if 1 <= r_cand <= 20:
+                    fb_rooms = r_cand
+            except Exception:
+                pass
+
+        # Extract Location
+        fb_city = ""
+        fb_plz = ""
+        fb_district = ""
+        m_loc = re.search(r'(?:in|ort|stadt)?\s*([A-Za-zäöüÄÖÜß\- ]+)\s*\((\d{5})\)', raw_title_text)
+        if m_loc:
+            fb_city = m_loc.group(1).strip()
+            fb_plz = m_loc.group(2).strip()
+        else:
+            m_plz = re.search(r'\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)', text_corpus)
+            if m_plz:
+                fb_plz = m_plz.group(1)
+                fb_city = m_plz.group(2)
+
+        # Extract Images
+        fb_images = []
+        found_imgs = re.findall(r'https://mms\.immowelt\.de/[a-zA-Z0-9/\-_]+\.jpg', html)
+        for img_url in found_imgs:
+            if img_url not in fb_images:
+                fb_images.append(img_url)
 
         return {
             "success": True,
-            "title": title,
+            "expose_id": expose_id,
+            "title": raw_title_text,
             "description": desc,
+            "price": fb_price,
+            "living_space": fb_sqm,
+            "rooms": fb_rooms,
+            "city": fb_city,
+            "postal_code": fb_plz,
+            "district": fb_district,
+            "images": fb_images,
+            "image_url": fb_images[0] if fb_images else "",
             "portal": "Immowelt"
         }
     except Exception as e:
