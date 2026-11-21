@@ -5,7 +5,9 @@ extracting real offer links, prices, living space, rooms, high-resolution photos
 """
 
 import re
+import os
 import json
+import urllib.parse
 import requests
 import logging
 from bs4 import BeautifulSoup
@@ -15,11 +17,55 @@ from datetime import datetime
 logger = logging.getLogger("immometrica.scraper.immowelt")
 
 BROWSER_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
     "Cache-Control": "no-cache"
 }
+
+
+def fetch_immowelt_html(url: str, timeout: float = 12.0) -> requests.Response:
+    """
+    Fetches an Immowelt URL either directly or via a configured Scraping Gateway
+    (e.g. ScraperAPI, ZenRows, ScrapingBee, or a residential proxy) to bypass
+    DataDome HTTP 403 blocks on datacenter/cloud IPs.
+    """
+    scraper_key = os.getenv("SCRAPER_API_KEY", "").strip()
+    service = os.getenv("SCRAPING_SERVICE", "scraperapi").strip().lower()
+    proxy_url = os.getenv("SCRAPER_PROXY_URL", "").strip()
+
+    # 1. Custom HTTP/HTTPS Proxy (e.g. Bright Data, Smartproxy, Webshare)
+    if proxy_url:
+        proxies = {"http": proxy_url, "https": proxy_url}
+        return requests.get(url, headers=BROWSER_HEADERS, proxies=proxies, timeout=timeout)
+
+    # 2. Managed Scraping Gateway API (ScraperAPI / ZenRows / ScrapingBee)
+    if scraper_key:
+        encoded_url = urllib.parse.quote(url, safe="")
+        gateway_timeout = max(timeout, 35.0)
+
+        if service == "zenrows":
+            gateway_url = f"https://api.zenrows.com/v1/?apikey={scraper_key}&url={encoded_url}&js_render=true&premium_proxy=true&proxy_country=de"
+        elif service == "scrapingbee":
+            gateway_url = f"https://app.scrapingbee.com/api/v1/?api_key={scraper_key}&url={encoded_url}&render_js=true&country_code=de"
+        else:
+            # Default: ScraperAPI (supports country_code=de & render=true for DataDome JS resolution)
+            gateway_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de&render=true"
+
+        logger.info(f"Routing Immowelt request through {service} gateway...")
+        return requests.get(gateway_url, timeout=gateway_timeout)
+
+    # 3. Direct request with modern Chrome browser headers
+    return requests.get(url, headers=BROWSER_HEADERS, timeout=timeout)
 
 
 def clean_city_slug(city: str) -> str:
@@ -83,7 +129,7 @@ def search_immowelt_deals(
         url = f"https://www.immowelt.de/suche/{city_slug}/wohnungen/kaufen?sp={page}&sort=createdate_desc"
 
         try:
-            resp = requests.get(url, headers=BROWSER_HEADERS, timeout=8.0)
+            resp = fetch_immowelt_html(url, timeout=10.0)
             if resp.status_code != 200:
                 logger.warning(f"Immowelt search returned HTTP {resp.status_code} (page {page})")
                 break
@@ -357,7 +403,7 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
     expose_id = clean_url.split("/")[-1]
 
     try:
-        resp = requests.get(clean_url, headers=BROWSER_HEADERS, timeout=10.0)
+        resp = fetch_immowelt_html(clean_url, timeout=12.0)
         if resp.status_code != 200:
             return {
                 "success": False,

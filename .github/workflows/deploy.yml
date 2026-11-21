@@ -26,10 +26,7 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
           
-          echo "Building updated Docker container..."
-          docker compose build
-          
-          echo "Starting containers..."
-          docker compose up -d --remove-orphans
+          echo "Building updated Docker container and starting services..."
+          docker compose up -d --build --remove-orphans
           
           echo "ImmoMetrica deployment completed successfully!"
