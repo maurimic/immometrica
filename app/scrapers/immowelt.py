@@ -39,7 +39,7 @@ def fetch_immowelt_html(url: str, timeout: float = 12.0) -> requests.Response:
     (e.g. ScraperAPI, ZenRows, ScrapingBee, or a residential proxy) to bypass
     DataDome HTTP 403 blocks on datacenter/cloud IPs.
     """
-    scraper_key = os.getenv("SCRAPER_API_KEY", "").strip()
+    scraper_key = (os.getenv("SCRAPER_API_KEY") or os.getenv("SCRAPING_API_KEY") or "").strip()
     service = os.getenv("SCRAPING_SERVICE", "scraperapi").strip().lower()
     proxy_url = os.getenv("SCRAPER_PROXY_URL", "").strip()
 

@@ -51,6 +51,12 @@ document.addEventListener('alpine:init', () => {
     portalAlert: null,
     canaryChecking: false,
 
+    // URL Import Modal State
+    urlImportModalOpen: false,
+    importUrlInput: '',
+    isImportingUrl: false,
+    importError: '',
+
     // Filter state
     filters: {
       q: '',
@@ -298,12 +304,63 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    openUrlImportModal() {
+      this.urlImportModalOpen = true;
+      this.importUrlInput = '';
+      this.importError = '';
+      this.$nextTick(() => {
+        if (window.lucide) window.lucide.createIcons();
+      });
+    },
+
+    async submitUrlImport() {
+      const url = (this.importUrlInput || '').trim();
+      if (!url) return;
+      this.isImportingUrl = true;
+      this.importError = '';
+      try {
+        const resp = await fetch('/api/properties/import-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+          this.urlImportModalOpen = false;
+          this.importUrlInput = '';
+          this.showToast(data.message || 'Inserat erfolgreich importiert!', 'success');
+          await this.fetchProperties();
+          if (data.property_id) {
+            const importedDeal = this.properties.find(p => p.id === data.property_id);
+            if (importedDeal) {
+              this.openDetailModal(importedDeal, 'audit');
+            }
+          }
+        } else {
+          this.importError = data.detail || 'Fehler beim Importieren des Inserats.';
+          this.showToast(this.importError, 'error');
+        }
+      } catch (err) {
+        this.importError = 'Netzwerkfehler: ' + err.message;
+        this.showToast(this.importError, 'error');
+      } finally {
+        this.isImportingUrl = false;
+      }
+    },
+
     async triggerLiveScrape(targetCity = null) {
       const cityToScrape = (targetCity || this.scrapeCity || this.filters.q || 'Dortmund').trim();
       if (!cityToScrape) {
         this.showToast('Bitte gib eine Stadt ein (z. B. Dortmund, Saarlouis, Nürnberg oder Bochum).', 'warning');
         return;
       }
+
+      // Smart detection: If user entered an exposé link instead of a city, route to URL import
+      if (cityToScrape.startsWith('http://') || cityToScrape.startsWith('https://')) {
+        this.importUrlInput = cityToScrape;
+        return this.submitUrlImport();
+      }
+
       this.isScraping = true;
       this.scrapeCity = cityToScrape;
       
