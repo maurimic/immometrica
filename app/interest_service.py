@@ -10,6 +10,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 import requests
 from bs4 import BeautifulSoup
 
@@ -244,6 +245,8 @@ def generate_drklein_calculator_url(
 
     if loan_amount is not None and loan_amount > 0:
         loan_target = int(round(loan_amount))
+    elif buy_costs_from_equity:
+        loan_target = max(5000, int(round((p - eq_eur) + capex)))
     else:
         loan_target = max(5000, total_financing_need - eq_eur)
 
@@ -448,17 +451,48 @@ def get_property_mortgage_interest_quote(
 
     nebenkosten_pct = tax_rate + 2.0 + commission
     nebenkosten_eur = round(p * (nebenkosten_pct / 100.0), 2)
-    total_financing_need = round(p + nebenkosten_eur + capex, 2)
-    loan = max(5000.0, round(total_financing_need - eq, 2))
+    
+    if buy_costs_from_equity:
+        loan = max(5000.0, round((p - eq) + capex, 2))
+    else:
+        total_financing_need = round(p + nebenkosten_eur + capex, 2)
+        loan = max(5000.0, round(total_financing_need - eq, 2))
 
-    return fetch_drklein_quote_for_property(
-        price=p,
-        loan_amount=loan,
-        postal_code=postal_code,
-        term_years=term_years,
-        repayment_rate=repayment_rate,
-        renovation_costs=capex,
-        commission_percent=commission,
-        equity_amount=eq
-    )
+    terms = [5, 10, 15, 20, 30]
+
+    def _fetch_single_term(t: int):
+        return t, fetch_drklein_quote_for_property(
+            price=p,
+            loan_amount=loan,
+            postal_code=postal_code,
+            term_years=t,
+            repayment_rate=repayment_rate,
+            renovation_costs=capex,
+            commission_percent=commission,
+            equity_amount=eq
+        )
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        term_map = dict(executor.map(_fetch_single_term, terms))
+
+    primary_quote = term_map.get(term_years) or term_map.get(10) or next(iter(term_map.values()))
+
+    rates_by_term = []
+    for t in terms:
+        t_data = term_map.get(t, {})
+        rates_by_term.append({
+            "years": t,
+            "nominal_rate": t_data.get("nominal_rate"),
+            "effective_rate": t_data.get("effective_rate"),
+            "monthly_rate": t_data.get("monthly_rate"),
+            "bank_name": t_data.get("bank_name"),
+            "bank_code": t_data.get("bank_code"),
+            "label": f"{t} Jahre (Standard)" if t == 10 else f"{t} Jahre",
+            "is_default": (t == 10)
+        })
+
+    res = dict(primary_quote)
+    res["rates_by_term"] = rates_by_term
+    res["buy_costs_from_equity"] = buy_costs_from_equity
+    return res
 

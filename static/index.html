@@ -883,6 +883,9 @@
                             :class="Number(calc.interest_rate) === Number(term.nominal_rate) ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-sky-400'"
                             class="px-2 py-0.5 rounded text-[11px] transition-all cursor-pointer">
                       <span x-text="`${term.years}J: ${formatNumber(term.nominal_rate, 2)} %`"></span>
+                      <template x-if="term.bank_name">
+                        <span class="text-[9px] opacity-75 font-normal ml-0.5" x-text="`(${term.bank_name})`"></span>
+                      </template>
                     </button>
                   </template>
                 </div>
@@ -3019,6 +3022,19 @@
                           <span>Im Dr. Klein Rechner öffnen</span>
                           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                         </a>
+                        <template x-if="selectedProperty.ai_analysis.metrics.rates_by_term && selectedProperty.ai_analysis.metrics.rates_by_term.length > 0">
+                          <div class="w-full flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-sky-200/60 dark:border-sky-800/40 text-[10px]">
+                            <span class="text-slate-500 dark:text-slate-400 font-medium mr-1">Zinsbindungen für diesen Kaufpreis:</span>
+                            <template x-for="t in selectedProperty.ai_analysis.metrics.rates_by_term" :key="t.years">
+                              <span class="px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200">
+                                <span x-text="`${t.years}J: ${formatNumber(t.nominal_rate, 2)} %`"></span>
+                                <template x-if="t.bank_name">
+                                  <span class="text-[9px] text-slate-500 dark:text-slate-400 font-normal ml-0.5" x-text="`(${t.bank_name})`"></span>
+                                </template>
+                              </span>
+                            </template>
+                          </div>
+                        </template>
                       </div>
                     </div>
 
@@ -3116,6 +3132,19 @@
                         <span>Im Dr. Klein Rechner öffnen</span>
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                       </a>
+                      <template x-if="selectedProperty.ai_analysis.metrics.rates_by_term && selectedProperty.ai_analysis.metrics.rates_by_term.length > 0">
+                        <div class="w-full flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-sky-200/60 dark:border-sky-800/40 text-[10px]">
+                          <span class="text-slate-500 dark:text-slate-400 font-medium mr-1">Zinsbindungen für diesen Kaufpreis:</span>
+                          <template x-for="t in selectedProperty.ai_analysis.metrics.rates_by_term" :key="t.years">
+                            <span class="px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200">
+                              <span x-text="`${t.years}J: ${formatNumber(t.nominal_rate, 2)} %`"></span>
+                              <template x-if="t.bank_name">
+                                <span class="text-[9px] text-slate-500 dark:text-slate-400 font-normal ml-0.5" x-text="`(${t.bank_name})`"></span>
+                              </template>
+                            </span>
+                          </template>
+                        </div>
+                      </template>
                     </div>
 
                     <div class="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">

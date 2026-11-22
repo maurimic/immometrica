@@ -2111,7 +2111,8 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         "annual_cashflow": cf_data.get("annual_cashflow", 0.0),
         "grunderwerbsteuer_rate": cf_data.get("transfer_tax_rate", 6.5),
         "is_profitable_at_mietspiegel": is_profitable_at_mietspiegel,
-        "mietspiegel_analysis": mietspiegel_analysis
+        "mietspiegel_analysis": mietspiegel_analysis,
+        "rates_by_term": cf_data.get("rates_by_term", [])
     }
 
 

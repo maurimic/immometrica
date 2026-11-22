@@ -131,6 +131,9 @@
                             :class="Number(calc.interest_rate) === Number(term.nominal_rate) ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 hover:border-sky-400'"
                             class="px-2 py-0.5 rounded text-[11px] transition-all cursor-pointer">
                       <span x-text="`${term.years}J: ${formatNumber(term.nominal_rate, 2)} %`"></span>
+                      <template x-if="term.bank_name">
+                        <span class="text-[9px] opacity-75 font-normal ml-0.5" x-text="`(${term.bank_name})`"></span>
+                      </template>
                     </button>
                   </template>
                 </div>

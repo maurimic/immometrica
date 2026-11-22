@@ -29,12 +29,13 @@ def get_object_interest_rate(
     term_years: int = Query(10, description="Sollzinsbindung in Jahren"),
     repayment_rate: float = Query(2.0, description="Anfängliche Tilgung in %"),
     renovation_costs: float = Query(0.0, description="Sanierungskosten in EUR"),
-    commission_percent: float = Query(3.57, description="Maklerprovision in %")
+    commission_percent: float = Query(3.57, description="Maklerprovision in %"),
+    buy_costs_from_equity: bool = Query(True, description="Nebenkosten aus Eigenkapital zahlen")
 ):
     """
     Returns a customized Dr. Klein live mortgage quote tailored directly
     to the property's purchase price, postal code and financing ratio (LTV),
-    including pre-filled direct URL to the official Dr. Klein calculator.
+    including pre-filled direct URL to the official Dr. Klein calculator and tailored terms.
     """
     return get_property_mortgage_interest_quote(
         price=price,
@@ -44,7 +45,8 @@ def get_object_interest_rate(
         term_years=term_years,
         repayment_rate=repayment_rate,
         renovation_costs=renovation_costs,
-        commission_percent=commission_percent
+        commission_percent=commission_percent,
+        buy_costs_from_equity=buy_costs_from_equity
     )
 
 @router.get("/states")

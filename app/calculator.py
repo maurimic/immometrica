@@ -270,5 +270,6 @@ def calculate_cashflow(
         "annual_cashflow_after_tax": annual_cashflow_after_tax,
         "drklein_calculator_url": drklein_calculator_url,
         "mortgage_bank_name": bank_name,
-        "is_drklein_live_quote": is_live_quote
+        "is_drklein_live_quote": is_live_quote,
+        "rates_by_term": drklein_quote.get("rates_by_term", []) if drklein_quote else []
     }
