@@ -66,9 +66,10 @@ window.immoCalculatorModule = {
     this.calc.city = prop.city || '';
     this.calc.state = prop.state || '';
     this.calc.price = prop.purchase_price;
-    this.calc.rent = prop.current_rent > 0 ? prop.current_rent : prop.expected_rent;
-    this.calc.expected_rent = Number(prop.expected_rent || prop.ai_analysis?.metrics?.expected_monthly_rent || 0);
-    this.calc.current_rent = Number(prop.current_rent || prop.ai_analysis?.metrics?.current_monthly_rent || 0);
+    const rawRent = prop.current_rent > 0 ? prop.current_rent : prop.expected_rent;
+    this.calc.rent = rawRent ? Math.round(Number(rawRent) * 100) / 100 : 0;
+    this.calc.expected_rent = Number(Number(prop.expected_rent || prop.ai_analysis?.metrics?.expected_monthly_rent || 0).toFixed(2));
+    this.calc.current_rent = Number(Number(prop.current_rent || prop.ai_analysis?.metrics?.current_monthly_rent || 0).toFixed(2));
     this.calc.is_rented = Boolean(prop.is_rented || prop.ai_analysis?.metrics?.is_rented);
     this.calc.mietspiegel_analysis = prop.ai_analysis?.metrics?.mietspiegel_analysis || prop.ai_analysis?.mietspiegel_analysis || null;
     this.calc.living_space = prop.living_space;
@@ -88,11 +89,11 @@ window.immoCalculatorModule = {
     const hgExplicit = prop.ai_analysis?.insights?.has_explicit_hausgeld;
     const hgVal = Number(prop.ai_analysis?.insights?.hausgeld || 0);
     const hgNonRec = Number(prop.ai_analysis?.insights?.hausgeld_non_recoverable || 0);
-    this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal) : 0;
+    this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal * 100) / 100 : 0;
     if (prop.ai_analysis?.metrics?.additional_costs !== undefined && prop.ai_analysis?.metrics?.additional_costs !== null) {
-      this.calc.additional_costs = Math.round(Number(prop.ai_analysis.metrics.additional_costs));
+      this.calc.additional_costs = Math.round(Number(prop.ai_analysis.metrics.additional_costs) * 100) / 100;
     } else if (hgExplicit && hgVal > 0) {
-      this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec) : Math.round(hgVal * 0.35);
+      this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec * 100) / 100 : Math.round(hgVal * 0.35 * 100) / 100;
     } else {
       this.calc.additional_costs = 50;
     }
@@ -121,7 +122,7 @@ window.immoCalculatorModule = {
     await this.sendToCalculator(prop);
     const targetRent = Number(prop.expected_rent || prop.ai_analysis?.metrics?.expected_monthly_rent || 0);
     if (targetRent > 0) {
-      this.calc.rent = Math.round(targetRent);
+      this.calc.rent = Math.round(targetRent * 100) / 100;
       this.runCalculator();
     }
     this.activeTab = 'calculator';
@@ -163,7 +164,7 @@ window.immoCalculatorModule = {
 
   setMietspiegelRent(amount) {
     if (!amount || amount <= 0) return;
-    this.calc.rent = Math.round(Number(amount));
+    this.calc.rent = Math.round(Number(amount) * 100) / 100;
     this.runCalculator();
   },
 
@@ -371,9 +372,10 @@ window.immoCalculatorModule = {
       this.calc.city = this.selectedProperty.city || '';
       this.calc.state = this.selectedProperty.state || '';
       this.calc.price = this.selectedProperty.purchase_price;
-      this.calc.rent = this.selectedProperty.current_rent > 0 ? this.selectedProperty.current_rent : this.selectedProperty.expected_rent;
-      this.calc.expected_rent = Number(this.selectedProperty.expected_rent || this.selectedProperty.ai_analysis?.metrics?.expected_monthly_rent || 0);
-      this.calc.current_rent = Number(this.selectedProperty.current_rent || this.selectedProperty.ai_analysis?.metrics?.current_monthly_rent || 0);
+      const rawRent = this.selectedProperty.current_rent > 0 ? this.selectedProperty.current_rent : this.selectedProperty.expected_rent;
+      this.calc.rent = rawRent ? Math.round(Number(rawRent) * 100) / 100 : 0;
+      this.calc.expected_rent = Number(Number(this.selectedProperty.expected_rent || this.selectedProperty.ai_analysis?.metrics?.expected_monthly_rent || 0).toFixed(2));
+      this.calc.current_rent = Number(Number(this.selectedProperty.current_rent || this.selectedProperty.ai_analysis?.metrics?.current_monthly_rent || 0).toFixed(2));
       this.calc.is_rented = Boolean(this.selectedProperty.is_rented || this.selectedProperty.ai_analysis?.metrics?.is_rented);
       this.calc.mietspiegel_analysis = this.selectedProperty.ai_analysis?.metrics?.mietspiegel_analysis || this.selectedProperty.ai_analysis?.mietspiegel_analysis || null;
       this.calc.living_space = this.selectedProperty.living_space;
@@ -387,11 +389,11 @@ window.immoCalculatorModule = {
       const hgExplicit = this.selectedProperty.ai_analysis?.insights?.has_explicit_hausgeld;
       const hgVal = Number(this.selectedProperty.ai_analysis?.insights?.hausgeld || 0);
       const hgNonRec = Number(this.selectedProperty.ai_analysis?.insights?.hausgeld_non_recoverable || 0);
-      this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal) : 0;
+      this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal * 100) / 100 : 0;
       if (this.selectedProperty.ai_analysis?.metrics?.additional_costs !== undefined && this.selectedProperty.ai_analysis?.metrics?.additional_costs !== null) {
-        this.calc.additional_costs = Math.round(Number(this.selectedProperty.ai_analysis.metrics.additional_costs));
+        this.calc.additional_costs = Math.round(Number(this.selectedProperty.ai_analysis.metrics.additional_costs) * 100) / 100;
       } else if (hgExplicit && hgVal > 0) {
-        this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec) : Math.round(hgVal * 0.35);
+        this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec * 100) / 100 : Math.round(hgVal * 0.35 * 100) / 100;
       } else {
         this.calc.additional_costs = 50;
       }
