@@ -23,12 +23,16 @@ window.immoCalculatorModule = {
     equity_type: 'percent', // 'percent' or 'amount'
     interest_rate: 3.93,
     repayment_rate: 2.0,
-    additional_costs: 45, // Hausgeld / Instandhaltung nicht umlegbar
+    additional_costs: 50, // Hausgeld / Instandhaltung nicht umlegbar
     hausgeld_total: 0,
     renovation_costs: 0,
     commission_percent: 3.57,
     buy_costs_from_equity: true,
     manual_state_override: false,
+    mortgage_bank_name: '',
+    is_live_quote: false,
+    drklein_calculator_url: '',
+    is_fetching_drklein: false,
     // AfA & Steuer-Parameter
     include_afa: false,
     building_share_percent: 80,
@@ -73,18 +77,24 @@ window.immoCalculatorModule = {
     // Use consistent live interest rate matching the AI audit
     if (prop.ai_analysis?.metrics?.applied_interest_rate) {
       this.calc.interest_rate = Number(prop.ai_analysis.metrics.applied_interest_rate);
+      this.calc.mortgage_bank_name = prop.ai_analysis.metrics.mortgage_bank_name || '';
+      this.calc.is_live_quote = Boolean(prop.ai_analysis.metrics.is_drklein_live_quote);
+      this.calc.drklein_calculator_url = prop.ai_analysis.metrics.drklein_calculator_url || '';
     } else if (this.liveRates?.default_nominal_rate) {
       this.calc.interest_rate = Number(this.liveRates.default_nominal_rate);
+      this.fetchTailoredObjectRate();
     }
 
     const hgExplicit = prop.ai_analysis?.insights?.has_explicit_hausgeld;
     const hgVal = Number(prop.ai_analysis?.insights?.hausgeld || 0);
     const hgNonRec = Number(prop.ai_analysis?.insights?.hausgeld_non_recoverable || 0);
     this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal) : 0;
-    if (hgExplicit && hgVal > 0) {
+    if (prop.ai_analysis?.metrics?.additional_costs !== undefined && prop.ai_analysis?.metrics?.additional_costs !== null) {
+      this.calc.additional_costs = Math.round(Number(prop.ai_analysis.metrics.additional_costs));
+    } else if (hgExplicit && hgVal > 0) {
       this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec) : Math.round(hgVal * 0.35);
     } else {
-      this.calc.additional_costs = 45;
+      this.calc.additional_costs = 50;
     }
     this.calc.manual_state_override = false;
 
@@ -208,8 +218,147 @@ window.immoCalculatorModule = {
         })
       });
       this.calc.result = await res.json();
+      if (this.calc.result) {
+        this.calc.drklein_calculator_url = this.getDrKleinUrl();
+        if (this.calc.result.mortgage_bank_name) {
+          this.calc.mortgage_bank_name = this.calc.result.mortgage_bank_name;
+          this.calc.is_live_quote = Boolean(this.calc.result.is_drklein_live_quote);
+        }
+      }
     } catch (err) {
       console.error('Calculator error:', err);
+    }
+  },
+
+  setEquityType(type) {
+    if (this.calc.equity_type === type) return;
+    const p = Math.max(0, Number(this.calc.price) || 0);
+    const val = Number(this.calc.equity_value) || 0;
+    if (type === 'amount') {
+      // Convert percent to Euro amount
+      this.calc.equity_value = p > 0 ? Math.round(p * (val / 100)) : val;
+      this.calc.equity_type = 'amount';
+    } else {
+      // Convert Euro amount to percent
+      this.calc.equity_value = p > 0 ? Math.round((val / p) * 1000) / 10 : 20;
+      this.calc.equity_type = 'percent';
+    }
+    this.runCalculator();
+    this.fetchTailoredObjectRate(true);
+  },
+
+  handleEquityInput() {
+    const val = Number(this.calc.equity_value) || 0;
+    // Auto-detect if user typed a nominal euro amount (e.g. 15000 or > 100) while in percent mode
+    if (this.calc.equity_type === 'percent' && val > 100) {
+      this.calc.equity_type = 'amount';
+    }
+    this.runCalculator();
+  },
+
+  getDrKleinUrl() {
+    const p = Math.max(10000, Math.round(Number(this.calc.price) || 0));
+    const taxRate = Number(this.calc.tax_rate || 6.5);
+    const commissionPct = Number(this.calc.commission_percent || 0);
+    const capex = Math.max(0, Math.round(Number(this.calc.renovation_costs) || 0));
+
+    // Exact user-specified equity in EUR
+    let eqEur = 0;
+    if (this.calc.equity_type === 'percent') {
+      const pct = Number(this.calc.equity_value) || 0;
+      eqEur = Math.round(p * (pct / 100));
+    } else {
+      eqEur = Math.round(Number(this.calc.equity_value) || 0);
+    }
+    eqEur = Math.max(0, eqEur);
+
+    // Dr. Klein Ancillary Costs: GrESt + 2.0% Notar/Grundbuch + Maklerprovision
+    const notaryAndRegistryPct = 2.0;
+    const totalNebenkostenPct = taxRate + notaryAndRegistryPct + commissionPct;
+    const totalNebenkostenEur = Math.round(p * (totalNebenkostenPct / 100));
+
+    // Total financing need: Kaufpreis + Nebenkosten + Sanierungskosten (CaPEx)
+    const totalFinancingNeed = p + totalNebenkostenEur + capex;
+
+    // Loan amount matching Dr. Klein's formula (Kaufpreis + Nebenkosten + Sanierung - Eigenkapital)
+    const loanAmount = Math.max(5000, Math.round(totalFinancingNeed - eqEur));
+
+    const plz = (this.calc.postal_code || '').replace(/\D/g, '').slice(0, 5);
+    const plzParam = plz ? `&plz=${plz}` : '';
+    const tilg = Math.max(1, Math.min(10, Math.round(Number(this.calc.repayment_rate || 2))));
+
+    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${eqEur}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=10&tilgungssatz=${tilg}`;
+    if (capex > 0) {
+      url += `&modernisierungskosten=${capex}`;
+    }
+    if (commissionPct > 0) {
+      url += `&maklerprovisionPct=${commissionPct}&maklerprovision=${commissionPct}`;
+    }
+    url += `#construction-interest-calculator`;
+    return url;
+  },
+
+  getDrKleinUrlForProperty(prop) {
+    if (!prop) return 'https://www.drklein.de/bauzinsen-rechner.html#construction-interest-calculator';
+    const p = Math.max(10000, Math.round(Number(prop.purchase_price) || 0));
+    const taxRate = Number(prop.ai_analysis?.metrics?.grunderwerbsteuer_rate || 6.5);
+    const commissionPct = Number(prop.commission_percent !== undefined ? prop.commission_percent : (prop.ai_analysis?.metrics?.commission_percent || 3.57));
+    const capex = Math.max(0, Math.round(
+      Number((prop.image_analysis && prop.image_analysis.total_visual_capex) ||
+             (prop.ai_analysis && prop.ai_analysis.capex && prop.ai_analysis.capex.total_capex) || 0)
+    ));
+    const eqPct = Number(prop.ai_analysis?.metrics?.equity_value || 20);
+    const eqEur = Math.round(p * (eqPct / 100));
+
+    const totalNebenkostenPct = taxRate + 2.0 + commissionPct;
+    const totalNebenkostenEur = Math.round(p * (totalNebenkostenPct / 100));
+    const totalFinancingNeed = p + totalNebenkostenEur + capex;
+    const loanAmount = Math.max(5000, Math.round(totalFinancingNeed - eqEur));
+
+    const plz = (prop.postal_code || '').replace(/\D/g, '').slice(0, 5);
+    const plzParam = plz ? `&plz=${plz}` : '';
+    const tilg = Math.max(1, Math.min(10, Math.round(Number(prop.ai_analysis?.metrics?.applied_repayment_rate || 2))));
+
+    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${eqEur}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=10&tilgungssatz=${tilg}`;
+    if (capex > 0) url += `&modernisierungskosten=${capex}`;
+    if (commissionPct > 0) url += `&maklerprovisionPct=${commissionPct}&maklerprovision=${commissionPct}`;
+    url += `#construction-interest-calculator`;
+    return url;
+  },
+
+  async fetchTailoredObjectRate(forceApply = false) {
+    if (!this.calc.price || this.calc.price <= 0) return;
+    try {
+      this.calc.is_fetching_drklein = true;
+      const params = new URLSearchParams({
+        price: this.calc.price,
+        equity_value: this.calc.equity_value,
+        equity_type: this.calc.equity_type,
+        term_years: 10,
+        repayment_rate: this.calc.repayment_rate || 2.0,
+        renovation_costs: this.calc.renovation_costs || 0,
+        commission_percent: this.calc.commission_percent || 3.57
+      });
+      if (this.calc.postal_code) params.append('postal_code', this.calc.postal_code);
+      const res = await fetch(`/api/calculator/object-rate?${params.toString()}`);
+      if (res.ok) {
+        const quote = await res.json();
+        if (quote && quote.nominal_rate) {
+          if (forceApply || !this.calc.user_has_modified_interest) {
+            this.calc.interest_rate = Number(quote.nominal_rate);
+          }
+          this.calc.mortgage_bank_name = quote.bank_name || '';
+          this.calc.is_live_quote = Boolean(quote.is_live_quote);
+          this.calc.drklein_calculator_url = this.getDrKleinUrl();
+          if (forceApply) {
+            this.runCalculator();
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch tailored Dr. Klein rate:', e);
+    } finally {
+      this.calc.is_fetching_drklein = false;
     }
   },
 
@@ -229,14 +378,22 @@ window.immoCalculatorModule = {
       this.calc.mietspiegel_analysis = this.selectedProperty.ai_analysis?.metrics?.mietspiegel_analysis || this.selectedProperty.ai_analysis?.mietspiegel_analysis || null;
       this.calc.living_space = this.selectedProperty.living_space;
       this.calc.commission_percent = this.selectedProperty.commission_percent !== undefined ? this.selectedProperty.commission_percent : 3.57;
+      if (this.selectedProperty.ai_analysis?.metrics?.applied_interest_rate) {
+        this.calc.interest_rate = Number(this.selectedProperty.ai_analysis.metrics.applied_interest_rate);
+        this.calc.mortgage_bank_name = this.selectedProperty.ai_analysis.metrics.mortgage_bank_name || '';
+        this.calc.is_live_quote = Boolean(this.selectedProperty.ai_analysis.metrics.is_drklein_live_quote);
+        this.calc.drklein_calculator_url = this.selectedProperty.ai_analysis.metrics.drklein_calculator_url || '';
+      }
       const hgExplicit = this.selectedProperty.ai_analysis?.insights?.has_explicit_hausgeld;
       const hgVal = Number(this.selectedProperty.ai_analysis?.insights?.hausgeld || 0);
       const hgNonRec = Number(this.selectedProperty.ai_analysis?.insights?.hausgeld_non_recoverable || 0);
       this.calc.hausgeld_total = (hgExplicit && hgVal > 0) ? Math.round(hgVal) : 0;
-      if (hgExplicit && hgVal > 0) {
+      if (this.selectedProperty.ai_analysis?.metrics?.additional_costs !== undefined && this.selectedProperty.ai_analysis?.metrics?.additional_costs !== null) {
+        this.calc.additional_costs = Math.round(Number(this.selectedProperty.ai_analysis.metrics.additional_costs));
+      } else if (hgExplicit && hgVal > 0) {
         this.calc.additional_costs = hgNonRec > 0 ? Math.round(hgNonRec) : Math.round(hgVal * 0.35);
       } else {
-        this.calc.additional_costs = 45;
+        this.calc.additional_costs = 50;
       }
       this.calc.manual_state_override = false;
       this.resolveLocationTax();

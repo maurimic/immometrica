@@ -82,12 +82,27 @@ def calculate_cashflow(
     Automatically infers federal state and Grunderwerbsteuer from postal_code/city/state.
     Optionally computes German V+V depreciation (AfA) and tax refunds/liability.
     """
+    drklein_quote = None
     if interest_rate is None or interest_rate <= 0:
         try:
-            from app.interest_service import get_active_mortgage_interest_rate
-            interest_rate = get_active_mortgage_interest_rate()
+            from app.interest_service import get_property_mortgage_interest_quote
+            drklein_quote = get_property_mortgage_interest_quote(
+                price=price,
+                equity_value=equity_value,
+                equity_type=equity_type,
+                postal_code=postal_code,
+                repayment_rate=repayment_rate,
+                renovation_costs=renovation_costs,
+                commission_percent=commission_percent,
+                buy_costs_from_equity=buy_costs_from_equity
+            )
+            interest_rate = float(drklein_quote.get("nominal_rate", 3.93))
         except Exception:
-            interest_rate = 3.93
+            try:
+                from app.interest_service import get_active_mortgage_interest_rate
+                interest_rate = get_active_mortgage_interest_rate()
+            except Exception:
+                interest_rate = 3.93
 
     geo_info = resolve_location_and_tax(postal_code=postal_code, city=city, state=state)
     resolved_state = geo_info["state"]
@@ -183,6 +198,24 @@ def calculate_cashflow(
     monthly_cashflow_after_tax = round(monthly_cashflow + (monthly_tax_effect if include_afa else 0.0), 2)
     annual_cashflow_after_tax = round(monthly_cashflow_after_tax * 12.0, 2)
 
+    try:
+        from app.interest_service import generate_drklein_calculator_url
+        drklein_calculator_url = generate_drklein_calculator_url(
+            price=price,
+            equity=equity_amount,
+            loan_amount=loan_amount,
+            postal_code=geo_info.get("postal_code") or postal_code,
+            repayment_rate=repayment_rate,
+            buy_costs_from_equity=buy_costs_from_equity,
+            renovation_costs=renovation_costs,
+            commission_percent=commission_percent
+        )
+    except Exception:
+        drklein_calculator_url = f"https://www.drklein.de/bauzinsen-rechner.html?kaufpreis={int(round(price))}#construction-interest-calculator"
+
+    bank_name = drklein_quote.get("bank_name", "Dr. Klein Partnerbank") if drklein_quote else "Dr. Klein Benchmark"
+    is_live_quote = drklein_quote.get("is_live_quote", False) if drklein_quote else False
+
     return {
         "price": price,
         "rent": rent,
@@ -234,5 +267,8 @@ def calculate_cashflow(
         "annual_tax_effect": annual_tax_effect,
         "monthly_tax_effect": monthly_tax_effect,
         "monthly_cashflow_after_tax": monthly_cashflow_after_tax,
-        "annual_cashflow_after_tax": annual_cashflow_after_tax
+        "annual_cashflow_after_tax": annual_cashflow_after_tax,
+        "drklein_calculator_url": drklein_calculator_url,
+        "mortgage_bank_name": bank_name,
+        "is_drklein_live_quote": is_live_quote
     }

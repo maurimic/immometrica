@@ -135,11 +135,76 @@
                   </template>
                 </div>
               </div>
+
+              <!-- Tailored Object-Rate Box & Direct Dr. Klein Link (Live Kaufpreis-Zins) -->
+              <div class="p-3 bg-white dark:bg-slate-900 rounded-lg border border-sky-300 dark:border-sky-800 shadow-2xs space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="flex items-center gap-2">
+                    <div class="w-7 h-7 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 flex items-center justify-center font-bold text-sm shrink-0">
+                      ⚡
+                    </div>
+                    <div>
+                      <div class="flex items-center gap-1.5 flex-wrap">
+                        <span class="text-xs font-bold text-slate-900 dark:text-white">Passendes Zinsniveau für diesen Kaufpreis:</span>
+                        <span class="text-xs font-black text-sky-600 dark:text-sky-400" x-text="`${formatNumber(calc.interest_rate, 2)} % p.a.`"></span>
+                        <template x-if="calc.mortgage_bank_name">
+                          <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800" x-text="calc.mortgage_bank_name"></span>
+                        </template>
+                      </div>
+                      <span class="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
+                        Ermittelt für <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.price)"></strong> Kaufpreis &amp; <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.result?.loan_amount || (calc.price - (calc.equity_type === 'percent' ? (calc.price * calc.equity_value / 100) : calc.equity_value)))"></strong> Darlehen (Dr. Klein Live-Schnittstelle)
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- Direct Pre-filled Dr. Klein Link Button -->
+                  <div class="flex items-center gap-1.5">
+                    <button type="button" @click="fetchTailoredObjectRate(true)" :disabled="calc.is_fetching_drklein" class="px-2 py-1 text-[11px] rounded border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium transition-colors cursor-pointer" title="Zins für diesen Kaufpreis neu von Dr. Klein abfragen">
+                      <span x-text="calc.is_fetching_drklein ? 'Lädt...' : '🔄 Zins aktualisieren'"></span>
+                    </button>
+                    <a :href="getDrKleinUrl()" 
+                       target="_blank" 
+                       rel="noopener noreferrer" 
+                       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs shadow-xs hover:shadow transition-all group">
+                      <span>Im Dr. Klein Rechner öffnen</span>
+                      <i data-lucide="external-link" class="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform"></i>
+                    </a>
+                  </div>
+                </div>
+              </div>
               
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Eigenkapital (%)</label>
-                  <input type="number" x-model="calc.equity_value" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">Eigenkapital</label>
+                    <!-- Toggle between % and € -->
+                    <div class="inline-flex rounded-md shadow-2xs border border-slate-200 dark:border-slate-700 overflow-hidden">
+                      <button type="button" 
+                              @click="setEquityType('percent')" 
+                              :class="calc.equity_type === 'percent' ? 'bg-sky-600 text-white font-bold' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'"
+                              class="px-2 py-0.5 text-[10px] transition-colors cursor-pointer"
+                              title="Eigenkapital in Prozent angeben">
+                        %
+                      </button>
+                      <button type="button" 
+                              @click="setEquityType('amount')" 
+                              :class="calc.equity_type === 'amount' ? 'bg-sky-600 text-white font-bold' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border-l border-slate-200 dark:border-slate-700'"
+                              class="px-2 py-0.5 text-[10px] transition-colors cursor-pointer"
+                              title="Eigenkapital in Euro (€) angeben">
+                        €
+                      </button>
+                    </div>
+                  </div>
+                  <div class="relative">
+                    <input type="number" 
+                           x-model="calc.equity_value" 
+                           @input="handleEquityInput()"
+                           class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white pr-8 font-semibold">
+                    <div class="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-xs text-slate-400 font-semibold" x-text="calc.equity_type === 'percent' ? '%' : '€'"></div>
+                  </div>
+                  <div class="text-[10px] text-slate-500 dark:text-slate-400 mt-1 flex justify-between">
+                    <span x-text="calc.equity_type === 'percent' ? `${formatCurrency(Math.round(calc.price * (Number(calc.equity_value) || 0) / 100))} (${calc.equity_value || 0} %)` : `${calc.price > 0 ? ((Number(calc.equity_value) || 0) / calc.price * 100).toFixed(1) : 0} % (${formatCurrency(Number(calc.equity_value) || 0)})`"></span>
+                  </div>
                 </div>
 
                 <div>
@@ -153,8 +218,23 @@
                 </div>
 
                 <div>
-                  <label class="block text-xs font-medium text-slate-600 dark:text-slate-300 mb-1">Tilgung (% p.a.)</label>
-                  <input type="number" step="0.1" x-model="calc.repayment_rate" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white">
+                  <div class="flex items-center justify-between mb-1">
+                    <label class="block text-xs font-medium text-slate-600 dark:text-slate-300">Tilgung (% p.a.)</label>
+                    <span class="text-[10px] text-slate-400 font-semibold" x-text="`${formatNumber(calc.repayment_rate, 1)} % gewählt`"></span>
+                  </div>
+                  <input type="number" step="0.1" min="0.5" max="10.0" x-model="calc.repayment_rate" class="w-full text-sm rounded border border-slate-300 dark:border-slate-700 py-1.5 px-2 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold">
+                  
+                  <!-- Schnellwahl Tilgungs-Presets -->
+                  <div class="flex items-center gap-1 mt-1.5 flex-wrap">
+                    <template x-for="tVal in [1.0, 1.5, 2.0, 2.5, 3.0]" :key="tVal">
+                      <button type="button" 
+                              @click="calc.repayment_rate = tVal; runCalculator();"
+                              :class="Number(calc.repayment_rate) === Number(tVal) ? 'bg-sky-600 text-white font-bold shadow-xs' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-sky-400'"
+                              class="px-1.5 py-0.5 rounded text-[10px] transition-all cursor-pointer">
+                        <span x-text="`${tVal.toFixed(1).replace('.', ',')} %`"></span>
+                      </button>
+                    </template>
+                  </div>
                 </div>
               </div>
 

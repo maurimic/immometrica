@@ -1922,11 +1922,13 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
 
     rent_for_cf = current_rent if (rent_is_verified and current_rent > 0) else expected_market_rent
     non_rec_monthly = float(insights.get("hausgeld_non_recoverable") or 50.0) if insights.get("has_explicit_hausgeld") else 50.0
+    prop_plz = str(property_data.get("postal_code") or insights.get("postal_code") or "").strip() or None
     cf_data = calculate_cashflow(
         price=price,
         rent=rent_for_cf,
         city=city,
         state=state,
+        postal_code=prop_plz,
         living_space=sqm,
         commission_percent=commission_pct,
         additional_costs=non_rec_monthly
@@ -1937,6 +1939,7 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         rent=expected_market_rent,
         city=city,
         state=state,
+        postal_code=prop_plz,
         living_space=sqm,
         commission_percent=commission_pct,
         additional_costs=non_rec_monthly
@@ -1953,6 +1956,7 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         rent=rent_for_cf,
         city=city,
         state=state,
+        postal_code=prop_plz,
         living_space=sqm,
         commission_percent=commission_pct,
         additional_costs=non_rec_monthly,
@@ -2098,6 +2102,9 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         "monthly_rate_with_capex": cf_data_capex.get("monthly_rate", cf_data.get("monthly_rate", 0.0)),
         "applied_interest_rate": cf_data.get("interest_rate", 3.93),
         "applied_repayment_rate": cf_data.get("repayment_rate", 2.0),
+        "mortgage_bank_name": cf_data.get("mortgage_bank_name", "Dr. Klein Partnerbank"),
+        "is_drklein_live_quote": cf_data.get("is_drklein_live_quote", False),
+        "drklein_calculator_url": cf_data.get("drklein_calculator_url"),
         "loan_amount": cf_data.get("loan_amount", 0.0),
         "monthly_rate": cf_data.get("monthly_rate", 0.0),
         "additional_costs": cf_data.get("additional_costs", non_rec_monthly),

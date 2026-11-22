@@ -3,7 +3,12 @@ from typing import Dict, Any, Optional
 from app.calculator import calculate_cashflow, calculate_buy_costs, GRUNDERWERBSTEUER_DE
 from app.geo_resolver import resolve_location_and_tax
 from app.valuation import evaluate_property_valuation, CITY_BENCHMARKS
-from app.interest_service import get_live_mortgage_rates, get_active_mortgage_interest_rate
+from app.interest_service import (
+    get_live_mortgage_rates, 
+    get_active_mortgage_interest_rate,
+    get_property_mortgage_interest_quote,
+    generate_drklein_calculator_url
+)
 
 router = APIRouter(prefix="/api/calculator", tags=["calculator"])
 
@@ -14,6 +19,33 @@ def get_interest_rates(force_refresh: bool = False):
     across fixed terms (5, 10, 15, 20, 30 years) with effective and nominal rates.
     """
     return get_live_mortgage_rates(force_refresh=force_refresh)
+
+@router.get("/object-rate")
+def get_object_interest_rate(
+    price: float = Query(..., description="Kaufpreis in EUR"),
+    equity_value: float = Query(20.0, description="Eigenkapital in % oder EUR"),
+    equity_type: str = Query("percent", description="'percent' oder 'amount'"),
+    postal_code: Optional[str] = Query(None, description="Postleitzahl der Immobilie"),
+    term_years: int = Query(10, description="Sollzinsbindung in Jahren"),
+    repayment_rate: float = Query(2.0, description="Anfängliche Tilgung in %"),
+    renovation_costs: float = Query(0.0, description="Sanierungskosten in EUR"),
+    commission_percent: float = Query(3.57, description="Maklerprovision in %")
+):
+    """
+    Returns a customized Dr. Klein live mortgage quote tailored directly
+    to the property's purchase price, postal code and financing ratio (LTV),
+    including pre-filled direct URL to the official Dr. Klein calculator.
+    """
+    return get_property_mortgage_interest_quote(
+        price=price,
+        equity_value=equity_value,
+        equity_type=equity_type,
+        postal_code=postal_code,
+        term_years=term_years,
+        repayment_rate=repayment_rate,
+        renovation_costs=renovation_costs,
+        commission_percent=commission_percent
+    )
 
 @router.get("/states")
 def get_states():
@@ -44,12 +76,12 @@ def compute_deal_kpis(data: Dict[str, Any] = Body(...)):
     equity_value = float(data.get("equity_value", 20.0))
     equity_type = str(data.get("equity_type", "percent"))
     
-    # Use live mortgage benchmark rate if not specified or set to 0
+    # Use property-specific Dr. Klein live mortgage quote if not explicitly specified
     raw_interest = data.get("interest_rate")
     if raw_interest is not None and float(raw_interest) > 0:
         interest_rate = float(raw_interest)
     else:
-        interest_rate = get_active_mortgage_interest_rate()
+        interest_rate = None
     repayment_rate = float(data.get("repayment_rate", 2.0))
     additional_costs = float(data.get("additional_costs", 50.0))
     renovation_costs = float(data.get("renovation_costs", 0.0))

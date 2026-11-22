@@ -155,6 +155,7 @@ document.addEventListener('alpine:init', () => {
       this.$watch('calc.rent', () => this.runCalculator());
       this.$watch('calc.living_space', () => this.runCalculator());
       this.$watch('calc.equity_value', () => this.runCalculator());
+      this.$watch('calc.equity_type', () => this.runCalculator());
       this.$watch('calc.interest_rate', () => this.runCalculator());
       this.$watch('calc.repayment_rate', () => this.runCalculator());
       this.$watch('calc.additional_costs', () => this.runCalculator());
