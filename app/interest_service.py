@@ -238,17 +238,23 @@ def generate_drklein_calculator_url(
     capex = max(0, int(round(renovation_costs or 0)))
     commission = max(0.0, float(commission_percent or 0))
 
-    # Total ancillary costs (GrESt + 2.0% Notar/Grundbuch + Maklerprovision)
-    nebenkosten_pct = tax_rate + 2.0 + commission
-    nebenkosten_eur = int(round(p * (nebenkosten_pct / 100.0)))
-    total_financing_need = int(round(p + nebenkosten_eur + capex))
+    # Ancillary costs as automatically calculated by Dr. Klein web form (GrESt + 2.0% Notar/Grundbuch)
+    drklein_nebenkosten_eur = int(round(p * ((tax_rate + 2.0) / 100.0)))
+    drklein_total_cost = int(round(p + drklein_nebenkosten_eur + capex))
 
     if loan_amount is not None and loan_amount > 0:
         loan_target = int(round(loan_amount))
     elif buy_costs_from_equity:
         loan_target = max(5000, int(round((p - eq_eur) + capex)))
     else:
-        loan_target = max(5000, total_financing_need - eq_eur)
+        loan_target = max(5000, drklein_total_cost - eq_eur)
+
+    # In Dr. Klein's web calculator: Darlehensbetrag = Gesamtkosten - Eigenkapital.
+    # To ensure Dr. Klein displays EXACTLY loan_target:
+    # If buy_costs_from_equity is True (Option A), the user pays ancillary costs from cash,
+    # so Dr. Klein's equity field must equal: drklein_total_cost - loan_target.
+    # If buy_costs_from_equity is False (Option B), ancillary costs are financed.
+    drklein_equity_param = max(0, drklein_total_cost - loan_target)
 
     plz_clean = re.sub(r"\D", "", str(postal_code or ""))[:5]
     plz_param = f"&plz={plz_clean}" if plz_clean else ""
@@ -256,7 +262,7 @@ def generate_drklein_calculator_url(
 
     url = (
         f"https://www.drklein.de/bauzinsen-rechner.html?"
-        f"kaufpreis={int(round(p))}&eigenkapital={eq_eur}&darlehensbetrag={loan_target}"
+        f"kaufpreis={int(round(p))}&eigenkapital={drklein_equity_param}&darlehensbetrag={loan_target}"
         f"{plz_param}&sollzinsbindung={term_years}&tilgungssatz={tilg_int}"
     )
     if capex > 0:
@@ -276,7 +282,8 @@ def fetch_drklein_quote_for_property(
     force_refresh: bool = False,
     renovation_costs: float = 0.0,
     commission_percent: float = 3.57,
-    equity_amount: Optional[float] = None
+    equity_amount: Optional[float] = None,
+    buy_costs_from_equity: bool = True
 ) -> Dict[str, Any]:
     """
     Queries Dr. Klein's live REST API (/rest-api/tav/angebot) for a tailor-made mortgage quote
@@ -298,7 +305,8 @@ def fetch_drklein_quote_for_property(
         term_years=term_years,
         repayment_rate=repayment_rate,
         renovation_costs=renovation_costs,
-        commission_percent=commission_percent
+        commission_percent=commission_percent,
+        buy_costs_from_equity=buy_costs_from_equity
     )
 
     # Cache key rounding brackets to reduce redundant external calls
@@ -469,7 +477,8 @@ def get_property_mortgage_interest_quote(
             repayment_rate=repayment_rate,
             renovation_costs=capex,
             commission_percent=commission,
-            equity_amount=eq
+            equity_amount=eq,
+            buy_costs_from_equity=buy_costs_from_equity
         )
 
     with ThreadPoolExecutor(max_workers=5) as executor:

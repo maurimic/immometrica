@@ -175,6 +175,39 @@
                   </div>
                 </div>
               </div>
+
+              <!-- Kaufnebenkosten Finanzierungsoption (Option A: Aus eigener Tasche vs. Mitfinanzieren) -->
+              <div class="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700/80 space-y-2">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span class="text-xs font-bold text-slate-800 dark:text-slate-200 block">Kaufnebenkosten (Grunderwerbsteuer, Notar, Makler):</span>
+                    <span class="text-[11px] text-slate-500 dark:text-slate-400" x-text="calc.buy_costs_from_equity ? 'Werden bar aus Eigenkapital bezahlt (Investoren-Standard · 100% synchron mit Dr. Klein)' : 'Werden über den Bankkredit mitfinanziert (Darlehensbetrag erhöht)'"></span>
+                  </div>
+                  <div class="inline-flex rounded-lg border border-slate-200 dark:border-slate-700 p-0.5 bg-slate-100 dark:bg-slate-800">
+                    <button type="button" 
+                            @click="calc.buy_costs_from_equity = true; runCalculator(); fetchTailoredObjectRate(true);" 
+                            :class="calc.buy_costs_from_equity ? 'bg-sky-600 text-white font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                            class="px-2.5 py-1 text-xs rounded-md transition-all cursor-pointer">
+                      Aus eigener Tasche (Option A)
+                    </button>
+                    <button type="button" 
+                            @click="calc.buy_costs_from_equity = false; runCalculator(); fetchTailoredObjectRate(true);" 
+                            :class="!calc.buy_costs_from_equity ? 'bg-sky-600 text-white font-bold shadow-xs' : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'"
+                            class="px-2.5 py-1 text-xs rounded-md transition-all cursor-pointer">
+                      Mitfinanzieren
+                    </button>
+                  </div>
+                </div>
+                <!-- Transparente Zusammenfassung des Barmitteleinsatzes -->
+                <div class="text-[11px] flex flex-wrap items-center justify-between gap-1 pt-1.5 border-t border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400">
+                  <template x-if="calc.buy_costs_from_equity">
+                    <span>💡 Benötigtes Barmittel-Eigenkapital gesamt: <strong class="text-slate-900 dark:text-white font-bold" x-text="formatCurrency(calc.result?.actual_equity_invested)"></strong> (<span x-text="formatCurrency(calc.equity_type === 'percent' ? Math.round(calc.price * (Number(calc.equity_value)||0) / 100) : Number(calc.equity_value)||0)"></span> Kaufpreis-EK + <span x-text="formatCurrency(calc.result?.total_buy_costs)"></span> Kaufnebenkosten)</span>
+                  </template>
+                  <template x-if="!calc.buy_costs_from_equity">
+                    <span>💡 Kreditbetrag inkl. Kaufnebenkosten: <strong class="text-slate-900 dark:text-white font-bold" x-text="formatCurrency(calc.result?.loan_amount)"></strong> (Nebenkosten im Kredit finanziert)</span>
+                  </template>
+                </div>
+              </div>
               
               <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>

@@ -274,7 +274,7 @@ window.immoCalculatorModule = {
     const commissionPct = Number(this.calc.commission_percent || 0);
     const capex = Math.max(0, Math.round(Number(this.calc.renovation_costs) || 0));
 
-    // Exact user-specified equity in EUR
+    // Exact user-specified equity in EUR (on purchase price)
     let eqEur = 0;
     if (this.calc.equity_type === 'percent') {
       const pct = Number(this.calc.equity_value) || 0;
@@ -284,15 +284,16 @@ window.immoCalculatorModule = {
     }
     eqEur = Math.max(0, eqEur);
 
-    // Dr. Klein Ancillary Costs: GrESt + 2.0% Notar/Grundbuch + Maklerprovision
-    const notaryAndRegistryPct = 2.0;
-    const totalNebenkostenPct = taxRate + notaryAndRegistryPct + commissionPct;
-    const totalNebenkostenEur = Math.round(p * (totalNebenkostenPct / 100));
+    // Dr. Klein Form Nebenkosten: GrESt + 2.0% Notar/Grundbuch
+    const drkleinNebenkostenEur = Math.round(p * ((taxRate + 2.0) / 100));
+    const drkleinTotalCost = p + drkleinNebenkostenEur + capex;
 
-    // Total financing need: Kaufpreis + Nebenkosten + Sanierungskosten (CaPEx)
-    const totalFinancingNeed = p + totalNebenkostenEur + capex;
+    // Full project financing need including broker
+    const fullNebenkostenPct = taxRate + 2.0 + commissionPct;
+    const fullNebenkostenEur = Math.round(p * (fullNebenkostenPct / 100));
+    const totalFinancingNeed = p + fullNebenkostenEur + capex;
 
-    // Loan amount matching calculator settings
+    // Target loan amount matching calculator settings
     let loanAmount = 0;
     if (this.calc.result?.loan_amount && Number(this.calc.result.loan_amount) > 0) {
       loanAmount = Math.round(Number(this.calc.result.loan_amount));
@@ -302,12 +303,16 @@ window.immoCalculatorModule = {
       loanAmount = Math.max(5000, Math.round(totalFinancingNeed - eqEur));
     }
 
+    // On Dr. Klein: Darlehensbetrag = Gesamtkosten - Eigenkapital.
+    // To match loanAmount 100%, pass eigenkapital = drkleinTotalCost - loanAmount.
+    const drkleinEquity = Math.max(0, drkleinTotalCost - loanAmount);
+
     const plz = (this.calc.postal_code || '').replace(/\D/g, '').slice(0, 5);
     const plzParam = plz ? `&plz=${plz}` : '';
     const tilg = Math.max(1, Math.min(10, Math.round(Number(this.calc.repayment_rate || 2))));
     const termYears = this.calc.selected_term_years || 10;
 
-    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${eqEur}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=${termYears}&tilgungssatz=${tilg}`;
+    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${drkleinEquity}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=${termYears}&tilgungssatz=${tilg}`;
     if (capex > 0) {
       url += `&modernisierungskosten=${capex}`;
     }
@@ -330,6 +335,10 @@ window.immoCalculatorModule = {
     const eqPct = Number(prop.ai_analysis?.metrics?.equity_value || 20);
     const eqEur = Math.round(p * (eqPct / 100));
 
+    // Dr. Klein Form Nebenkosten: GrESt + 2.0% Notar/Grundbuch
+    const drkleinNebenkostenEur = Math.round(p * ((taxRate + 2.0) / 100));
+    const drkleinTotalCost = p + drkleinNebenkostenEur + capex;
+
     let loanAmount = 0;
     if (prop.ai_analysis?.metrics?.loan_amount && Number(prop.ai_analysis.metrics.loan_amount) > 0) {
       loanAmount = Math.round(Number(prop.ai_analysis.metrics.loan_amount));
@@ -337,12 +346,14 @@ window.immoCalculatorModule = {
       loanAmount = Math.max(5000, Math.round((p - eqEur) + capex));
     }
 
+    const drkleinEquity = Math.max(0, drkleinTotalCost - loanAmount);
+
     const plz = (prop.postal_code || '').replace(/\D/g, '').slice(0, 5);
     const plzParam = plz ? `&plz=${plz}` : '';
     const tilg = Math.max(1, Math.min(10, Math.round(Number(prop.ai_analysis?.metrics?.applied_repayment_rate || 2))));
     const termYears = Number(prop.ai_analysis?.metrics?.term_years || 10);
 
-    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${eqEur}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=${termYears}&tilgungssatz=${tilg}`;
+    let url = `https://www.drklein.de/bauzinsen-rechner.html?kaufpreis=${p}&eigenkapital=${drkleinEquity}&darlehensbetrag=${loanAmount}${plzParam}&sollzinsbindung=${termYears}&tilgungssatz=${tilg}`;
     if (capex > 0) url += `&modernisierungskosten=${capex}`;
     if (commissionPct > 0) url += `&maklerprovisionPct=${commissionPct}&maklerprovision=${commissionPct}`;
     url += `#construction-interest-calculator`;
