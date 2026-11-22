@@ -786,9 +786,6 @@
                               Dr. Klein Zins für dieses Objekt:
                               <span class="text-sky-600 dark:text-sky-400 font-extrabold" x-text="`${formatPercent(selectedProperty.ai_analysis.metrics.applied_interest_rate || 4.64, 2)}`"></span>
                             </span>
-                            <template x-if="selectedProperty.ai_analysis.metrics.mortgage_bank_name">
-                              <span class="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800" x-text="selectedProperty.ai_analysis.metrics.mortgage_bank_name"></span>
-                            </template>
                             <div class="text-[10px] text-slate-500 dark:text-slate-400">
                               Live-Angebot für <span x-text="formatCurrency(selectedProperty.purchase_price)"></span> Kaufpreis &amp; <span x-text="formatCurrency(selectedProperty.ai_analysis.metrics.loan_amount || (selectedProperty.purchase_price * 0.8))"></span> Kredit
                             </div>
@@ -807,9 +804,6 @@
                             <template x-for="t in selectedProperty.ai_analysis.metrics.rates_by_term" :key="t.years">
                               <span class="px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200">
                                 <span x-text="`${t.years}J: ${formatNumber(t.nominal_rate, 2)} %`"></span>
-                                <template x-if="t.bank_name">
-                                  <span class="text-[9px] text-slate-500 dark:text-slate-400 font-normal ml-0.5" x-text="`(${t.bank_name})`"></span>
-                                </template>
                               </span>
                             </template>
                           </div>
@@ -896,9 +890,6 @@
                             Dr. Klein Zins für dieses Objekt:
                             <span class="text-sky-600 dark:text-sky-400 font-extrabold" x-text="`${formatPercent(selectedProperty.ai_analysis.metrics.applied_interest_rate || 4.64, 2)}`"></span>
                           </span>
-                          <template x-if="selectedProperty.ai_analysis.metrics.mortgage_bank_name">
-                            <span class="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 font-semibold border border-emerald-200 dark:border-emerald-800" x-text="selectedProperty.ai_analysis.metrics.mortgage_bank_name"></span>
-                          </template>
                           <div class="text-[10px] text-slate-500 dark:text-slate-400">
                             Live-Angebot für <span x-text="formatCurrency(selectedProperty.purchase_price)"></span> Kaufpreis &amp; <span x-text="formatCurrency(selectedProperty.ai_analysis.metrics.loan_amount || (selectedProperty.purchase_price * 0.8))"></span> Kredit
                           </div>
@@ -917,9 +908,6 @@
                           <template x-for="t in selectedProperty.ai_analysis.metrics.rates_by_term" :key="t.years">
                             <span class="px-1.5 py-0.5 rounded border border-sky-300 dark:border-sky-700 bg-white dark:bg-slate-900 font-semibold text-slate-800 dark:text-slate-200">
                               <span x-text="`${t.years}J: ${formatNumber(t.nominal_rate, 2)} %`"></span>
-                              <template x-if="t.bank_name">
-                                <span class="text-[9px] text-slate-500 dark:text-slate-400 font-normal ml-0.5" x-text="`(${t.bank_name})`"></span>
-                              </template>
                             </span>
                           </template>
                         </div>
