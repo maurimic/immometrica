@@ -431,29 +431,30 @@ window.immoAlertsModule = {
 
   formatAlertTimestamp(ts) {
     if (!ts) return '';
-    const str = String(ts).trim();
-    const parts = str.split(' ');
-    if (parts.length === 2) {
-      const dParts = parts[0].split('-');
-      const tParts = parts[1].split(':');
-      if (dParts.length === 3 && tParts.length >= 2) {
-        return `${dParts[2]}.${dParts[1]}.${dParts[0]} um ${tParts[0]}:${tParts[1]} Uhr`;
-      }
+    const s = String(ts).trim().replace('T', ' ');
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    if (match) {
+      const [_, y, m, d, hh, mm] = match;
+      return `${d}.${m}.${y} um ${hh}:${mm} Uhr`;
     }
-    return str.substring(0, 16);
+    return s.substring(0, 16);
   },
 
   formatScanTimestamp(ts) {
     if (!ts) return '';
-    const str = String(ts).trim();
-    const parts = str.split(' ');
-    if (parts.length === 2) {
-      const dParts = parts[0].split('-');
-      const tParts = parts[1].split(':');
-      if (dParts.length === 3 && tParts.length >= 2) {
-        return `${dParts[2]}.${dParts[1]}. um ${tParts[0]}:${tParts[1]} Uhr`;
+    const s = String(ts).trim().replace('T', ' ');
+    const match = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+    if (match) {
+      const [_, y, m, d, hh, mm] = match;
+      const today = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      const dateStr = `${y}-${m}-${d}`;
+      if (dateStr === todayStr) {
+        return `Heute um ${hh}:${mm} Uhr`;
       }
+      return `${d}.${m}. um ${hh}:${mm} Uhr`;
     }
-    return str.substring(0, 16);
+    return s.substring(0, 16);
   }
 };

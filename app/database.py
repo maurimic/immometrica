@@ -30,10 +30,12 @@ def get_system_setting(key: str, default: Optional[str] = None) -> Optional[str]
         return default
 
 def set_system_setting(key: str, value: str):
+    from app.datetime_utils import get_berlin_now_str
+    now_berlin = get_berlin_now_str()
     conn = get_connection()
     c = conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-    c.execute("REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)", (key, value))
+    c.execute("REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, now_berlin))
     conn.commit()
     conn.close()
 
@@ -298,7 +300,8 @@ def seed_data(conn):
     from app.availability import generate_live_search_url
     from datetime import datetime
 
-    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M")
+    from app.datetime_utils import get_berlin_now_str
+    now_iso = get_berlin_now_str("%Y-%m-%d %H:%M")
 
     raw_properties = [
         {
@@ -918,8 +921,8 @@ def is_alert_already_logged(portal_url: str) -> bool:
 
 
 def record_deal_alert(alert_data: Dict[str, Any]) -> int:
-    from datetime import datetime
-    local_created_at = alert_data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from app.datetime_utils import get_berlin_now_str
+    local_created_at = alert_data.get("created_at") or get_berlin_now_str()
     conn = get_connection()
     c = conn.cursor()
     c.execute("""

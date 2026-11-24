@@ -251,7 +251,7 @@
                     <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
                     <span class="truncate" x-text="formatPropertyAddress(prop)"></span>
                     <span class="text-slate-300 dark:text-slate-600">•</span>
-                    <span class="shrink-0" x-text="`Vor ${prop.days_online} Tagen`"></span>
+                    <span class="shrink-0" x-text="formatDaysOnline(prop.days_online)"></span>
                   </div>
                 </div>
 
@@ -408,7 +408,7 @@
                               🏷️ Provisionsfrei
                             </span>
                           </template>
-                          <span class="text-[10px] text-slate-400" x-text="`Vor ${prop.days_online} Tagen`"></span>
+                          <span class="text-[10px] text-slate-400" x-text="formatDaysOnline(prop.days_online)"></span>
                         </div>
                       </div>
                     </div>
@@ -442,7 +442,7 @@
                         </button>
                       </template>
                     </div>
-                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="prop.last_checked_at ? `Geprüft: ${prop.last_checked_at.slice(11,16)} Uhr` : 'Geprüft'"></div>
+                    <div class="text-[10px] text-slate-400 mt-0.5" x-text="formatRelativeCheckedAt(prop.last_checked_at)"></div>
                   </td>
 
                   <!-- Location & Postal Code -->

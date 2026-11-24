@@ -107,7 +107,8 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
     Performs real-time network and DOM-scoped verification of a listing URL.
     Does NOT use crude substring matching across full HTML which caused false positives.
     """
-    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from app.datetime_utils import get_berlin_now_str
+    now_iso = get_berlin_now_str("%Y-%m-%d %H:%M:%S")
     live_fallback = generate_live_search_url(source_portal, city)
 
     if not url or not url.startswith("http"):

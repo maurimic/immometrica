@@ -9,6 +9,7 @@ import re
 import json
 import logging
 from datetime import datetime, timedelta
+from app.datetime_utils import get_berlin_now_str
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 import requests
@@ -23,10 +24,10 @@ FALLBACK_RATES: Dict[str, Any] = {
     "default_nominal_rate": 3.93,
     "default_effective_rate": 4.03,
     "default_term_years": 10,
-    "as_of_date": datetime.now().strftime("%d.%m.%Y"),
+    "as_of_date": get_berlin_now_str("%d.%m.%Y"),
     "source_name": "Dr. Klein / Deutsche Bundesbank (Benchmark)",
     "source_url": "https://www.drklein.de/bauzinsen.html",
-    "last_fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    "last_fetched_at": get_berlin_now_str(),
     "rates_by_term": [
         {"years": 5, "nominal_rate": 3.97, "effective_rate": 4.09, "label": "5 Jahre"},
         {"years": 10, "nominal_rate": 3.93, "effective_rate": 4.03, "label": "10 Jahre (Standard)", "is_default": True},
@@ -67,7 +68,7 @@ def fetch_drklein_live_rates() -> Optional[Dict[str, Any]]:
         
         # Extract Stand date
         date_match = re.search(r"Stand:?\s*([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{4})", resp.text)
-        as_of = date_match.group(1) if date_match else datetime.now().strftime("%d.%m.%Y")
+        as_of = date_match.group(1) if date_match else get_berlin_now_str("%d.%m.%Y")
 
         rates_by_term: List[Dict[str, Any]] = []
 
@@ -113,7 +114,7 @@ def fetch_drklein_live_rates() -> Optional[Dict[str, Any]]:
             "as_of_date": as_of,
             "source_name": "Dr. Klein Baufinanzierung (Tagesaktuell)",
             "source_url": url,
-            "last_fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "last_fetched_at": get_berlin_now_str(),
             "rates_by_term": rates_by_term
         }
 
@@ -380,7 +381,7 @@ def fetch_drklein_quote_for_property(
                     "calculator_url": calc_url,
                     "cached": False,
                     "is_live_quote": True,
-                    "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "fetched_at": get_berlin_now_str()
                 }
                 try:
                     set_system_setting(cache_key, json.dumps(result, ensure_ascii=False))
@@ -422,7 +423,7 @@ def fetch_drklein_quote_for_property(
         "calculator_url": calc_url,
         "cached": False,
         "is_live_quote": False,
-        "fetched_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        "fetched_at": get_berlin_now_str()
     }
 
 

@@ -8,6 +8,7 @@ import time
 import json
 import logging
 from datetime import datetime, timedelta
+from app.datetime_utils import get_berlin_now, get_berlin_now_str
 from typing import Dict, Any, List, Optional
 
 from app.database import get_system_setting, set_system_setting
@@ -26,7 +27,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
     Saves results to SQLite system_settings and dispatches Telegram alerts if degraded.
     """
     results: Dict[str, Dict[str, Any]] = {}
-    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_iso = get_berlin_now_str("%Y-%m-%d %H:%M:%S")
 
     # 1. Kleinanzeigen Check
     t0 = time.time()
@@ -224,7 +225,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
         if should_send_tg and not force_notify and last_tg:
             try:
                 last_dt = datetime.strptime(last_tg, "%Y-%m-%d %H:%M:%S")
-                if (datetime.now() - last_dt).total_seconds() < 21600: # Max once every 6 hours
+                if (get_berlin_now().replace(tzinfo=None) - last_dt).total_seconds() < 21600: # Max once every 6 hours
                     should_send_tg = False
             except Exception:
                 pass
@@ -317,7 +318,7 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
     due to missing fields or bot protection.
     Surfaces the notification banner on the startpage and notifies Telegram.
     """
-    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_iso = get_berlin_now_str("%Y-%m-%d %H:%M:%S")
     logger.warning(f"Recording portal incident for {portal}: {reason} ({details})")
 
     set_system_setting("portal_alert_active", "1")
@@ -351,7 +352,7 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
     if last_tg:
         try:
             last_dt = datetime.strptime(last_tg, "%Y-%m-%d %H:%M:%S")
-            if (datetime.now() - last_dt).total_seconds() < 3600:
+            if (get_berlin_now().replace(tzinfo=None) - last_dt).total_seconds() < 3600:
                 should_send = False
         except Exception:
             pass

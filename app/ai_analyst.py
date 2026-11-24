@@ -13,6 +13,7 @@ import logging
 import requests
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
+from app.datetime_utils import get_berlin_now_str
 from app.calculator import calculate_cashflow
 from app.valuation import evaluate_property_valuation, get_city_benchmark, get_mietspiegel_size_benchmark
 from app.geo_resolver import resolve_location_and_tax
@@ -2146,7 +2147,7 @@ def generate_ai_due_diligence_report(
     if is_offline:
         base_metrics = compute_investment_metrics(property_data, {}, {"items": [], "total_capex": 0.0, "has_high_capex": False})
         return {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": get_berlin_now_str(),
             "engine_version": "llm-v2",
             "used_llm": False,
             "ai_provider": "Knockout-Gate (0 Token – Inserat offline)",
@@ -2184,7 +2185,7 @@ def generate_ai_due_diligence_report(
         base_metrics = compute_investment_metrics(property_data, {}, {"items": [], "total_capex": 0.0, "has_high_capex": False})
         url_hint = "Die verlinkte Portal-Adresse ist eine allgemeine Suchübersicht statt ein direktes Einzel-Exposé." if is_search_url else "Im Inserat bzw. der Datenbank fehlt der Fließtext der Objektbeschreibung vollständig."
         return {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": get_berlin_now_str(),
             "engine_version": "llm-v2",
             "used_llm": False,
             "ai_provider": "Knockout-Gate (0 Token – Datenbasis unzureichend)",
@@ -2540,7 +2541,7 @@ def generate_ai_due_diligence_report(
     tok_usage = llm_raw.get("token_usage") if (llm_raw and isinstance(llm_raw, dict) and "token_usage" in llm_raw) else {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0}
 
     return {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": get_berlin_now_str(),
         "engine_version": "llm-v2",
         "used_llm": used_llm,
         "ai_provider": ai_provider,

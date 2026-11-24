@@ -445,11 +445,12 @@ def check_all_properties_availability():
             status = check_portal_url_live(portal_url, source_portal, city)
         except Exception as e:
             logger.error(f"Fehler bei Verfügbarkeitsprüfung für Objekt {prop_id}: {e}")
+            from app.datetime_utils import get_berlin_now_str
             status = {
                 "is_online": True,
                 "availability_status": "online",
                 "status_message": f"Prüfung fehlgeschlagen: {e}",
-                "last_checked_at": datetime.now().isoformat(),
+                "last_checked_at": get_berlin_now_str(),
                 "live_search_url": portal_url,
                 "description": "",
             }
@@ -649,10 +650,8 @@ def run_property_ai_audit(
         portal_url = prop.get("portal_url", "")
         source_portal = prop.get("source_portal", "")
         city = prop.get("city", "")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S") if "datetime" in globals() else ""
-        from datetime import datetime as dt_cls
-        if not now_str:
-            now_str = dt_cls.now().strftime("%Y-%m-%d %H:%M:%S")
+        from app.datetime_utils import get_berlin_now_str
+        now_str = get_berlin_now_str()
 
         if portal_url:
             if "immobilienscout24.de" in portal_url.lower() or source_portal == "ImmoScout24":
@@ -1754,7 +1753,8 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
     clean_lat, clean_lng = ensure_distinct_coord(lat, lng, occupied_coords, seed=999)
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+    now_str = get_berlin_now_str()
     sp_json = json.dumps([{"portal": source_portal, "url": raw_url, "price": price}])
 
     cursor.execute("""
@@ -1787,7 +1787,7 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
         benchmark.get("estimated_market_value_per_sqm", 2800.0),
         benchmark.get("market_deviation_percent", 0.0),
         source_portal, raw_url, img_url,
-        1, datetime.now().strftime("%Y-%m-%d"),
+        1, get_berlin_today_str(),
         is_private, 0, 0, 0, "neu",
         str(tags).replace("'", '"'),
         clean_lat, clean_lng, None, 0.0,

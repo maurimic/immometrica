@@ -13,6 +13,7 @@ import base64
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
+from app.datetime_utils import get_berlin_now_str
 import requests
 import PIL.Image
 import PIL.ImageStat
@@ -992,7 +993,7 @@ def analyze_property_images(
     if not should_run:
         logger.info(f"Vision AI skipped for property {property_data.get('id')}: {skip_reason}")
         return {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": get_berlin_now_str(),
             "property_id": property_data.get("id"),
             "ai_provider": "Vision-Gate (Übersprungen zur Kosteneinsparung)",
             "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0},
@@ -1486,7 +1487,7 @@ def analyze_property_images(
                 inv_sum = re.sub(r"(?i)auf keinem der \d+ fotos", f"auf den {len(analyzed_photos)} Fotos", inv_sum)
 
             return {
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp": get_berlin_now_str(),
                 "property_id": property_data.get("id"),
                 "ai_provider": gemini_res.get("ai_provider", "Google Gemini 1.5 Flash Vision (Live API-Key)"),
                 "token_usage": {
@@ -1522,7 +1523,7 @@ def analyze_property_images(
                 p["quality_score"] = None
         
         return {
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": get_berlin_now_str(),
             "property_id": property_data.get("id"),
             "ai_provider": "⚠️ KI-Bildanalyse fehlgeschlagen (API-Timeout / Fehler)",
             "token_usage": {
@@ -1898,7 +1899,7 @@ def analyze_property_images(
         p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
 
     return {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": get_berlin_now_str(),
         "property_id": property_data.get("id"),
         "ai_provider": "BKI Bausachverständigen-Engine (Computer Vision)",
         "token_usage": {

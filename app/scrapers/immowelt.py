@@ -311,7 +311,8 @@ def search_immowelt_deals(
             if is_private:
                 tags.append("Provisionsfrei")
     
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+            now_str = get_berlin_now_str()
     
             # Build informative description text from Immowelt listing details
             loc_display = f"{extracted_plz} {resolved_city}" + (f"-{district}" if district else "")
@@ -363,7 +364,7 @@ def search_immowelt_deals(
                 "gallery_images": gallery_images,
                 "description": full_desc,
                 "days_online": 1,
-                "first_seen_date": datetime.now().strftime("%Y-%m-%d"),
+                "first_seen_date": get_berlin_today_str(),
                 "is_private": is_private,
                 "is_rented": is_rented,
                 "is_foreclosure": 0,

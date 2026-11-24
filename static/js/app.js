@@ -1244,6 +1244,47 @@ document.addEventListener('alpine:init', () => {
       return num.toLocaleString('de-DE', { minimumFractionDigits: dec, maximumFractionDigits: dec }) + ' Zi.';
     },
 
+    formatDaysOnline(days) {
+      if (days === null || days === undefined || isNaN(days)) return 'Neu';
+      const d = Math.max(0, parseInt(days, 10));
+      if (d === 0) return 'Heute neu';
+      if (d === 1) return 'Vor 1 Tag';
+      return `Vor ${d} Tagen`;
+    },
+
+    formatRelativeCheckedAt(ts) {
+      if (!ts) return 'Geprüft';
+      const s = String(ts).trim().replace('T', ' ');
+      const match = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+      if (!match) return `Geprüft: ${s.substring(11, 16)} Uhr`;
+      const [_, y, m, d, hh, mm] = match;
+      const today = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
+      
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = `${yesterday.getFullYear()}-${pad(yesterday.getMonth() + 1)}-${pad(yesterday.getDate())}`;
+
+      const dateStr = `${y}-${m}-${d}`;
+      if (dateStr === todayStr) {
+        return `Geprüft: Heute, ${hh}:${mm} Uhr`;
+      } else if (dateStr === yesterdayStr) {
+        return `Geprüft: Gestern, ${hh}:${mm} Uhr`;
+      } else {
+        return `Geprüft: ${d}.${m}., ${hh}:${mm} Uhr`;
+      }
+    },
+
+    formatDateTimeDE(ts) {
+      if (!ts) return '-';
+      const s = String(ts).trim().replace('T', ' ');
+      const match = s.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+      if (!match) return s;
+      const [_, y, m, d, hh, mm] = match;
+      return `${d}.${m}.${y}, ${hh}:${mm} Uhr`;
+    },
+
     isHouseOrPlot(prop) {
       if (!prop) return false;
       const pType = String(prop.property_type || '').toLowerCase();

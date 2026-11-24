@@ -13,6 +13,7 @@ import re
 import json
 import logging
 from datetime import datetime
+from app.datetime_utils import get_berlin_now_str
 from typing import Dict, Any, List, Optional, Tuple
 
 from app.database import (
@@ -446,7 +447,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 ai_report["pipeline_decision"] = {
                     "stage": "archiv",
                     "reason": rejection_text,
-                    "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+                    "date": get_berlin_now_str("%d.%m.%Y %H:%M")
                 }
                 c.execute(
                     "UPDATE properties SET pipeline_stage = 'archiv', status_message = ?, ai_analysis = ? WHERE id = ?",
@@ -524,7 +525,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 ai_report["pipeline_decision"] = {
                     "stage": "archiv",
                     "reason": rejection_text,
-                    "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+                    "date": get_berlin_now_str("%d.%m.%Y %H:%M")
                 }
                 c.execute(
                     "UPDATE properties SET pipeline_stage = 'archiv', status_message = ?, ai_analysis = ? WHERE id = ?",
@@ -559,7 +560,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                     ai_report["pipeline_decision"] = {
                         "stage": "archiv",
                         "reason": rej,
-                        "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+                        "date": get_berlin_now_str("%d.%m.%Y %H:%M")
                     }
                     c.execute(
                         "UPDATE properties SET pipeline_stage = 'archiv', status_message = ?, ai_analysis = ? WHERE id = ?",
@@ -581,7 +582,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             ai_report["pipeline_decision"] = {
                 "stage": target_stage,
                 "reason": qualification_text,
-                "date": datetime.now().strftime("%d.%m.%Y %H:%M")
+                "date": get_berlin_now_str("%d.%m.%Y %H:%M")
             }
             c.execute(
                 "UPDATE properties SET pipeline_stage = ?, status_message = ?, ai_analysis = ? WHERE id = ?",
@@ -670,13 +671,13 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             "has_critical_risks": 0,
             "sent_to_telegram": 1 if sent_tg else 0,
             "telegram_error": tg_err,
-            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "created_at": get_berlin_now_str()
         }
         record_deal_alert(alert_record)
         new_alerts_count += 1
 
     # Update search profile stats
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = get_berlin_now_str()
     current_count = int(profile.get("deals_found_count") or 0)
     update_search_profile(profile_id, {
         "last_run_at": now_str,
@@ -764,7 +765,7 @@ def execute_all_active_profiles() -> List[Dict[str, Any]]:
     """
     profiles = get_search_profiles()
     results = []
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now_str = get_berlin_now_str()
 
     set_system_setting("crawler_last_run", now_str)
 

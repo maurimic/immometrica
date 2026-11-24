@@ -4,12 +4,18 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Timezone configuration (Europe/Berlin)
+ENV TZ=Europe/Berlin
+ENV DEBIAN_FRONTEND=noninteractive
+
 WORKDIR /app
 
-# Install system dependencies (curl for healthcheck, libjpeg/zlib for Pillow)
+# Install system dependencies (tzdata for exact German timezone, curl for healthcheck, libjpeg/zlib for Pillow)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
     curl \
     ca-certificates \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python requirements

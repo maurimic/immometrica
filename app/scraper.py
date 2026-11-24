@@ -10,6 +10,7 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
 from concurrent.futures import ThreadPoolExecutor
 
 from app.database import get_connection
@@ -229,14 +230,14 @@ def import_scraped_deals_returning_ids(deals: List[Dict[str, Any]]) -> List[int]
             d.get("gross_yield", 0.0), d.get("monthly_cashflow", 0.0),
             d.get("market_value", 0.0), d.get("market_value_per_sqm", 0.0), d.get("market_deviation_percent", 0.0),
             d.get("source_portal", "Kleinanzeigen"), portal_url, d.get("image_url", ""),
-            d.get("days_online", 1), d.get("first_seen_date", datetime.now().strftime("%Y-%m-%d")),
+            d.get("days_online", 1), d.get("first_seen_date", get_berlin_today_str()),
             d.get("is_private", 0), d.get("is_rented", 0), d.get("is_foreclosure", 0),
             d.get("is_favorite", 0), d.get("pipeline_stage", "neu"),
             str(d.get("tags", "[]")).replace("'", '"'),
             clean_lat, clean_lng, d.get("parcel_id"), d.get("parcel_area", 0.0),
             d.get("is_online", 1), d.get("availability_status", "online"),
             d.get("status_message", "Live erreichbar & aktiv"),
-            d.get("last_checked_at", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            d.get("last_checked_at", get_berlin_now_str()),
             d.get("live_search_url", ""),
             sp_json,
             d.get("description", ""),

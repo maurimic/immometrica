@@ -353,8 +353,9 @@ def send_system_telegram_alert(
         base_url = get_base_url()
     base_url = (base_url or "").rstrip("/")
 
+    from app.datetime_utils import get_berlin_now_str
     icon = "🚨" if level == "critical" else "⚠️"
-    now_str = datetime.now().strftime("%d.%m.%Y %H:%M")
+    now_str = get_berlin_now_str("%d.%m.%Y %H:%M")
 
     lines = [
         f"{icon} <b>System-Warnung: ImmoMetrica Scraper</b>",

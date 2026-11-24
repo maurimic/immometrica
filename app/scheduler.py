@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Optional
 
 from app.database import get_system_setting, set_system_setting
+from app.datetime_utils import get_berlin_now
 
 logger = logging.getLogger("immometrica.scheduler")
 
@@ -45,7 +46,7 @@ async def _crawler_loop():
                 else:
                     try:
                         last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-                        elapsed_seconds = (datetime.now() - last_run_dt).total_seconds()
+                        elapsed_seconds = (get_berlin_now().replace(tzinfo=None) - last_run_dt).total_seconds()
                         if elapsed_seconds >= (interval_min * 60):
                             should_run = True
                     except Exception:
@@ -71,7 +72,7 @@ async def _crawler_loop():
             else:
                 try:
                     last_canary_dt = datetime.strptime(last_canary_str, "%Y-%m-%d %H:%M:%S")
-                    if (datetime.now() - last_canary_dt).total_seconds() >= (6 * 3600):
+                    if (get_berlin_now().replace(tzinfo=None) - last_canary_dt).total_seconds() >= (6 * 3600):
                         should_run_canary = True
                 except Exception:
                     should_run_canary = True

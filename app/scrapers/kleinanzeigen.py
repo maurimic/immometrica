@@ -304,7 +304,8 @@ def scrape_kleinanzeigen_deals(
             if is_private:
                 tags.append("Provisionsfrei")
     
-            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+            now_str = get_berlin_now_str()
     
             results.append({
                 "title": title,
@@ -337,7 +338,7 @@ def scrape_kleinanzeigen_deals(
                 "source_portals": [{"portal": "Kleinanzeigen", "url": full_url, "price": price}],
                 "image_url": img_url,
                 "days_online": 1,
-                "first_seen_date": datetime.now().strftime("%Y-%m-%d"),
+                "first_seen_date": get_berlin_today_str(),
                 "is_private": is_private,
                 "is_rented": is_rented,
                 "is_foreclosure": 0,
