@@ -320,5 +320,6 @@ def test_telegram(payload: Dict[str, Any] = Body(...)):
     if not chat_id:
         chat_id = get_system_setting("telegram_chat_id")
 
-    result = test_telegram_connection(bot_token=token, chat_id=chat_id)
+    base_url = payload.get("base_url") or payload.get("app_base_url")
+    result = test_telegram_connection(bot_token=token, chat_id=chat_id, base_url=base_url)
     return result

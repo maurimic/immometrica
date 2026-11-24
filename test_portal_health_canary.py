@@ -74,6 +74,12 @@ class TestPortalHealthCanary(unittest.TestCase):
         self.assertTrue(res["alert_active"])
         self.assertIn("Immowelt", res["alert_message"])
         mock_tg.assert_called_once()
+        call_kwargs = mock_tg.call_args[1]
+        # Clearly identify ONLY the failing portal
+        self.assertEqual(call_kwargs["portal"], "Immowelt")
+        # Clearly provide the tested failing URL
+        self.assertIn("immowelt.de/expose", call_kwargs.get("target_url", ""))
+        self.assertIn("Immowelt", call_kwargs.get("portal_statuses", {}))
 
     def test_record_portal_incident_and_dismiss(self):
         with patch("app.portal_health.send_system_telegram_alert") as mock_tg:
@@ -115,7 +121,13 @@ class TestPortalHealthCanary(unittest.TestCase):
             title="Immowelt Layout geändert",
             message="Kaufpreise können nicht ausgelesen werden",
             portal="Immowelt",
+            target_url="https://www.immowelt.de/expose/test-123",
             error_details="Key 'hardFacts' missing",
+            portal_statuses={
+                "Kleinanzeigen": {"status": "healthy", "message": "3 Inserate ok"},
+                "ImmoScout24": {"status": "healthy", "message": "3 Inserate ok"},
+                "Immowelt": {"status": "degraded", "message": "HTTP 403 Bot-Schutz"}
+            },
             bot_token="123456:ABC-DEF",
             chat_id="987654321",
             base_url="https://immometrica.local"
@@ -126,6 +138,8 @@ class TestPortalHealthCanary(unittest.TestCase):
         payload = call_kwargs["json"]
         self.assertEqual(payload["chat_id"], "987654321")
         self.assertIn("Immowelt", payload["text"])
+        self.assertIn("https://www.immowelt.de/expose/test-123", payload["text"])
+        self.assertIn("Status aller Portale im Check", payload["text"])
         self.assertIn("https://immometrica.local", payload["text"])
 
 

@@ -4,6 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from typing import Optional
 import os
+import re
+from dotenv import load_dotenv
+
+# Load environment variables from .env if present
+load_dotenv()
 
 from app.database import init_db, set_system_setting
 from app.routers import properties, pipeline, calculations, export, settings, alerts, auth, portal_health
@@ -42,8 +47,14 @@ async def auth_middleware(request: Request, call_next):
                 cleaned_host = host_hdr.split(",")[0].strip()
                 detected_url = f"{proto}://{cleaned_host}".rstrip("/")
                 is_local = any(cleaned_host.startswith(p) for p in ["127.0.0.1", "localhost", "0.0.0.0", "192.168.", "10."])
+                is_raw_ip = bool(re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?$", cleaned_host))
                 if not is_local:
-                    set_system_setting("last_server_base_url", detected_url)
+                    from app.database import get_system_setting
+                    cur_srv = get_system_setting("last_server_base_url", "")
+                    cur_is_ip = bool(re.search(r"://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?$", cur_srv))
+                    # Only save if it's a valid domain name (never save a raw IP address as the server URL)
+                    if not is_raw_ip:
+                        set_system_setting("last_server_base_url", detected_url)
                 else:
                     set_system_setting("last_local_base_url", detected_url)
     except Exception:

@@ -841,19 +841,26 @@
                   <div class="p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/60 space-y-3 shadow-xs">
                     <div class="flex flex-wrap items-center justify-between gap-2">
                       <div class="flex items-center gap-2">
-                        <span class="text-lg">ℹ️</span>
+                        <span class="text-lg" x-text="selectedProperty.ai_analysis.metrics.is_rented ? '⚠️' : 'ℹ️'"></span>
                         <div>
-                          <h5 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                            Mietpotenzial & Markt-Sollmiete (Objekt bezugsfrei / unvermietet)
+                          <h5 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider"
+                              x-text="selectedProperty.ai_analysis.metrics.is_rented 
+                                ? 'Mietpotenzial & Markt-Sollmiete (Objekt vermietet – Ist-Miete unbekannt)' 
+                                : 'Mietpotenzial & Markt-Sollmiete (Objekt bezugsfrei / unvermietet)'">
                           </h5>
-                          <span class="text-[11px] text-slate-500 dark:text-slate-400">
-                            Da kein Altmietvertrag besteht, basiert die Rendite- und Cashflow-Kalkulation auf der ortsüblichen Neuvermietungsmiete laut Mietspiegel.
+                          <span class="text-[11px] text-slate-500 dark:text-slate-400"
+                                x-text="selectedProperty.ai_analysis.metrics.is_rented 
+                                  ? 'Da im Exposé keine konkrete Kaltmiete beziffert wurde, basiert die vorläufige Kalkulation auf der ortsüblichen Neuvermietungsmiete laut Mietspiegel.' 
+                                  : 'Da kein Altmietvertrag besteht, basiert die Rendite- und Cashflow-Kalkulation auf der ortsüblichen Neuvermietungsmiete laut Mietspiegel.'">
                           </span>
                         </div>
                       </div>
 
-                      <span class="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300">
-                        Bezugsfrei / Unvermietet
+                      <span class="px-2.5 py-1 rounded-full text-xs font-semibold"
+                            :class="selectedProperty.ai_analysis.metrics.is_rented 
+                              ? 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-300 dark:border-amber-700' 
+                              : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'"
+                            x-text="selectedProperty.ai_analysis.metrics.is_rented ? 'Vermietet (Miete k. A.)' : 'Bezugsfrei / Unvermietet'">
                       </span>
                     </div>
 
@@ -914,9 +921,16 @@
                       </template>
                     </div>
 
-                    <div class="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
-                      💡 <strong>Keine Mietpreisbremsen-Bindung an Vormiete:</strong> Das Objekt kann nach Erwerb direkt zum aktuellen ortsüblichen Mietspiegel-Marktniveau neu vermietet werden.
-                    </div>
+                    <template x-if="!selectedProperty.ai_analysis.metrics.is_rented">
+                      <div class="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                        💡 <strong>Keine Mietpreisbremsen-Bindung an Vormiete:</strong> Das Objekt ist bezugsfrei. Nach Erwerb kann direkt zum aktuellen ortsüblichen Mietspiegel-Marktniveau neu vermietet werden.
+                      </div>
+                    </template>
+                    <template x-if="selectedProperty.ai_analysis.metrics.is_rented">
+                      <div class="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
+                        ⚠️ <strong>Bestehendes Mietverhältnis („Kauf bricht nicht Miete“, § 566 BGB):</strong> Die Wohnung ist vermietet, im Exposé fehlt jedoch die Angabe zur Ist-Miete. Das bestehende Mietverhältnis bleibt nach Kauf unverändert bestehen. Eine Mietanpassung richtet sich nach dem Mietvertrag und gesetzlichen Kappungsgrenzen (§ 558 BGB). Vor Kauf sollten Mietvertrag und Zahlungsnachweise beim Verkäufer angefordert werden.
+                      </div>
+                    </template>
                   </div>
                 </template>
 
@@ -927,7 +941,7 @@
                   <div class="p-4 rounded-xl bg-white dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 space-y-3.5 shadow-xs">
                     
                     <!-- Header with Address & Direct Google Maps Button -->
-                    <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100 dark:border-slate-700/80">
+                    <div class="flex flex-wrap items-center justify-between gap-3">
                       <div class="flex items-center gap-2.5">
                         <div class="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold text-base shadow-2xs">
                           📍
@@ -935,7 +949,7 @@
                         <div>
                           <div class="flex items-center gap-2 flex-wrap">
                             <h5 class="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">
-                              Mikrolage, Infrastruktur & Google Maps
+                              Mikrolage & Google Maps
                             </h5>
                             <!-- Precision Badge -->
                             <span class="text-[10px] px-2 py-0.5 rounded-full font-bold border"
@@ -976,54 +990,6 @@
                         <div class="leading-relaxed" x-text="selectedProperty.ai_analysis.location_analysis.disclaimer"></div>
                       </div>
                     </template>
-
-                    <!-- POI & Infrastructure Grid -->
-                    <div>
-                      <div class="flex items-center justify-between mb-2">
-                        <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                          Wichtigste Entfernungen & Infrastruktur-Knotenpunkte:
-                        </span>
-                        <span class="text-[10px] font-semibold text-slate-400" 
-                              x-text="selectedProperty.ai_analysis.location_analysis.location_tier">
-                        </span>
-                      </div>
-                      
-                      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                        <template x-for="(poi, idx) in selectedProperty.ai_analysis.location_analysis.pois" :key="idx">
-                          <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700 text-xs space-y-1">
-                            <div class="flex items-center justify-between">
-                              <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                                <span x-text="poi.icon"></span>
-                                <span x-text="poi.title"></span>
-                              </span>
-                              <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300"
-                                    x-text="poi.distance_label">
-                              </span>
-                            </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="poi.target"></div>
-                            <div class="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium" x-text="poi.time_label"></div>
-                            <div class="text-[10px] text-slate-500 dark:text-slate-400 leading-tight" x-text="poi.details"></div>
-                          </div>
-                        </template>
-                      </div>
-                    </div>
-
-                    <!-- Location Summary & Rating -->
-                    <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 text-xs space-y-1.5">
-                      <div class="flex items-center justify-between flex-wrap gap-2">
-                        <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
-                          <span>🧭</span> Lage-Fazit & Mieter-Attraktivität
-                        </span>
-                        <div class="flex items-center gap-2">
-                          <span class="text-[11px] font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-                                x-text="`Mikrolage-Score: ${selectedProperty.ai_analysis.location_analysis.location_score} / 10`">
-                          </span>
-                        </div>
-                      </div>
-                      <p class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" 
-                         x-text="selectedProperty.ai_analysis.location_analysis.summary">
-                      </p>
-                    </div>
 
                   </div>
                 </template>

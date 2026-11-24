@@ -32,15 +32,26 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
     t0 = time.time()
     try:
         from app.scrapers.kleinanzeigen import scrape_kleinanzeigen_deals
-        ka_deals = scrape_kleinanzeigen_deals(city="Dortmund", max_results=3)
+        valid_deals = []
+        for attempt in range(2):
+            try:
+                ka_deals = scrape_kleinanzeigen_deals(city="Dortmund", max_results=3)
+                valid_deals = [d for d in ka_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
+                if valid_deals:
+                    break
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(1.5)
+
         elapsed = round(time.time() - t0, 2)
-        valid_deals = [d for d in ka_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
         if valid_deals:
             results["Kleinanzeigen"] = {
                 "status": "healthy",
                 "status_code": 200,
                 "latency_s": elapsed,
                 "message": f"{len(valid_deals)} Inserate erfolgreich mit Kaufpreis und Wohnfläche verifiziert.",
+                "target_url": "https://www.kleinanzeigen.de/s-wohnung-kaufen/dortmund/c196l1099",
                 "last_checked_at": now_iso
             }
         else:
@@ -49,6 +60,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
                 "status_code": 200,
                 "latency_s": elapsed,
                 "message": "Suchlauf lieferte keine Inserate mit gültigem Preis und m² (Formatänderung vermutet).",
+                "target_url": "https://www.kleinanzeigen.de/s-wohnung-kaufen/dortmund/c196l1099",
                 "last_checked_at": now_iso
             }
     except Exception as e:
@@ -57,6 +69,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
             "status_code": 500,
             "latency_s": round(time.time() - t0, 2),
             "message": f"Verbindungs- oder Parser-Fehler: {str(e)}",
+            "target_url": "https://www.kleinanzeigen.de/s-wohnung-kaufen/dortmund/c196l1099",
             "last_checked_at": now_iso
         }
 
@@ -64,15 +77,26 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
     t0 = time.time()
     try:
         from app.scrapers.immoscout import search_immoscout_deals
-        is_deals = search_immoscout_deals(city="Dortmund", max_results=3)
+        valid_is = []
+        for attempt in range(2):
+            try:
+                is_deals = search_immoscout_deals(city="Dortmund", max_results=3)
+                valid_is = [d for d in is_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
+                if valid_is:
+                    break
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(1.5)
+
         elapsed = round(time.time() - t0, 2)
-        valid_is = [d for d in is_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
         if valid_is:
             results["ImmoScout24"] = {
                 "status": "healthy",
                 "status_code": 200,
                 "latency_s": elapsed,
                 "message": f"{len(valid_is)} Inserate erfolgreich verifiziert.",
+                "target_url": "https://www.immobilienscout24.de/Suche/de/nordrhein-westfalen/dortmund/wohnung-kaufen",
                 "last_checked_at": now_iso
             }
         else:
@@ -81,6 +105,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
                 "status_code": 200,
                 "latency_s": elapsed,
                 "message": "ImmoScout24 lieferte keine parsebaren Angebote (API oder Layout geändert).",
+                "target_url": "https://www.immobilienscout24.de/Suche/de/nordrhein-westfalen/dortmund/wohnung-kaufen",
                 "last_checked_at": now_iso
             }
     except Exception as e:
@@ -89,40 +114,75 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
             "status_code": 500,
             "latency_s": round(time.time() - t0, 2),
             "message": f"ImmoScout-Fehler: {str(e)}",
+            "target_url": "https://www.immobilienscout24.de/Suche/de/nordrhein-westfalen/dortmund/wohnung-kaufen",
             "last_checked_at": now_iso
         }
 
     # 3. Immowelt Check
     t0 = time.time()
     try:
-        from app.scrapers.immowelt import fetch_immowelt_expose
-        iw_res = fetch_immowelt_expose(IMMOWELT_TEST_URL)
+        from app.scrapers.immowelt import fetch_immowelt_expose, search_immowelt_deals
+        iw_res = None
+        for attempt in range(2):
+            try:
+                iw_res = fetch_immowelt_expose(IMMOWELT_TEST_URL)
+                if iw_res.get("success") and float(iw_res.get("price") or 0) > 0 and float(iw_res.get("living_space") or 0) > 0:
+                    break
+            except Exception:
+                pass
+            if attempt == 0:
+                time.sleep(1.5)
+
         elapsed = round(time.time() - t0, 2)
-        if iw_res.get("success") and float(iw_res.get("price") or 0) > 0 and float(iw_res.get("living_space") or 0) > 0:
+        if iw_res and iw_res.get("success") and float(iw_res.get("price") or 0) > 0 and float(iw_res.get("living_space") or 0) > 0:
             results["Immowelt"] = {
                 "status": "healthy",
                 "status_code": 200,
                 "latency_s": elapsed,
                 "message": f"Exposé erfolgreich ausgelesen ({iw_res.get('city')}, {iw_res.get('price'):,.0f} €, {iw_res.get('living_space')} m²).",
+                "target_url": IMMOWELT_TEST_URL,
                 "last_checked_at": now_iso
             }
         else:
-            st = iw_res.get("status_code", 400)
-            err = iw_res.get("error") or "Kaufpreis oder Wohnfläche konnten nicht extrahiert werden."
+            st = iw_res.get("status_code", 400) if iw_res else 400
+            err = iw_res.get("error") if iw_res else "Kaufpreis oder Wohnfläche konnten nicht extrahiert werden."
             level = "degraded" if st in [403, 429] else "critical"
-            results["Immowelt"] = {
-                "status": level,
-                "status_code": st,
-                "latency_s": elapsed,
-                "message": err,
-                "last_checked_at": now_iso
-            }
+
+            # If it failed due to a bot-block (403), rate-limit (429) or dead URL (404/500), verify via search
+            fallback_success = False
+            if st in [403, 404, 429, 500, 502, 503] and os.getenv("TESTING") != "1":
+                try:
+                    fallback_deals = search_immowelt_deals(city="Dortmund", max_results=3)
+                    valid_fallback = [d for d in fallback_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
+                    if valid_fallback:
+                        fallback_success = True
+                        results["Immowelt"] = {
+                            "status": "healthy",
+                            "status_code": 200,
+                            "latency_s": round(time.time() - t0, 2),
+                            "message": f"Suchlauf verifiziert ({len(valid_fallback)} Angebote intakt; Test-Exposé URL temporär nicht erreichbar).",
+                            "target_url": IMMOWELT_TEST_URL,
+                            "last_checked_at": now_iso
+                        }
+                except Exception:
+                    pass
+
+            if not fallback_success:
+                results["Immowelt"] = {
+                    "status": level,
+                    "status_code": st,
+                    "latency_s": elapsed,
+                    "message": err,
+                    "target_url": IMMOWELT_TEST_URL,
+                    "last_checked_at": now_iso
+                }
     except Exception as e:
         results["Immowelt"] = {
             "status": "critical",
             "status_code": 500,
             "latency_s": round(time.time() - t0, 2),
             "message": f"Immowelt-Fehler: {str(e)}",
+            "target_url": IMMOWELT_TEST_URL,
             "last_checked_at": now_iso
         }
 
@@ -149,30 +209,43 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
         set_system_setting("portal_alert_level", overall)
         set_system_setting("portal_alert_title", "⚠️ Portal-Warnung: Scraper eingeschränkt")
 
-        # Check Telegram rate limit (send at most once every 2 hours unless forced)
+        # Track consecutive failures to suppress transient single-check false-alarms
+        cur_fails = 0
+        try:
+            cur_fails = int(get_system_setting("canary_consecutive_failures", "0"))
+        except Exception:
+            cur_fails = 0
+        cur_fails += 1
+        set_system_setting("canary_consecutive_failures", str(cur_fails))
+
+        # Check Telegram rate limit: Only alert if confirmed across consecutive checks (>= 2) or forced
         last_tg = get_system_setting("telegram_last_canary_alert")
-        should_send_tg = force_notify
-        if not should_send_tg:
-            if not last_tg:
-                should_send_tg = True
-            else:
-                try:
-                    last_dt = datetime.strptime(last_tg, "%Y-%m-%d %H:%M:%S")
-                    if (datetime.now() - last_dt).total_seconds() >= 7200: # 2 hours
-                        should_send_tg = True
-                except Exception:
-                    should_send_tg = True
+        should_send_tg = force_notify or (cur_fails >= 2)
+        if should_send_tg and not force_notify and last_tg:
+            try:
+                last_dt = datetime.strptime(last_tg, "%Y-%m-%d %H:%M:%S")
+                if (datetime.now() - last_dt).total_seconds() < 21600: # Max once every 6 hours
+                    should_send_tg = False
+            except Exception:
+                pass
+
+        failing_names = [p for p, r in results.items() if r.get("status") != "healthy"]
+        failing_urls = [r.get("target_url") for p, r in results.items() if r.get("status") != "healthy" and r.get("target_url")]
+        target_url_str = ", ".join(failing_urls) if failing_urls else None
 
         if should_send_tg:
             send_system_telegram_alert(
                 title="Scraper-Anomalie / Portal-Format geändert",
                 message=alert_msg,
-                portal=", ".join(results.keys()),
+                portal=", ".join(failing_names) if failing_names else "Unbekannt",
+                target_url=target_url_str,
+                portal_statuses=results,
                 level=overall
             )
             set_system_setting("telegram_last_canary_alert", now_iso)
     else:
-        # Reset alert if previously active
+        # Reset consecutive failure counter and alert state on success
+        set_system_setting("canary_consecutive_failures", "0")
         prev_active = get_system_setting("portal_alert_active")
         if prev_active == "1":
             set_system_setting("portal_alert_active", "0")
@@ -238,7 +311,7 @@ def get_portal_health_status() -> Dict[str, Any]:
     }
 
 
-def record_portal_incident(portal: str, reason: str, details: str = ""):
+def record_portal_incident(portal: str, reason: str, details: str = "", target_url: str = ""):
     """
     Instantly records an incident when a real scrape or single URL import fails
     due to missing fields or bot protection.
@@ -266,6 +339,7 @@ def record_portal_incident(portal: str, reason: str, details: str = ""):
         "status_code": 422,
         "message": reason,
         "details": details,
+        "target_url": target_url,
         "last_checked_at": now_iso
     }
     set_system_setting("portal_health_status", json.dumps(portals))
@@ -287,6 +361,7 @@ def record_portal_incident(portal: str, reason: str, details: str = ""):
             title=f"Format-Änderung / Scraper-Fehler bei {portal}",
             message=reason,
             portal=portal,
+            target_url=target_url or None,
             error_details=details,
             level="warning"
         )

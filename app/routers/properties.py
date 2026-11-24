@@ -1715,11 +1715,7 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
 
     if missing_fields:
         err_detail = f"Die folgenden Pflichtangaben konnten aus dem Inserat nicht ausgelesen werden: {', '.join(missing_fields)}."
-        try:
-            from app.portal_health import record_portal_incident
-            record_portal_incident(source_portal, "Schema-/Parsing-Abweichung", err_detail)
-        except Exception:
-            pass
+        logger.warning(f"Expose import missing mandatory fields for {source_portal}: {err_detail}")
         raise HTTPException(
             status_code=422,
             detail=f"Import fehlgeschlagen: {err_detail} Bitte prüfen Sie das Inserat auf dem Portal."

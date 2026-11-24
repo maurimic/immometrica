@@ -14,53 +14,94 @@ from datetime import datetime
 
 logger = logging.getLogger("immometrica.telegram")
 
+DEFAULT_LIVE_URL = "https://immofinder-poggel-micciche.duckdns.org"
+
+
+def is_live_environment() -> bool:
+    """
+    Ermittelt, ob die Anwendung in der Live-/Produktionsumgebung läuft (z.B. Linux-Server, Docker),
+    oder lokal auf dem Entwicklungsrechner (Windows / Localhost).
+    """
+    if os.getenv("ENV") == "production":
+        return True
+    if os.getenv("DOCKER_CONTAINER") == "1":
+        return True
+    if os.path.exists("/data/immometrica.db"):
+        return True
+    # Auf Linux-/Server-Systemen ohne explizites dev-Flag
+    if os.name != "nt" and os.getenv("ENV") != "development":
+        return True
+    return False
+
+
+def _is_ip_address(url_or_host: str) -> bool:
+    """Prüft, ob eine URL oder ein Host eine rohe IP-Adresse statt eines Domainnamens ist."""
+    try:
+        raw = (url_or_host or "").strip()
+        if "://" in raw:
+            raw = raw.split("://", 1)[1]
+        host = raw.split("/")[0].split(":")[0]
+        parts = host.split(".")
+        if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            return True
+        return False
+    except Exception:
+        return False
+
 
 def get_base_url() -> str:
     """
     Ermittelt die öffentliche Basis-URL der ImmoMetrica-Instanz:
-    1. Umgebungsvariable APP_BASE_URL / BASE_URL / PUBLIC_URL (os.environ)
-    2. Datenbank-Einstellung 'app_base_url' (manuell im UI gepflegt)
-    3. Lokale .env Datei
-    4. Automatisch erfasste Domain ('last_server_base_url' oder 'last_local_base_url')
-    5. Fallback je nach Umgebung (Server / Docker vs. Lokal 127.0.0.1:8000)
+    - Auf dem Live-Server (Docker/Linux/Production):
+      Nutzt standardmäßig DEFAULT_LIVE_URL (https://immofinder-poggel-micciche.duckdns.org)
+      bzw. eine konfigurierte Domain (niemals eine rohe IP-Adresse).
+    - Lokal auf dem Entwicklungsrechner (Windows/Localhost):
+      Nutzt http://127.0.0.1:8000 oder die lokale Adresse.
     """
+    live = is_live_environment()
+
     # 1. Environment variables from runtime / container
     for env_var in ["APP_BASE_URL", "BASE_URL", "PUBLIC_URL", "SERVER_URL"]:
         val = os.getenv(env_var)
         if val and val.strip():
-            return val.strip().rstrip("/")
+            cleaned = val.strip().rstrip("/")
+            # Auf dem Live-Server niemals eine reine IP-Adresse für Benachrichtigungen nutzen
+            if live and _is_ip_address(cleaned):
+                continue
+            return cleaned
 
     # 2. Check database settings (manually saved in UI)
     try:
         from app.database import get_system_setting
         db_val = get_system_setting("app_base_url")
         if db_val and db_val.strip():
-            return db_val.strip().rstrip("/")
+            cleaned = db_val.strip().rstrip("/")
+            if not (live and _is_ip_address(cleaned)):
+                return cleaned
     except Exception:
         pass
 
-    # 3. Check local .env file
-    try:
-        from app.auth import _read_env_file, LOCAL_ENV_PATH
-        env_vars = _read_env_file(LOCAL_ENV_PATH)
-        for k in ["APP_BASE_URL", "BASE_URL", "PUBLIC_URL"]:
-            if env_vars.get(k):
-                return env_vars[k].strip().rstrip("/")
-    except Exception:
-        pass
+    # 3. Check local .env file (nur wenn lokal)
+    if not live:
+        try:
+            from app.auth import _read_env_file, LOCAL_ENV_PATH
+            env_vars = _read_env_file(LOCAL_ENV_PATH)
+            for k in ["APP_BASE_URL", "BASE_URL", "PUBLIC_URL"]:
+                if env_vars.get(k):
+                    cleaned = env_vars[k].strip().rstrip("/")
+                    return cleaned
+        except Exception:
+            pass
 
-    # 4. Check auto-detected domains
+    # 4. Check auto-detected domains from incoming requests
     try:
         from app.database import get_system_setting
-        is_prod = (
-            os.getenv("ENV") == "production"
-            or os.path.exists("/data/immometrica.db")
-            or os.getenv("DOCKER_CONTAINER") == "1"
-        )
-        if is_prod:
+        if live:
             server_url = get_system_setting("last_server_base_url")
             if server_url and server_url.strip():
-                return server_url.strip().rstrip("/")
+                cleaned = server_url.strip().rstrip("/")
+                if not _is_ip_address(cleaned):
+                    return cleaned
         else:
             local_url = get_system_setting("last_local_base_url")
             if local_url and local_url.strip():
@@ -68,7 +109,10 @@ def get_base_url() -> str:
     except Exception:
         pass
 
-    # 5. Fallback based on port
+    # 5. Fallback je nach Umgebung
+    if live:
+        return DEFAULT_LIVE_URL
+
     port = os.getenv("PORT", "8000")
     host = os.getenv("HOST", "127.0.0.1")
     if host in ["0.0.0.0", ""]:
@@ -281,6 +325,8 @@ def send_system_telegram_alert(
     message: str,
     portal: Optional[str] = None,
     error_details: Optional[str] = None,
+    target_url: Optional[str] = None,
+    portal_statuses: Optional[Dict[str, Any]] = None,
     level: str = "warning",
     bot_token: Optional[str] = None,
     chat_id: Optional[str] = None,
@@ -289,6 +335,7 @@ def send_system_telegram_alert(
     """
     Sends an automated system notification to Telegram when a scraper failure,
     portal layout change, or bot protection restriction is detected.
+    Clearly shows which portal failed, what exact page/URL was tested, and an overview of all portals.
     """
     if os.getenv("TESTING") == "1":
         return {"success": True, "skipped_testing": True}
@@ -312,17 +359,48 @@ def send_system_telegram_alert(
     lines = [
         f"{icon} <b>System-Warnung: ImmoMetrica Scraper</b>",
         f"<b>{html.escape(title)}</b>",
-        "",
-        f"<b>Meldung:</b> {html.escape(message)}"
+        ""
     ]
+
+    # Clearly show the failing portal(s)
     if portal:
-        lines.append(f"<b>Betroffenes Portal:</b> <code>{html.escape(portal)}</code>")
-    if error_details:
-        lines.append(f"<b>Fehler-Details:</b> <code>{html.escape(str(error_details)[:300])}</code>")
-    lines.append(f"<b>Zeitpunkt:</b> {now_str}")
+        lines.append(f"❌ <b>Betroffenes Portal:</b> <code>{html.escape(portal)}</code>")
+
+    # Clearly show the affected URL/page
+    if target_url:
+        safe_url = html.escape(target_url)
+        if target_url.startswith("http://") or target_url.startswith("https://"):
+            lines.append(f"🔗 <b>Betroffene Seite / URL:</b> <a href=\"{safe_url}\">{safe_url}</a>")
+        else:
+            lines.append(f"🔗 <b>Betroffene Seite / URL:</b> <code>{safe_url}</code>")
+
+    # Detailed error cause
+    lines.append(f"📋 <b>Fehlerursache:</b> {html.escape(message)}")
+
+    if error_details and error_details != message:
+        lines.append(f"🔍 <b>Details:</b> <code>{html.escape(str(error_details)[:300])}</code>")
+
+    # Clean overview breakdown of all portals if provided
+    if portal_statuses and isinstance(portal_statuses, dict):
+        lines.append("")
+        lines.append("📊 <b>Status aller Portale im Check:</b>")
+        for p_name, p_data in portal_statuses.items():
+            st = p_data.get("status", "unknown")
+            msg_snippet = p_data.get("message", "")
+            if len(msg_snippet) > 65:
+                msg_snippet = msg_snippet[:62] + "..."
+            if st == "healthy":
+                badge = "✅ OK"
+            elif st == "degraded":
+                badge = "⚠️ Eingeschränkt"
+            else:
+                badge = "❌ Fehler"
+            lines.append(f"  • <b>{p_name}:</b> {badge} (<i>{html.escape(msg_snippet)}</i>)")
+
+    lines.append("")
+    lines.append(f"⏰ <b>Zeitpunkt:</b> {now_str}")
 
     if base_url:
-        lines.append("")
         lines.append("──────────────────────")
         lines.append(f"🔗 <a href=\"{base_url}\"><b>ImmoMetrica Dashboard öffnen</b></a>")
 

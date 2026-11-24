@@ -17,6 +17,7 @@ window.immoAlertsModule = {
   },
   telegramInputToken: '',
   telegramInputChatId: '',
+  telegramInputBaseUrl: '',
   telegramTesting: false,
   telegramTestResult: null,
   savingAlertSettings: false,
@@ -56,6 +57,7 @@ window.immoAlertsModule = {
       if (settRes) {
         this.alertSettings = settRes;
         this.telegramInputChatId = String(settRes.telegram_chat_id || '').trim();
+        this.telegramInputBaseUrl = String(settRes.app_base_url || '').trim();
         if (settRes.crawler_last_stats) {
           this.lastScanStats = settRes.crawler_last_stats;
         }
@@ -250,8 +252,10 @@ window.immoAlertsModule = {
     this.savingAlertSettings = true;
     try {
       const cleanChatId = String(this.telegramInputChatId || '').trim();
+      const cleanBaseUrl = String(this.telegramInputBaseUrl || '').trim();
       const payload = {
         telegram_chat_id: cleanChatId,
+        app_base_url: cleanBaseUrl,
         crawler_interval_minutes: Number(this.alertSettings.crawler_interval_minutes),
         crawler_active: Boolean(this.alertSettings.crawler_active)
       };
@@ -268,8 +272,10 @@ window.immoAlertsModule = {
         this.telegramInputToken = '';
         this.alertSettings.telegram_chat_id = cleanChatId;
         this.telegramInputChatId = cleanChatId;
+        this.alertSettings.app_base_url = cleanBaseUrl;
+        this.telegramInputBaseUrl = cleanBaseUrl;
         await this.loadAlertsData();
-        alert(`✅ Einstellungen gespeichert!\nChat-ID: ${cleanChatId || '(keine angegeben)'}`);
+        alert(`✅ Einstellungen gespeichert!\nChat-ID: ${cleanChatId || '(keine angegeben)'}\nLive-URL: ${cleanBaseUrl || '(automatisch erkannt)'}`);
       } else {
         alert('Fehler: ' + (data.detail || 'Konnte Einstellungen nicht speichern.'));
       }
@@ -285,7 +291,8 @@ window.immoAlertsModule = {
     this.telegramTestResult = null;
     try {
       const payload = {
-        telegram_chat_id: String(this.telegramInputChatId || '').trim()
+        telegram_chat_id: String(this.telegramInputChatId || '').trim(),
+        base_url: String(this.telegramInputBaseUrl || '').trim()
       };
       if (this.telegramInputToken && this.telegramInputToken.trim()) {
         payload.telegram_bot_token = this.telegramInputToken.trim();

@@ -120,5 +120,33 @@ class TestTelegramAuditLink(unittest.TestCase):
         # Original portal link
         self.assertIn('href="https://www.immobilienscout24.de/expose/987654"', msg_text)
 
+    def test_06_get_base_url_live_defaults_to_duckdns(self):
+        """Test that in production/live environment, get_base_url() defaults to https://immofinder-poggel-micciche.duckdns.org."""
+        with patch.dict(os.environ, {"ENV": "production", "APP_BASE_URL": "", "BASE_URL": "", "PUBLIC_URL": ""}):
+            set_system_setting("app_base_url", "")
+            set_system_setting("last_server_base_url", "")
+            base_url = get_base_url()
+            self.assertEqual(base_url, "https://immofinder-poggel-micciche.duckdns.org")
+
+    def test_07_get_base_url_live_rejects_raw_ip(self):
+        """Test that on live server, raw IP addresses in env or DB are rejected and duckdns is used."""
+        with patch.dict(os.environ, {"ENV": "production", "APP_BASE_URL": "http://82.165.123.45:8000"}):
+            set_system_setting("app_base_url", "http://192.168.1.100:8000")
+            set_system_setting("last_server_base_url", "http://10.0.0.5:8000")
+            base_url = get_base_url()
+            self.assertEqual(base_url, "https://immofinder-poggel-micciche.duckdns.org")
+            # cleanup
+            set_system_setting("app_base_url", "")
+            set_system_setting("last_server_base_url", "")
+
+    def test_08_get_base_url_local_keeps_localhost(self):
+        """Test that locally (not production), get_base_url() retains 127.0.0.1 or local settings."""
+        with patch.dict(os.environ, {"ENV": "development", "APP_BASE_URL": "", "BASE_URL": "", "PUBLIC_URL": ""}):
+            set_system_setting("app_base_url", "")
+            set_system_setting("last_local_base_url", "http://127.0.0.1:8000")
+            base_url = get_base_url()
+            self.assertEqual(base_url, "http://127.0.0.1:8000")
+
+
 if __name__ == "__main__":
     unittest.main()
