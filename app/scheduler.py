@@ -31,11 +31,11 @@ async def _crawler_loop():
             is_active = active_setting in ("1", "true", "True")
 
             if is_active and not _is_running_scan:
-                interval_str = get_system_setting("crawler_interval_minutes", "30")
+                interval_str = get_system_setting("crawler_interval_minutes", "60")
                 try:
                     interval_min = max(5, int(interval_str))
                 except ValueError:
-                    interval_min = 30
+                    interval_min = 60
 
                 last_run_str = get_system_setting("crawler_last_run")
                 should_run = False

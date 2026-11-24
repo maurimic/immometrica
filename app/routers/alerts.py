@@ -245,7 +245,7 @@ def get_alert_settings():
     """Returns crawler and Telegram alert settings."""
     tg_token = get_system_setting("telegram_bot_token")
     tg_chat_id = get_system_setting("telegram_chat_id", "")
-    interval = get_system_setting("crawler_interval_minutes", "30")
+    interval = get_system_setting("crawler_interval_minutes", "60")
     active_str = get_system_setting("crawler_active", "0")
     last_run = get_system_setting("crawler_last_run")
 
@@ -262,7 +262,7 @@ def get_alert_settings():
         "telegram_masked_token": mask_token(tg_token),
         "telegram_chat_id": tg_chat_id,
         "app_base_url": get_base_url(),
-        "crawler_interval_minutes": int(interval) if interval and interval.isdigit() else 30,
+        "crawler_interval_minutes": int(interval) if interval and interval.isdigit() else 60,
         "crawler_active": active_str in ("1", "true", "True"),
         "crawler_last_run": last_run,
         "crawler_is_busy": is_crawler_busy(),

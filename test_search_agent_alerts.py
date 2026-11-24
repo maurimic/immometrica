@@ -73,13 +73,13 @@ orig_saved_active = sett.get("crawler_active")
 
 r = client.post("/api/alerts/settings", json={
     "telegram_chat_id": "123456789",
-    "crawler_interval_minutes": 15,
+    "crawler_interval_minutes": 60,
     "crawler_active": False
 })
 assert r.status_code == 200
 sett_after = client.get("/api/alerts/settings").json()
 assert sett_after["telegram_chat_id"] == "123456789"
-assert sett_after["crawler_interval_minutes"] == 15
+assert sett_after["crawler_interval_minutes"] == 60
 print(f"[OK] Test 4: Alert settings updated (Chat-ID: {sett_after['telegram_chat_id']}, Interval: {sett_after['crawler_interval_minutes']}m).")
 
 # Test 5: Telegram Test Endpoint

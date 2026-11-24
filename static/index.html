@@ -2078,7 +2078,7 @@
               <template x-if="alertSettings.crawler_active">
                 <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                  Crawler aktiv (alle <span x-text="alertSettings.crawler_interval_minutes"></span>m)
+                  Crawler aktiv (alle <span x-text="alertSettings.crawler_interval_minutes >= 60 ? (alertSettings.crawler_interval_minutes / 60) + 'h' : alertSettings.crawler_interval_minutes + 'm'"></span>)
                 </span>
               </template>
               <template x-if="!alertSettings.crawler_active">
@@ -2376,21 +2376,26 @@
               <!-- Interval Selector -->
               <div>
                 <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Abfrage-Intervall:</label>
-                <div class="grid grid-cols-3 gap-2">
-                  <button @click="alertSettings.crawler_interval_minutes = 15; saveAlertSettingsForm()"
-                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all"
-                          :class="alertSettings.crawler_interval_minutes === 15 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
-                    Alle 15 Min.
-                  </button>
-                  <button @click="alertSettings.crawler_interval_minutes = 30; saveAlertSettingsForm()"
-                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all"
-                          :class="alertSettings.crawler_interval_minutes === 30 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
-                    Alle 30 Min. (Standard)
-                  </button>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                   <button @click="alertSettings.crawler_interval_minutes = 60; saveAlertSettingsForm()"
-                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all"
+                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
                           :class="alertSettings.crawler_interval_minutes === 60 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
-                    Alle 60 Min.
+                    1h
+                  </button>
+                  <button @click="alertSettings.crawler_interval_minutes = 120; saveAlertSettingsForm()"
+                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
+                          :class="alertSettings.crawler_interval_minutes === 120 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
+                    2h
+                  </button>
+                  <button @click="alertSettings.crawler_interval_minutes = 360; saveAlertSettingsForm()"
+                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
+                          :class="alertSettings.crawler_interval_minutes === 360 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
+                    6h
+                  </button>
+                  <button @click="alertSettings.crawler_interval_minutes = 720; saveAlertSettingsForm()"
+                          class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
+                          :class="alertSettings.crawler_interval_minutes === 720 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
+                    12h
                   </button>
                 </div>
               </div>

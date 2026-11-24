@@ -285,7 +285,8 @@ def init_db():
         """)
 
     # Seed default crawler settings if missing
-    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('crawler_interval_minutes', '30')")
+    cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('crawler_interval_minutes', '60')")
+    cursor.execute("UPDATE system_settings SET value = '60' WHERE key = 'crawler_interval_minutes' AND value IN ('15', '30')")
     cursor.execute("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('crawler_active', '0')")
     conn.commit()
 

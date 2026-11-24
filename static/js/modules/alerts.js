@@ -10,7 +10,7 @@ window.immoAlertsModule = {
     telegram_configured: false,
     telegram_masked_token: null,
     telegram_chat_id: '',
-    crawler_interval_minutes: 30,
+    crawler_interval_minutes: 60,
     crawler_active: false,
     crawler_last_run: null,
     crawler_is_busy: false
