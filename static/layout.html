@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <title>ImmoMetrica | Immobilien finden, die sich rechnen</title>
   
   <!-- Favicon / Tab Logo (Haus mit Lupe) -->
@@ -47,14 +47,14 @@
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.4">
   <!-- Sub-modules for immoApp -->
-  <script src="/static/js/modules/map.js?v=2.3"></script>
-  <script src="/static/js/modules/calculator.js?v=2.3"></script>
-  <script src="/static/js/modules/alerts.js?v=2.3"></script>
-  <script src="/static/js/modules/modals.js?v=2.3"></script>
+  <script src="/static/js/modules/map.js?v=2.4"></script>
+  <script src="/static/js/modules/calculator.js?v=2.4"></script>
+  <script src="/static/js/modules/alerts.js?v=2.4"></script>
+  <script src="/static/js/modules/modals.js?v=2.4"></script>
   <!-- Alpine.js Core & Plugins -->
-  <script defer src="/static/js/app.js?v=2.2"></script>
+  <script defer src="/static/js/app.js?v=2.4"></script>
   <script defer src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js"></script>
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 antialiased min-h-screen flex flex-col transition-colors duration-200" x-data="immoApp">
@@ -63,7 +63,7 @@
   <!-- {{HEADER}} -->
 
   <!-- MAIN BODY CONTAINER -->
-  <main class="flex-1 w-full max-w-[1920px] mx-auto p-4 sm:p-6 lg:p-8 xl:px-10">
+  <main class="flex-1 w-full max-w-[1920px] mx-auto p-3 sm:p-6 lg:p-8 xl:px-10 pb-24 sm:pb-8">
 
     <!-- PORTAL HEALTH & SCRAPER CANARY ALERT BANNER (Global Startpage Notification) -->
     <template x-if="portalAlert && portalAlert.active">
@@ -126,6 +126,54 @@
     <!-- {{TAB_ALERTS}} -->
 
   </main>
+
+  <!-- MOBILE BOTTOM NAVIGATION (Smartphones < 640px) -->
+  <nav class="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-lg px-2 py-1.5 flex items-center justify-around safe-bottom">
+    <button @click="activeTab = 'feed'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'feed' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <div class="relative">
+        <i data-lucide="layout-list" class="w-5 h-5"></i>
+        <template x-if="properties.length > 0">
+          <span class="absolute -top-1 -right-2 px-1 text-[9px] font-bold rounded-full bg-sky-600 text-white leading-tight" x-text="properties.length > 99 ? '99+' : properties.length"></span>
+        </template>
+      </div>
+      <span class="text-[10px] mt-0.5">Deals</span>
+    </button>
+
+    <button @click="activeTab = 'board'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'board' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="kanban" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Pipeline</span>
+    </button>
+
+    <button @click="activeTab = 'calculator'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'calculator' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="calculator" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Rechner</span>
+    </button>
+
+    <button @click="activeTab = 'alerts'; loadAlertsData(); window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'alerts' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <div class="relative">
+        <i data-lucide="radio" class="w-5 h-5" :class="activeTab === 'alerts' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'"></i>
+        <template x-if="alertFeed.length > 0">
+          <span class="absolute -top-1 -right-2 px-1 text-[9px] font-bold rounded-full bg-rose-600 text-white leading-tight" x-text="alertFeed.length > 9 ? '9+' : alertFeed.length"></span>
+        </template>
+      </div>
+      <span class="text-[10px] mt-0.5">Alerts</span>
+    </button>
+
+    <button @click="activeTab = 'map'; initMap(); window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'map' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="map" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Karte</span>
+    </button>
+  </nav>
 
   <!-- {{MODALS}} -->
   <script>

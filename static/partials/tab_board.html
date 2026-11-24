@@ -7,10 +7,23 @@
         </div>
       </div>
 
+      <!-- Mobile Stage Quick Selector Tabs -->
+      <div class="sm:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+        <template x-for="stageData in boardStages" :key="'chip-' + stageData.stage.id">
+          <button type="button" 
+                  @click="document.getElementById('lane-' + stageData.stage.id)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })"
+                  class="px-2.5 py-1 rounded-full text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer">
+            <span class="w-2 h-2 rounded-full" :style="`background-color: ${stageData.stage.color}`"></span>
+            <span x-text="stageData.stage.name"></span>
+            <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold" x-text="stageData.count"></span>
+          </button>
+        </template>
+      </div>
+
       <!-- Kanban Columns -->
-      <div class="kanban-board">
+      <div class="kanban-board snap-x snap-mandatory scroll-smooth">
         <template x-for="stageData in boardStages" :key="stageData.stage.id">
-          <div class="kanban-lane" @dragover="dragOver($event)" @drop="dropDeal($event, stageData.stage.id)">
+          <div :id="'lane-' + stageData.stage.id" class="kanban-lane snap-center" @dragover="dragOver($event)" @drop="dropDeal($event, stageData.stage.id)">
             
             <!-- Lane Header -->
             <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">

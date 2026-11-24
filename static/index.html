@@ -2,7 +2,7 @@
 <html lang="de">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <title>ImmoMetrica | Immobilien finden, die sich rechnen</title>
   
   <!-- Favicon / Tab Logo (Haus mit Lupe) -->
@@ -47,37 +47,37 @@
   <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>
   <!-- Custom CSS -->
-  <link rel="stylesheet" href="/static/css/style.css?v=2.2">
+  <link rel="stylesheet" href="/static/css/style.css?v=2.4">
   <!-- Sub-modules for immoApp -->
-  <script src="/static/js/modules/map.js?v=2.3"></script>
-  <script src="/static/js/modules/calculator.js?v=2.3"></script>
-  <script src="/static/js/modules/alerts.js?v=2.3"></script>
-  <script src="/static/js/modules/modals.js?v=2.3"></script>
+  <script src="/static/js/modules/map.js?v=2.4"></script>
+  <script src="/static/js/modules/calculator.js?v=2.4"></script>
+  <script src="/static/js/modules/alerts.js?v=2.4"></script>
+  <script src="/static/js/modules/modals.js?v=2.4"></script>
   <!-- Alpine.js Core & Plugins -->
-  <script defer src="/static/js/app.js?v=2.2"></script>
+  <script defer src="/static/js/app.js?v=2.4"></script>
   <script defer src="https://unpkg.com/alpinejs@3.13.5/dist/cdn.min.js"></script>
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 antialiased min-h-screen flex flex-col transition-colors duration-200" x-data="immoApp">
 
 
     <!-- TOP HEADER -->
-  <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40 shadow-sm transition-colors duration-200">
-    <div class="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 h-16 flex items-center justify-between gap-4">
+  <header class="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-40 shadow-sm transition-colors duration-200" x-data="{ mobileMenuOpen: false }">
+    <div class="w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-10 h-14 sm:h-16 flex items-center justify-between gap-2 sm:gap-4">
       
       <!-- Brand Logo -->
-      <div class="flex items-center gap-3 shrink-0">
-        <img src="/static/favicon.svg" alt="ImmoMetrica Logo" class="w-10 h-10 rounded-xl shadow-md ring-1 ring-sky-500/20 object-contain" />
+      <div class="flex items-center gap-2 sm:gap-3 shrink-0">
+        <img src="/static/favicon.svg" alt="ImmoMetrica Logo" class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl shadow-md ring-1 ring-sky-500/20 object-contain" />
         <div>
-          <div class="flex items-center gap-2">
-            <span class="font-bold text-xl tracking-tight text-slate-900 dark:text-white">Immo<span class="text-sky-600 dark:text-sky-400">Metrica</span></span>
-            <span class="text-xs bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 font-semibold px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">Pro Clone</span>
+          <div class="flex items-center gap-1.5 sm:gap-2">
+            <span class="font-bold text-lg sm:text-xl tracking-tight text-slate-900 dark:text-white">Immo<span class="text-sky-600 dark:text-sky-400">Metrica</span></span>
+            <span class="text-[10px] sm:text-xs bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 font-semibold px-1.5 sm:px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">Pro</span>
           </div>
-          <p class="text-xs text-slate-500 dark:text-slate-400 hidden md:block">Metasuche über 40+ Portale • Sprengnetter-Marktdaten • Live-Verfügbarkeitsprüfung</p>
+          <p class="text-xs text-slate-500 dark:text-slate-400 hidden lg:block">Metasuche über 40+ Portale • Sprengnetter-Marktdaten • Live-Verfügbarkeitsprüfung</p>
         </div>
       </div>
 
-      <!-- Action Tools -->
-      <div class="flex items-center flex-wrap justify-end gap-2 sm:gap-2.5">
+      <!-- DESKTOP ACTION TOOLS (Visible on >= md screens) -->
+      <div class="hidden md:flex items-center flex-wrap justify-end gap-2">
         
         <!-- Live Status Checker Button (Global) -->
         <button @click="checkAllAvailability()" :disabled="checkingAll" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-800 rounded-lg shadow-2xs transition-colors whitespace-nowrap">
@@ -115,7 +115,7 @@
         <!-- Database Deals Count Badge -->
         <div class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs whitespace-nowrap" title="Lokal in deiner SQLite-Datenbank gespeicherte Deals">
           <i data-lucide="database" class="w-3.5 h-3.5 text-slate-400"></i>
-          <span class="text-slate-500 dark:text-slate-400">Deals in DB:</span>
+          <span class="text-slate-500 dark:text-slate-400">Deals:</span>
           <span class="font-bold text-sky-700 dark:text-sky-400" x-text="properties.length"></span>
         </div>
 
@@ -135,7 +135,7 @@
         <!-- CSV Export Button -->
         <a :href="exportCsvUrl()" download class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg border border-slate-300 dark:border-slate-700 transition-colors whitespace-nowrap">
           <i data-lucide="download" class="w-3.5 h-3.5"></i>
-          <span>CSV Export</span>
+          <span>CSV</span>
         </a>
 
         <!-- KI Vision & Text API-Key Button -->
@@ -144,7 +144,7 @@
                 :class="(hasActiveApiKey) 
                   ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100' 
                   : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100'"
-                :title="activeAiProvider === 'oneprovider' ? 'OneProvider Dev AI ist aktiv' : (activeAiProvider === 'gemini' ? 'Google Gemini ist aktiv' : 'Google Gemini oder OneProvider API-Key hinterlegen')">
+                :title="activeAiProvider === 'oneprovider' ? 'OneProvider Dev AI ist aktiv' : (activeAiProvider === 'gemini' ? 'Google Gemini ist aktiv' : 'API-Key hinterlegen')">
           <i data-lucide="key" class="w-3.5 h-3.5" :class="hasActiveApiKey ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500'"></i>
           <span x-text="headerApiKeyLabel"></span>
         </button>
@@ -157,52 +157,133 @@
           <span>Abmelden</span>
         </button>
 
+      </div>
 
+      <!-- MOBILE ACTION HEADER (Visible on < md screens: Clean & Compact) -->
+      <div class="flex md:hidden items-center gap-1.5 shrink-0">
+        <!-- Portal Health Status Mini Dot Button -->
+        <button @click="runCanaryCheck(true)" :disabled="canaryChecking"
+                class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 transition-colors flex items-center"
+                :title="(!portalHealth || portalHealth.overall === 'healthy') ? 'Portale: OK' : 'Portal-Warnung'">
+          <span class="w-2.5 h-2.5 rounded-full"
+                :class="(!portalHealth || portalHealth.overall === 'healthy') ? 'bg-emerald-500' : (portalHealth.overall === 'critical' ? 'bg-rose-500 animate-ping' : 'bg-amber-500')"></span>
+        </button>
+
+        <!-- Dark Mode / Theme Toggle Button -->
+        <button @click="toggleTheme()" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+          <template x-if="theme === 'system'">
+            <i data-lucide="monitor" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
+          </template>
+          <template x-if="theme === 'dark'">
+            <i data-lucide="moon" class="w-4 h-4 text-amber-400"></i>
+          </template>
+          <template x-if="theme === 'light'">
+            <i data-lucide="sun" class="w-4 h-4 text-amber-500"></i>
+          </template>
+        </button>
+
+        <!-- Mobile Tools Drawer Toggle Button -->
+        <button @click="mobileMenuOpen = !mobileMenuOpen" 
+                class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer"
+                :class="mobileMenuOpen ? 'bg-sky-600 text-white border-sky-600' : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'">
+          <i :data-lucide="mobileMenuOpen ? 'x' : 'menu'" class="w-4 h-4"></i>
+          <span>Tools</span>
+        </button>
       </div>
 
     </div>
 
-    <!-- NAVIGATION TABS -->
-    <div class="w-full max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 flex space-x-6 border-t border-slate-100 dark:border-slate-800 text-sm font-medium overflow-x-auto">
-      <button @click="activeTab = 'feed'" :class="activeTab === 'feed' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+    <!-- MOBILE TOOLS ACCORDION / DRAWER (Opens when tapping 'Tools' on mobile) -->
+    <div x-show="mobileMenuOpen" x-cloak class="md:hidden border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 shadow-xl space-y-2 animate-in slide-in-from-top-2 duration-150">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800 text-xs">
+        <span class="font-bold text-slate-500 dark:text-slate-400">Schnellzugriff &amp; System</span>
+        <div class="flex items-center gap-1.5 font-bold text-sky-700 dark:text-sky-400">
+          <i data-lucide="database" class="w-3.5 h-3.5"></i>
+          <span x-text="`${properties.length} Deals in DB`"></span>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-2 text-xs">
+        <!-- Live Status Checker Button -->
+        <button @click="checkAllAvailability(); mobileMenuOpen = false;" :disabled="checkingAll" class="p-2 text-xs font-semibold text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg border border-emerald-300 dark:border-emerald-800 flex items-center justify-center gap-1.5 text-center">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5" :class="checkingAll ? 'animate-spin' : ''"></i>
+          <span>Live-Status</span>
+        </button>
+
+        <!-- Canary Portal Check Button -->
+        <button @click="runCanaryCheck(true); mobileMenuOpen = false;" :disabled="canaryChecking" class="p-2 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 flex items-center justify-center gap-1.5 text-center">
+          <i data-lucide="activity" class="w-3.5 h-3.5"></i>
+          <span>Portale prüfen</span>
+        </button>
+
+        <!-- Bulk Delete Deactivated Deals -->
+        <button @click="deleteOfflineProperties(); mobileMenuOpen = false;" class="p-2 text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-lg border border-rose-300 dark:border-rose-800 flex items-center justify-center gap-1.5 text-center">
+          <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          <span>Deaktivierte löschen</span>
+        </button>
+
+        <!-- CSV Export Button -->
+        <a :href="exportCsvUrl()" download class="p-2 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 rounded-lg border border-slate-300 dark:border-slate-700 flex items-center justify-center gap-1.5 text-center">
+          <i data-lucide="download" class="w-3.5 h-3.5"></i>
+          <span>CSV Export</span>
+        </a>
+
+        <!-- API-Key Modal Button -->
+        <button @click="openApiKeyModal(); mobileMenuOpen = false;" class="p-2 text-xs font-semibold rounded-lg border flex items-center justify-center gap-1.5 text-center"
+                :class="hasActiveApiKey ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800'">
+          <i data-lucide="key" class="w-3.5 h-3.5"></i>
+          <span x-text="headerApiKeyLabel"></span>
+        </button>
+
+        <!-- Logout Button -->
+        <button @click="logout()" class="p-2 text-xs font-semibold text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 rounded-lg border border-rose-300 dark:border-rose-800 flex items-center justify-center gap-1.5 text-center">
+          <i data-lucide="log-out" class="w-3.5 h-3.5"></i>
+          <span>Abmelden</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- NAVIGATION TABS (Horizontal Scrollable with Hidden Scrollbar) -->
+    <div class="w-full max-w-[1920px] mx-auto px-3 sm:px-6 lg:px-8 xl:px-10 flex space-x-4 sm:space-x-6 border-t border-slate-100 dark:border-slate-800 text-sm font-medium overflow-x-auto no-scrollbar scroll-smooth flex-nowrap">
+      <button @click="activeTab = 'feed'" :class="activeTab === 'feed' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="layout-list" class="w-4 h-4"></i>
-        <span>Dealfeed & Metasuche</span>
-        <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-normal" x-text="properties.length"></span>
+        <span>Dealfeed &amp; Metasuche</span>
+        <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-normal" x-text="properties.length"></span>
       </button>
 
-      <button @click="activeTab = 'board'" :class="activeTab === 'board' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+      <button @click="activeTab = 'board'" :class="activeTab === 'board' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="kanban" class="w-4 h-4"></i>
-        <span>Dealboard (Pipeline)</span>
+        <span>Pipeline</span>
       </button>
 
-      <button @click="activeTab = 'calculator'" :class="activeTab === 'calculator' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+      <button @click="activeTab = 'calculator'" :class="activeTab === 'calculator' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="calculator" class="w-4 h-4"></i>
         <span>Cashflow-Rechner</span>
       </button>
 
-      <button @click="activeTab = 'map'; initMap()" :class="activeTab === 'map' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+      <button @click="activeTab = 'map'; initMap()" :class="activeTab === 'map' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="map" class="w-4 h-4"></i>
-        <span>Interaktive Lagekarte</span>
+        <span>Lagekarte</span>
       </button>
 
-      <button @click="activeTab = 'alerts'; loadAlertsData(); setTimeout(() => lucide.createIcons(), 50)" :class="activeTab === 'alerts' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+      <button @click="activeTab = 'alerts'; loadAlertsData(); setTimeout(() => lucide.createIcons(), 50)" :class="activeTab === 'alerts' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="radio" class="w-4 h-4 text-rose-500"></i>
-        <span>Suchagent & Alerts</span>
+        <span>Suchagent &amp; Alerts</span>
         <template x-if="alertFeed.length > 0">
-          <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 font-bold" x-text="alertFeed.length"></span>
+          <span class="ml-1 text-[11px] px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/70 text-rose-700 dark:text-rose-300 font-bold" x-text="alertFeed.length"></span>
         </template>
       </button>
 
-      <button @click="activeTab = 'info'; setTimeout(() => lucide.createIcons(), 50)" :class="activeTab === 'info' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-3 px-1 border-b-2 flex items-center gap-2 transition-colors whitespace-nowrap">
+      <button @click="activeTab = 'info'; setTimeout(() => lucide.createIcons(), 50)" :class="activeTab === 'info' ? 'border-sky-600 text-sky-600 dark:text-sky-400 dark:border-sky-400 font-semibold' : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'" class="py-2.5 sm:py-3 px-1 border-b-2 flex items-center gap-1.5 sm:gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer">
         <i data-lucide="help-circle" class="w-4 h-4"></i>
-        <span>Info & Anleitung</span>
+        <span>Info</span>
       </button>
     </div>
   </header>
 
 
   <!-- MAIN BODY CONTAINER -->
-  <main class="flex-1 w-full max-w-[1920px] mx-auto p-4 sm:p-6 lg:p-8 xl:px-10">
+  <main class="flex-1 w-full max-w-[1920px] mx-auto p-3 sm:p-6 lg:p-8 xl:px-10 pb-24 sm:pb-8">
 
     <!-- PORTAL HEALTH & SCRAPER CANARY ALERT BANNER (Global Startpage Notification) -->
     <template x-if="portalAlert && portalAlert.active">
@@ -257,31 +338,33 @@
       
       <!-- Filter Bar -->
       <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 space-y-4 transition-colors">
-        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div class="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           
           <!-- Search input with Suchen (DB) & Live-Metasuche (Web) Buttons -->
-          <div class="lg:col-span-3">
+          <div class="col-span-2 sm:col-span-2 md:col-span-4 lg:col-span-3">
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Stichwort / PLZ / Ort</label>
-              <span class="text-[10px] text-slate-400 dark:text-slate-500">DB filtern oder live neue Deals finden</span>
+              <span class="text-[10px] text-slate-400 dark:text-slate-500 hidden sm:inline">DB filtern oder live neue Deals finden</span>
             </div>
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
               <div class="relative flex-1">
-                <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." autocomplete="off" name="deal_search_query" class="w-full pl-8 pr-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
-                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2"></i>
+                <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." autocomplete="off" name="deal_search_query" class="w-full pl-8 pr-2.5 py-2 sm:py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
+                <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 sm:top-2"></i>
               </div>
-              <button @click="fetchProperties()" class="px-2.5 py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
-                <i data-lucide="filter" class="w-3.5 h-3.5"></i>
-                <span>Filter</span>
-              </button>
-              <button @click="triggerLiveScrape(filters.q)" :disabled="isScraping" class="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer transform hover:scale-[1.02]" title="Neue Live-Deals über Portale (Kleinanzeigen, ImmoScout24, Immowelt) suchen & importieren">
-                <i data-lucide="globe" class="w-3.5 h-3.5" :class="isScraping ? 'animate-spin' : ''"></i>
-                <span x-text="isScraping ? 'Suche...' : 'Neue Deals suchen'"></span>
-              </button>
-              <button @click="openUrlImportModal()" class="px-3 py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer transform hover:scale-[1.02]" title="Exposé-Link von Kleinanzeigen, ImmoScout24 oder Immowelt direkt importieren & analysieren">
-                <i data-lucide="link" class="w-3.5 h-3.5"></i>
-                <span>Link importieren</span>
-              </button>
+              <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
+                <button @click="fetchProperties()" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
+                  <i data-lucide="filter" class="w-3.5 h-3.5"></i>
+                  <span>Filter</span>
+                </button>
+                <button @click="triggerLiveScrape(filters.q)" :disabled="isScraping" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Neue Live-Deals über Portale (Kleinanzeigen, ImmoScout24, Immowelt) suchen & importieren">
+                  <i data-lucide="globe" class="w-3.5 h-3.5" :class="isScraping ? 'animate-spin' : ''"></i>
+                  <span x-text="isScraping ? 'Suche...' : 'Deals suchen'"></span>
+                </button>
+                <button @click="openUrlImportModal()" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Exposé-Link direkt importieren">
+                  <i data-lucide="link" class="w-3.5 h-3.5"></i>
+                  <span>Link import</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -387,40 +470,230 @@
         </div>
 
         <!-- 1-KLICK SCHNELLAUSWAHL PRESETS -->
-        <div class="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/80 no-print text-xs">
-          <span class="font-semibold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1">
+        <div class="flex items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800/80 no-print text-xs overflow-x-auto no-scrollbar flex-nowrap sm:flex-wrap py-1">
+          <span class="font-semibold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1 shrink-0">
             <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i>
             <span>Schnellauswahl:</span>
           </span>
 
-          <button @click="applyPreset('all')" class="px-2.5 py-1 font-medium rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">
+          <button @click="applyPreset('all')" class="px-2.5 py-1 font-medium rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors whitespace-nowrap shrink-0">
             🌟 Alle Deals (<span x-text="properties.length"></span>)
           </button>
 
-          <button @click="applyPreset('top_yield')" class="px-2.5 py-1 font-semibold rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 transition-colors">
+          <button @click="applyPreset('top_yield')" class="px-2.5 py-1 font-semibold rounded-lg bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 transition-colors whitespace-nowrap shrink-0">
             🔥 Top-Rendite (> 6%)
           </button>
 
-          <button @click="applyPreset('positive_cashflow')" class="px-2.5 py-1 font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors">
+          <button @click="applyPreset('positive_cashflow')" class="px-2.5 py-1 font-semibold rounded-lg bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors whitespace-nowrap shrink-0">
             💰 Positiver Cashflow
           </button>
 
-          <button @click="applyPreset('private')" class="px-2.5 py-1 font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 transition-colors">
+          <button @click="applyPreset('private')" class="px-2.5 py-1 font-semibold rounded-lg bg-sky-50 dark:bg-sky-950/40 hover:bg-sky-100 dark:hover:bg-sky-900/50 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 transition-colors whitespace-nowrap shrink-0">
             🏷️ Provisionsfrei & Privat
           </button>
 
-          <button @click="applyPreset('undervalued')" class="px-2.5 py-1 font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors">
+          <button @click="applyPreset('undervalued')" class="px-2.5 py-1 font-semibold rounded-lg bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 transition-colors whitespace-nowrap shrink-0">
             📉 Unter Marktwert (Sprengnetter)
           </button>
 
-          <button @click="applyPreset('online')" class="px-2.5 py-1 font-semibold rounded-lg bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors">
+          <button @click="applyPreset('online')" class="px-2.5 py-1 font-semibold rounded-lg bg-teal-50 dark:bg-teal-950/40 hover:bg-teal-100 dark:hover:bg-teal-900/50 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 transition-colors whitespace-nowrap shrink-0">
             🟢 Nur aktive Online-Deals
           </button>
         </div>
       </div>
 
-      <!-- Properties Results View -->
-      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden transition-colors">
+      <!-- Results Header with Deal Count & View Mode Toggle (Karten vs. Tabelle) -->
+      <div class="flex items-center justify-between px-1 text-xs">
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-slate-800 dark:text-slate-200" x-text="`${properties.length} Immobilien gefunden`"></span>
+          <span class="text-[10px] text-slate-400 hidden sm:inline" x-text="filters.online_only ? '(nur aktive Online-Deals)' : ''"></span>
+        </div>
+        <div class="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+          <button @click="viewMode = 'cards'; localStorage.setItem('immo_view_mode', 'cards')" :class="viewMode === 'cards' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-300 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'" class="px-2.5 py-1 rounded-md text-xs flex items-center gap-1 transition-all cursor-pointer" title="Kartenansicht (optimal für Smartphones &amp; Tablets)">
+            <i data-lucide="layout-grid" class="w-3.5 h-3.5"></i>
+            <span>Karten</span>
+          </button>
+          <button @click="viewMode = 'table'; localStorage.setItem('immo_view_mode', 'table')" :class="viewMode === 'table' ? 'bg-white dark:bg-slate-700 text-sky-600 dark:text-sky-300 shadow-xs font-bold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400'" class="px-2.5 py-1 rounded-md text-xs flex items-center gap-1 transition-all cursor-pointer" title="Tabellenansicht (Desktop)">
+            <i data-lucide="table" class="w-3.5 h-3.5"></i>
+            <span>Tabelle</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 1. MOBILE & RESPONSIVE DEAL CARDS VIEW (viewMode === 'cards') -->
+      <div x-show="viewMode === 'cards'" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+        <template x-for="prop in properties" :key="'card-' + prop.id">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 overflow-hidden transition-all hover:shadow-md flex flex-col justify-between">
+            
+            <div>
+              <!-- Top Media / Image Header -->
+              <div class="relative h-44 w-full bg-slate-100 dark:bg-slate-800 overflow-hidden cursor-pointer" @click="openDetailModal(prop, 'overview')">
+                <template x-if="prop.image_url">
+                  <img :src="prop.image_url" alt="" class="w-full h-full object-cover">
+                </template>
+                <template x-if="!prop.image_url">
+                  <div class="w-full h-full flex flex-col items-center justify-center text-slate-400">
+                    <i data-lucide="home" class="w-10 h-10 mb-1"></i>
+                    <span class="text-xs">Kein Vorschaubild</span>
+                  </div>
+                </template>
+
+                <!-- Overlay: Top Badges -->
+                <div class="absolute top-2.5 inset-x-2.5 flex items-center justify-between pointer-events-none">
+                  <div class="flex items-center gap-1.5 flex-wrap pointer-events-auto">
+                    <!-- Source Portal Badge -->
+                    <span class="px-2 py-0.5 rounded-md text-[11px] font-bold shadow-sm"
+                          :class="getPortalBadgeClass(prop.source_portal)" x-text="prop.source_portal"></span>
+                    
+                    <template x-if="prop.is_private">
+                      <span class="px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-500 text-white shadow-sm">
+                        Provisionsfrei
+                      </span>
+                    </template>
+                  </div>
+
+                  <!-- Favorite Button -->
+                  <button @click.stop="toggleFavorite(prop)" class="p-1.5 rounded-full bg-slate-900/60 backdrop-blur-sm text-white hover:text-amber-400 transition-colors pointer-events-auto shadow-sm cursor-pointer">
+                    <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-400 fill-amber-400' : ''"></i>
+                  </button>
+                </div>
+
+                <!-- Overlay: Bottom Price & Discount -->
+                <div class="absolute bottom-2.5 inset-x-2.5 flex items-end justify-between pointer-events-none">
+                  <div class="bg-slate-900/80 backdrop-blur-sm px-2.5 py-1 rounded-xl text-white shadow-md pointer-events-auto">
+                    <div class="text-base font-extrabold" x-text="formatCurrency(prop.purchase_price)"></div>
+                    <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.price_per_sqm)"></div>
+                  </div>
+
+                  <template x-if="prop.market_deviation_percent < -0.1">
+                    <span class="px-2 py-1 rounded-xl text-[11px] font-bold bg-rose-600 text-white shadow-md pointer-events-auto flex items-center gap-1">
+                      <span>🔥</span>
+                      <span x-text="`${formatNumber(prop.market_deviation_percent, 1)}% Marktwert`"></span>
+                    </span>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Card Content -->
+              <div class="p-3.5 space-y-3">
+                <!-- Title & Location -->
+                <div>
+                  <a :href="'?deal=' + prop.id + '&view=audit'" @click.prevent="openDetailModal(prop, 'audit')" 
+                     class="font-bold text-sm text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug" 
+                     x-text="prop.title"></a>
+                  
+                  <div class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
+                    <span class="truncate" x-text="formatPropertyAddress(prop)"></span>
+                    <span class="text-slate-300 dark:text-slate-600">•</span>
+                    <span class="shrink-0" x-text="`Vor ${prop.days_online} Tagen`"></span>
+                  </div>
+                </div>
+
+                <!-- 2x2 Key Metric Grid -->
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                  <!-- Bruttorendite -->
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Bruttorendite</span>
+                    <div class="text-sm font-bold"
+                         :class="prop.gross_yield >= 6.0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-800 dark:text-slate-200'"
+                         x-text="formatPercent(prop.gross_yield, 2)"></div>
+                    <span class="text-[9px] text-slate-400" x-text="prop.is_rented ? 'Ist-Miete' : 'Soll-Mietspiegel'"></span>
+                  </div>
+
+                  <!-- Cashflow -->
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Monatl. Cashflow</span>
+                    <div class="text-sm font-bold"
+                         :class="prop.monthly_cashflow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                         x-text="formatCashflow(prop.monthly_cashflow)"></div>
+                    <span class="text-[9px] text-slate-400">Netto nach Kredit</span>
+                  </div>
+
+                  <!-- Fläche & Zimmer -->
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Fläche &amp; Zimmer</span>
+                    <div class="text-sm font-bold text-slate-800 dark:text-slate-200">
+                      <span x-text="`${formatNumber(prop.living_space, 1)} m²`"></span>
+                      <span class="text-xs font-normal text-slate-400 ml-1" x-text="`• ${prop.rooms} Zi.`"></span>
+                    </div>
+                  </div>
+
+                  <!-- Sprengnetter Marktwert -->
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Marktwert</span>
+                    <div class="text-sm font-bold text-sky-700 dark:text-sky-400 truncate" x-text="formatCurrency(prop.market_value)"></div>
+                  </div>
+                </div>
+
+                <!-- KI-Audit & Live Status Pill -->
+                <div class="flex items-center justify-between gap-2 pt-1">
+                  <div class="flex items-center gap-1.5 flex-wrap">
+                    <template x-if="prop.is_online">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Live Online
+                      </span>
+                    </template>
+                    <template x-if="!prop.is_online">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                        <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                        Deaktiviert
+                      </span>
+                    </template>
+
+                    <!-- KI Verdict Pill -->
+                    <template x-if="prop.ai_analysis">
+                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border"
+                            :class="{
+                              'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800': prop.ai_analysis.status === 'GREEN',
+                              'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-800': prop.ai_analysis.status === 'YELLOW',
+                              'bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-800': prop.ai_analysis.status === 'RED'
+                            }">
+                        <span>🤖</span>
+                        <span x-text="`Score: ${prop.ai_analysis.score}/10`"></span>
+                      </span>
+                    </template>
+                  </div>
+
+                  <div class="flex items-center gap-1">
+                    <!-- Single Live Check Button -->
+                    <button @click.stop="checkPropertyAvailability(prop)" class="p-1.5 rounded-lg text-slate-400 hover:text-sky-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer" title="Verfügbarkeit prüfen">
+                      <i data-lucide="refresh-cw" class="w-3.5 h-3.5" :class="prop.checking ? 'animate-spin text-sky-600' : ''"></i>
+                    </button>
+                    <template x-if="!prop.is_online">
+                      <button @click.stop="deleteProperty(prop.id, $event)" class="p-1.5 rounded-lg text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 cursor-pointer" title="Löschen">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                      </button>
+                    </template>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Action Buttons Footer -->
+            <div class="p-3.5 pt-0">
+              <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button @click="openDetailModal(prop, 'audit')" 
+                        class="w-full py-2 px-3 bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-700 hover:to-sky-800 text-white rounded-xl text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+                  <i data-lucide="microscope" class="w-3.5 h-3.5"></i>
+                  <span>KI-Audit</span>
+                </button>
+
+                <button @click="sendToCalculator(prop); activeTab = 'calculator';" 
+                        class="w-full py-2 px-3 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+                  <i data-lucide="calculator" class="w-3.5 h-3.5"></i>
+                  <span>Rechner</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </template>
+      </div>
+
+      <!-- 2. DESKTOP PROPERTIES TABLE VIEW (viewMode === 'table') -->
+      <div x-show="viewMode === 'table'" class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden transition-colors">
         
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-800 text-left text-xs">
@@ -692,10 +965,23 @@
         </div>
       </div>
 
+      <!-- Mobile Stage Quick Selector Tabs -->
+      <div class="sm:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
+        <template x-for="stageData in boardStages" :key="'chip-' + stageData.stage.id">
+          <button type="button" 
+                  @click="document.getElementById('lane-' + stageData.stage.id)?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })"
+                  class="px-2.5 py-1 rounded-full text-xs font-semibold bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs flex items-center gap-1.5 shrink-0 whitespace-nowrap cursor-pointer">
+            <span class="w-2 h-2 rounded-full" :style="`background-color: ${stageData.stage.color}`"></span>
+            <span x-text="stageData.stage.name"></span>
+            <span class="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-bold" x-text="stageData.count"></span>
+          </button>
+        </template>
+      </div>
+
       <!-- Kanban Columns -->
-      <div class="kanban-board">
+      <div class="kanban-board snap-x snap-mandatory scroll-smooth">
         <template x-for="stageData in boardStages" :key="stageData.stage.id">
-          <div class="kanban-lane" @dragover="dragOver($event)" @drop="dropDeal($event, stageData.stage.id)">
+          <div :id="'lane-' + stageData.stage.id" class="kanban-lane snap-center" @dragover="dragOver($event)" @drop="dropDeal($event, stageData.stage.id)">
             
             <!-- Lane Header -->
             <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
@@ -753,7 +1039,7 @@
         <!-- TAB 3: CASHFLOW CALCULATOR -->
     <div x-show="activeTab === 'calculator'" class="space-y-6">
       
-      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-6">
+      <div class="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-3.5 sm:p-6">
         <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100 dark:border-slate-800">
           <div>
             <h2 class="text-lg font-bold text-slate-900 dark:text-white">Immobilien-Rendite & Cashflow-Rechner</h2>
@@ -901,7 +1187,7 @@
                         <span class="text-xs font-black text-sky-600 dark:text-sky-400" x-text="`${formatNumber(calc.interest_rate, 2)} % p.a.`"></span>
                       </div>
                       <span class="text-[11px] text-slate-500 dark:text-slate-400 block mt-0.5">
-                        Ermittelt für <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.price)"></strong> Kaufpreis &amp; <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.price - (calc.equity_type === 'percent' ? (calc.price * calc.equity_value / 100) : calc.equity_value))"></strong> Darlehen (Dr. Klein Live-Schnittstelle)
+                        Ermittelt für <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.price)"></strong> Kaufpreis &amp; <strong class="text-slate-700 dark:text-slate-300" x-text="formatCurrency(calc.result?.loan_amount || (calc.price - (calc.equity_type === 'percent' ? (calc.price * calc.equity_value / 100) : calc.equity_value)))"></strong> Darlehen (Dr. Klein Live-Schnittstelle)
                       </span>
                     </div>
                   </div>
@@ -2285,11 +2571,59 @@
 
   </main>
 
+  <!-- MOBILE BOTTOM NAVIGATION (Smartphones < 640px) -->
+  <nav class="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 shadow-lg px-2 py-1.5 flex items-center justify-around safe-bottom">
+    <button @click="activeTab = 'feed'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'feed' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <div class="relative">
+        <i data-lucide="layout-list" class="w-5 h-5"></i>
+        <template x-if="properties.length > 0">
+          <span class="absolute -top-1 -right-2 px-1 text-[9px] font-bold rounded-full bg-sky-600 text-white leading-tight" x-text="properties.length > 99 ? '99+' : properties.length"></span>
+        </template>
+      </div>
+      <span class="text-[10px] mt-0.5">Deals</span>
+    </button>
+
+    <button @click="activeTab = 'board'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'board' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="kanban" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Pipeline</span>
+    </button>
+
+    <button @click="activeTab = 'calculator'; window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'calculator' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="calculator" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Rechner</span>
+    </button>
+
+    <button @click="activeTab = 'alerts'; loadAlertsData(); window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'alerts' ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <div class="relative">
+        <i data-lucide="radio" class="w-5 h-5" :class="activeTab === 'alerts' ? 'text-rose-600 dark:text-rose-400' : 'text-slate-500'"></i>
+        <template x-if="alertFeed.length > 0">
+          <span class="absolute -top-1 -right-2 px-1 text-[9px] font-bold rounded-full bg-rose-600 text-white leading-tight" x-text="alertFeed.length > 9 ? '9+' : alertFeed.length"></span>
+        </template>
+      </div>
+      <span class="text-[10px] mt-0.5">Alerts</span>
+    </button>
+
+    <button @click="activeTab = 'map'; initMap(); window.scrollTo({top: 0, behavior: 'smooth'});" 
+            class="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-all cursor-pointer"
+            :class="activeTab === 'map' ? 'text-sky-600 dark:text-sky-400 font-bold' : 'text-slate-500 dark:text-slate-400 font-medium'">
+      <i data-lucide="map" class="w-5 h-5"></i>
+      <span class="text-[10px] mt-0.5">Karte</span>
+    </button>
+  </nav>
+
       <!-- ========================================================================= -->
     <!-- MODAL: SUCHPROFIL ANLEGEN / BEARBEITEN                                    -->
     <!-- ========================================================================= -->
-    <div x-show="searchProfileModalOpen" class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4" style="display: none;">
-      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-xl w-full p-6 sm:p-7 space-y-5 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white" @click.outside="searchProfileModalOpen = false">
+    <div x-show="searchProfileModalOpen" class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4" style="display: none;">
+      <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-xl w-full p-4 sm:p-7 space-y-4 sm:space-y-5 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white max-h-[92vh] overflow-y-auto" @click.outside="searchProfileModalOpen = false">
         
         <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
           <div class="flex items-center gap-2">
@@ -2398,8 +2732,8 @@
 
 
   <!-- URL SCHNELLIMPORT MODAL -->
-  <div x-show="urlImportModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-    <div @click.away="urlImportModalOpen = false" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 text-slate-800 dark:text-slate-100 space-y-4">
+  <div x-show="urlImportModalOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm">
+    <div @click.away="urlImportModalOpen = false" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-lg w-full p-4 sm:p-6 text-slate-800 dark:text-slate-100 space-y-4 max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
         <div class="flex items-center gap-2.5">
           <div class="w-8 h-8 rounded-lg bg-sky-100 dark:bg-sky-950 text-sky-600 dark:text-sky-400 flex items-center justify-center font-bold">
@@ -2450,69 +2784,71 @@
 
   <!-- DETAIL MODAL -->
   <div x-show="detailModalOpen" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
-    <div class="immo-modal-container bg-white dark:bg-slate-900 shadow-2xl w-full p-6 sm:p-8 space-y-6 relative border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 transition-all overflow-y-auto"
-         :class="isModalFullscreen ? 'max-w-none w-screen h-screen max-h-screen rounded-none fixed inset-0 z-50 p-6 sm:p-10' : 'max-w-6xl max-h-[94vh] rounded-2xl'"
+    <div class="immo-modal-container bg-white dark:bg-slate-900 shadow-2xl w-full p-3.5 sm:p-6 md:p-8 space-y-5 sm:space-y-6 relative border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-slate-100 transition-all overflow-y-auto"
+         :class="isModalFullscreen ? 'max-w-none w-screen h-screen max-h-screen rounded-none fixed inset-0 z-50 p-3.5 sm:p-6 md:p-10' : 'max-w-6xl max-h-[94vh] rounded-2xl'"
          @click.outside="if (!lightboxOpen && !offerModalOpen && !showApiKeyModal) closeDetailModal()">
       
       <!-- Top Action bar with Quick-Jump, Fullscreen, Share Link, New Tab, and Close -->
-      <div class="sticky top-0 z-30 -mx-6 -mt-6 sm:-mx-8 sm:-mt-8 mb-4 px-4 sm:px-6 py-2.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 overflow-x-auto">
-        <!-- Quick Jump Navigation -->
-        <div class="flex items-center gap-1.5 text-xs font-semibold shrink-0">
+      <div class="sticky top-0 z-30 -mx-3.5 -mt-3.5 sm:-mx-6 sm:-mt-6 md:-mx-8 md:-mt-8 mb-4 px-3 sm:px-6 py-2.5 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2 w-full">
+          <!-- Property Title Snippet -->
+          <div class="flex items-center gap-2 min-w-0 flex-1" x-show="selectedProperty">
+            <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 shrink-0" x-text="selectedProperty?.source_portal"></span>
+            <span class="text-xs font-bold text-slate-800 dark:text-slate-200 truncate" x-text="selectedProperty?.title"></span>
+          </div>
+
+          <!-- Sharing, Fullscreen & Pinned Close Button -->
+          <div class="flex items-center gap-1.5 shrink-0 ml-auto">
+            <template x-if="selectedProperty">
+              <button @click="copyDealShareLink(selectedProperty, modalActiveSection || 'audit')"
+                      class="p-1.5 sm:px-3 sm:py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
+                      title="Link kopieren">
+                <i data-lucide="share-2" class="w-3.5 h-3.5"></i>
+                <span class="hidden sm:inline ml-1">Link</span>
+              </button>
+            </template>
+            <template x-if="selectedProperty">
+              <a :href="'?deal=' + selectedProperty.id + '&view=' + (modalActiveSection || 'audit')"
+                 target="_blank"
+                 class="p-1.5 sm:px-3 sm:py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold shadow-2xs transition-all"
+                 title="In neuem Tab öffnen">
+                <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
+                <span class="hidden sm:inline ml-1">Tab</span>
+              </a>
+            </template>
+            <button @click="isModalFullscreen = !isModalFullscreen; syncUrl(false)"
+                    class="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer hidden sm:inline-flex"
+                    title="Vollbild">
+              <i :data-lucide="isModalFullscreen ? 'minimize-2' : 'maximize-2'" class="w-3.5 h-3.5"></i>
+            </button>
+            <!-- Pinned Mobile-Friendly Close Button -->
+            <button @click="closeDetailModal()"
+                    class="p-1.5 sm:p-2 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-all cursor-pointer shadow-xs"
+                    title="Schließen (Esc)">
+              <i data-lucide="x" class="w-4 h-4 sm:w-4.5 sm:h-4.5"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Jump Navigation Tabs (Touch-Scrollable without horizontal scrollbar) -->
+        <div class="flex items-center gap-1.5 text-xs font-semibold overflow-x-auto no-scrollbar scroll-smooth pb-0.5">
           <button @click="scrollToSection('property-overview')"
-                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   :class="modalActiveSection === 'overview' ? 'bg-sky-600 text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'">
             <span>📊</span>
             <span>Übersicht</span>
           </button>
           <button @click="scrollToSection('ki-audit-section')"
-                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   :class="modalActiveSection === 'audit' ? 'bg-sky-600 text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'">
             <span>🤖</span>
             <span>KI-Audit &amp; Due Diligence</span>
           </button>
           <button @click="scrollToSection('gallery-section')"
-                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
+                  class="px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0"
                   :class="modalActiveSection === 'gallery' ? 'bg-sky-600 text-white shadow-xs' : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'">
             <span>📸</span>
             <span>Bilder &amp; Gewerke</span>
-          </button>
-        </div>
-
-        <!-- Sharing & Window Controls -->
-        <div class="flex items-center gap-2 shrink-0">
-          <!-- Kopiere Link Button -->
-          <template x-if="selectedProperty">
-            <button @click="copyDealShareLink(selectedProperty, modalActiveSection || 'audit')"
-                    class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 text-xs font-semibold shadow-2xs transition-all cursor-pointer"
-                    title="Teilbaren Direktlink mit geöffnetem KI-Audit in Zwischenablage kopieren">
-              <i data-lucide="share-2" class="w-3.5 h-3.5"></i>
-              <span class="hidden sm:inline">Link kopieren</span>
-            </button>
-          </template>
-
-          <!-- Im neuen Tab öffnen Link -->
-          <template x-if="selectedProperty">
-            <a :href="'?deal=' + selectedProperty.id + '&view=' + (modalActiveSection || 'audit')"
-               target="_blank"
-               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 text-xs font-semibold shadow-2xs transition-all"
-               title="In separatem Browser-Tab öffnen (für direkten Tab-Vergleich nebeneinander)">
-              <i data-lucide="external-link" class="w-3.5 h-3.5"></i>
-              <span class="hidden sm:inline">Neuer Tab</span>
-            </a>
-          </template>
-
-          <!-- Vollbild / Ganze Seite Toggle -->
-          <button @click="isModalFullscreen = !isModalFullscreen; syncUrl(false)"
-                  class="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 transition-all cursor-pointer"
-                  :title="isModalFullscreen ? 'Fenster verkleinern' : 'Vollbildmodus (Ganze Seite für Tab-Vergleich)'">
-            <i :data-lucide="isModalFullscreen ? 'minimize-2' : 'maximize-2'" class="w-4 h-4"></i>
-          </button>
-
-          <!-- Close button -->
-          <button @click="closeDetailModal()"
-                  class="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
-                  title="Schließen (Esc)">
-            <i data-lucide="x" class="w-5 h-5"></i>
           </button>
         </div>
       </div>
@@ -2615,18 +2951,18 @@
               </template>
             </div>
 
-            <div class="flex items-center gap-2">
-              <button @click="showPropertyOnMap(selectedProperty); detailModalOpen = false;" class="px-3.5 py-2 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors" title="Auf interaktiver Karte anzeigen & fokussieren">
+            <div class="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+              <button @click="showPropertyOnMap(selectedProperty); detailModalOpen = false;" class="flex-1 sm:flex-none justify-center px-3.5 py-2 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Auf interaktiver Karte anzeigen & fokussieren">
                 <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
                 <span>Auf Karte</span>
               </button>
 
-              <button @click="deleteProperty(selectedProperty.id)" class="px-3 py-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors" title="Deal unwiderruflich löschen">
+              <button @click="deleteProperty(selectedProperty.id)" class="px-3 py-2 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-400 border border-rose-300 dark:border-rose-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Deal unwiderruflich löschen">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
                 <span>Löschen</span>
               </button>
 
-              <button @click="sendToCalculator(selectedProperty); detailModalOpen = false;" class="px-4 py-2 bg-slate-900 dark:bg-sky-600 hover:bg-slate-800 dark:hover:bg-sky-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors">
+              <button @click="sendToCalculator(selectedProperty); detailModalOpen = false;" class="w-full sm:w-auto justify-center px-4 py-2 bg-slate-900 dark:bg-sky-600 hover:bg-slate-800 dark:hover:bg-sky-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer">
                 <i data-lucide="calculator" class="w-3.5 h-3.5"></i>
                 <span>Im Rechner durchkalkulieren</span>
               </button>
@@ -3936,8 +4272,8 @@
   </div>
 
   <!-- MODAL: AI MODEL & MULTI-PROVIDER API-KEY CONFIGURATION -->
-  <div x-show="showApiKeyModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-    <div @click.away="showApiKeyModal = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 transition-colors">
+  <div x-show="showApiKeyModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+    <div @click.away="showApiKeyModal = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 transition-colors max-h-[92vh] overflow-y-auto">
       
       <!-- Modal Header -->
       <div class="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-sky-600 via-indigo-600 to-indigo-700 text-white">
@@ -4263,8 +4599,8 @@
   </div>
 
   <!-- MODAL: LIVE DEAL SCRAPER & CRAWLER -->
-  <div x-show="showScrapeModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-    <div @click.away="if (!isScraping) showScrapeModal = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 transition-colors">
+  <div x-show="showScrapeModal" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+    <div @click.away="if (!isScraping) showScrapeModal = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-lg w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden animate-in fade-in zoom-in-95 duration-150 transition-colors max-h-[92vh] overflow-y-auto">
       
       <!-- Modal Header -->
       <div class="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-gradient-to-r from-emerald-600 to-teal-600 text-white">
@@ -4354,8 +4690,8 @@
   </div>
 
   <!-- MODAL: ANKAUFS-WORKFLOW (SCHRITT 1: UNTERLAGEN-E-MAIL -> SCHRITT 2: LETTER OF INTENT) -->
-  <div x-show="offerModalOpen" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-    <div @click.away="offerModalOpen = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden text-slate-900 dark:text-slate-100 transition-colors animate-in fade-in zoom-in-95 duration-150">
+  <div x-show="offerModalOpen" x-cloak class="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
+    <div @click.away="offerModalOpen = false" class="bg-white dark:bg-slate-900 rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden text-slate-900 dark:text-slate-100 transition-colors animate-in fade-in zoom-in-95 duration-150 max-h-[92vh] overflow-y-auto">
       
       <!-- Modal Header -->
       <div class="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-white transition-colors"

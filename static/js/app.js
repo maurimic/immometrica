@@ -12,7 +12,8 @@ document.addEventListener('alpine:init', () => {
         return 'feed';
       })(),
     infoSubTab: 'guide', // 'guide' (Leitfaden/Handbuch) or 'mcp' (Model Context Protocol)
-    viewMode: 'table', // 'table' or 'grid'
+    viewMode: (typeof window !== 'undefined' && window.innerWidth < 768) ? 'cards' : 'table', // default to cards on mobile
+    mobileMenuOpen: false,
 
     // Data state
     properties: [],
@@ -123,6 +124,16 @@ document.addEventListener('alpine:init', () => {
           this.applyTheme('system');
         }
       });
+
+      // Initialize view mode (default to cards on mobile, or user saved preference)
+      try {
+        const savedView = localStorage.getItem('immo_view_mode');
+        if (savedView && ['cards', 'table'].includes(savedView)) {
+          this.viewMode = savedView;
+        } else if (typeof window !== 'undefined' && window.innerWidth < 768) {
+          this.viewMode = 'cards';
+        }
+      } catch (e) {}
 
       // Initialize URL Routing & Deep Linking immediately before async data calls
       this.initRouter();
