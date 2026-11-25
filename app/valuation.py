@@ -23,6 +23,50 @@ CITY_BENCHMARKS = {
     "Hannover": {"avg_sqm_buy": 3200.0, "avg_sqm_rent": 11.20, "avg_yield": 4.20, "state": "Niedersachsen"},
     "Duisburg": {"avg_sqm_buy": 1850.0, "avg_sqm_rent": 8.10, "avg_yield": 5.25, "state": "Nordrhein-Westfalen"},
     "Magdeburg": {"avg_sqm_buy": 2100.0, "avg_sqm_rent": 7.90, "avg_yield": 4.51, "state": "Sachsen-Anhalt"},
+    "Bochum": {"avg_sqm_buy": 2550.0, "avg_sqm_rent": 9.40, "avg_yield": 4.42, "state": "Nordrhein-Westfalen"},
+    "Wuppertal": {"avg_sqm_buy": 2250.0, "avg_sqm_rent": 8.70, "avg_yield": 4.64, "state": "Nordrhein-Westfalen"},
+    "Bielefeld": {"avg_sqm_buy": 2950.0, "avg_sqm_rent": 10.20, "avg_yield": 4.15, "state": "Nordrhein-Westfalen"},
+    "Bonn": {"avg_sqm_buy": 4350.0, "avg_sqm_rent": 13.80, "avg_yield": 3.81, "state": "Nordrhein-Westfalen"},
+    "Münster": {"avg_sqm_buy": 4450.0, "avg_sqm_rent": 13.60, "avg_yield": 3.67, "state": "Nordrhein-Westfalen"},
+    "Aachen": {"avg_sqm_buy": 3450.0, "avg_sqm_rent": 11.40, "avg_yield": 3.97, "state": "Nordrhein-Westfalen"},
+    "Gelsenkirchen": {"avg_sqm_buy": 1650.0, "avg_sqm_rent": 7.60, "avg_yield": 5.53, "state": "Nordrhein-Westfalen"},
+    "Mönchengladbach": {"avg_sqm_buy": 2400.0, "avg_sqm_rent": 9.10, "avg_yield": 4.55, "state": "Nordrhein-Westfalen"},
+    "Krefeld": {"avg_sqm_buy": 2350.0, "avg_sqm_rent": 8.90, "avg_yield": 4.54, "state": "Nordrhein-Westfalen"},
+    "Oberhausen": {"avg_sqm_buy": 1950.0, "avg_sqm_rent": 8.30, "avg_yield": 5.11, "state": "Nordrhein-Westfalen"},
+    "Hagen": {"avg_sqm_buy": 1850.0, "avg_sqm_rent": 8.00, "avg_yield": 5.19, "state": "Nordrhein-Westfalen"},
+    "Hamm": {"avg_sqm_buy": 2150.0, "avg_sqm_rent": 8.50, "avg_yield": 4.74, "state": "Nordrhein-Westfalen"},
+    "Herne": {"avg_sqm_buy": 1850.0, "avg_sqm_rent": 7.90, "avg_yield": 5.12, "state": "Nordrhein-Westfalen"},
+    "Mülheim an der Ruhr": {"avg_sqm_buy": 2650.0, "avg_sqm_rent": 9.50, "avg_yield": 4.30, "state": "Nordrhein-Westfalen"},
+    "Solingen": {"avg_sqm_buy": 2550.0, "avg_sqm_rent": 9.30, "avg_yield": 4.38, "state": "Nordrhein-Westfalen"},
+    "Leverkusen": {"avg_sqm_buy": 3350.0, "avg_sqm_rent": 11.30, "avg_yield": 4.05, "state": "Nordrhein-Westfalen"},
+    "Karlsruhe": {"avg_sqm_buy": 3950.0, "avg_sqm_rent": 13.00, "avg_yield": 3.95, "state": "Baden-Württemberg"},
+    "Mannheim": {"avg_sqm_buy": 3600.0, "avg_sqm_rent": 12.20, "avg_yield": 4.07, "state": "Baden-Württemberg"},
+    "Freiburg": {"avg_sqm_buy": 5250.0, "avg_sqm_rent": 15.20, "avg_yield": 3.47, "state": "Baden-Württemberg"},
+    "Heidelberg": {"avg_sqm_buy": 5100.0, "avg_sqm_rent": 14.90, "avg_yield": 3.51, "state": "Baden-Württemberg"},
+    "Ulm": {"avg_sqm_buy": 4100.0, "avg_sqm_rent": 12.60, "avg_yield": 3.69, "state": "Baden-Württemberg"},
+    "Augsburg": {"avg_sqm_buy": 4250.0, "avg_sqm_rent": 13.10, "avg_yield": 3.70, "state": "Bayern"},
+    "Regensburg": {"avg_sqm_buy": 4650.0, "avg_sqm_rent": 13.50, "avg_yield": 3.48, "state": "Bayern"},
+    "Würzburg": {"avg_sqm_buy": 4100.0, "avg_sqm_rent": 12.40, "avg_yield": 3.63, "state": "Bayern"},
+    "Erlangen": {"avg_sqm_buy": 4550.0, "avg_sqm_rent": 13.60, "avg_yield": 3.59, "state": "Bayern"},
+    "Fürth": {"avg_sqm_buy": 3550.0, "avg_sqm_rent": 11.80, "avg_yield": 3.99, "state": "Bayern"},
+    "Ingolstadt": {"avg_sqm_buy": 4600.0, "avg_sqm_rent": 13.40, "avg_yield": 3.50, "state": "Bayern"},
+    "Chemnitz": {"avg_sqm_buy": 1550.0, "avg_sqm_rent": 6.60, "avg_yield": 5.11, "state": "Sachsen"},
+    "Halle": {"avg_sqm_buy": 2050.0, "avg_sqm_rent": 7.80, "avg_yield": 4.57, "state": "Sachsen-Anhalt"},
+    "Erfurt": {"avg_sqm_buy": 2850.0, "avg_sqm_rent": 9.40, "avg_yield": 3.96, "state": "Thüringen"},
+    "Potsdam": {"avg_sqm_buy": 4700.0, "avg_sqm_rent": 13.80, "avg_yield": 3.52, "state": "Brandenburg"},
+    "Rostock": {"avg_sqm_buy": 3300.0, "avg_sqm_rent": 10.20, "avg_yield": 3.71, "state": "Mecklenburg-Vorpommern"},
+    "Lübeck": {"avg_sqm_buy": 3450.0, "avg_sqm_rent": 11.00, "avg_yield": 3.83, "state": "Schleswig-Holstein"},
+    "Kiel": {"avg_sqm_buy": 3150.0, "avg_sqm_rent": 10.60, "avg_yield": 4.04, "state": "Schleswig-Holstein"},
+    "Braunschweig": {"avg_sqm_buy": 3100.0, "avg_sqm_rent": 10.50, "avg_yield": 4.06, "state": "Niedersachsen"},
+    "Osnabrück": {"avg_sqm_buy": 2950.0, "avg_sqm_rent": 10.10, "avg_yield": 4.11, "state": "Niedersachsen"},
+    "Oldenburg": {"avg_sqm_buy": 3350.0, "avg_sqm_rent": 10.80, "avg_yield": 3.87, "state": "Niedersachsen"},
+    "Wiesbaden": {"avg_sqm_buy": 4200.0, "avg_sqm_rent": 13.40, "avg_yield": 3.83, "state": "Hessen"},
+    "Mainz": {"avg_sqm_buy": 4350.0, "avg_sqm_rent": 13.90, "avg_yield": 3.83, "state": "Rheinland-Pfalz"},
+    "Darmstadt": {"avg_sqm_buy": 4400.0, "avg_sqm_rent": 13.70, "avg_yield": 3.74, "state": "Hessen"},
+    "Kassel": {"avg_sqm_buy": 2550.0, "avg_sqm_rent": 9.10, "avg_yield": 4.28, "state": "Hessen"},
+    "Offenbach": {"avg_sqm_buy": 3850.0, "avg_sqm_rent": 13.10, "avg_yield": 4.08, "state": "Hessen"},
+    "Saarbrücken": {"avg_sqm_buy": 2450.0, "avg_sqm_rent": 9.20, "avg_yield": 4.51, "state": "Saarland"},
+    "Saarlouis": {"avg_sqm_buy": 2350.0, "avg_sqm_rent": 8.90, "avg_yield": 4.54, "state": "Saarland"},
 }
 
 DEFAULT_BENCHMARK = {"avg_sqm_buy": 3100.0, "avg_sqm_rent": 10.50, "avg_yield": 4.06, "state": "Nordrhein-Westfalen"}
@@ -129,8 +173,8 @@ def evaluate_property_valuation(
     safe_property_type = str(property_type or "Eigentumswohnung")
 
     # Construction year multiplier
-    from datetime import datetime
-    current_year = max(2026, datetime.now().year)
+    from app.datetime_utils import get_berlin_now
+    current_year = get_berlin_now().year
     age = max(0, current_year - safe_year_built)
     if age < 5:
         age_factor = 1.25  # Neubau

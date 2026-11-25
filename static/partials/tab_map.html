@@ -35,11 +35,11 @@
         </div>
       </div>
 
-      <!-- Split View Grid: Left Companion Listing Column + Right Map Canvas -->
+      <!-- Split View Grid: Map Canvas first on mobile, side-by-side 4/8 split on Desktop -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         
-        <!-- Left: Companion Listing Column (4 cols) -->
-        <div class="lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 flex flex-col h-[700px]">
+        <!-- Left: Companion Listing Column (4 cols on desktop, compact list below map on mobile) -->
+        <div class="order-2 lg:order-1 lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-3 sm:p-4 flex flex-col h-[340px] sm:h-[440px] lg:h-[700px]">
           <div class="flex items-center justify-between pb-3 mb-2 border-b border-slate-200 dark:border-slate-800">
             <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <i data-lucide="list" class="w-3.5 h-3.5"></i>
@@ -154,8 +154,8 @@
           </div>
         </div>
 
-        <!-- Right: Map Canvas (8 cols) -->
-        <div class="lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[700px]">
+        <!-- Right: Map Canvas (8 cols on desktop, compact above list on mobile) -->
+        <div class="order-1 lg:order-2 lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[400px] sm:h-[520px] lg:h-[700px]">
           
           <!-- Map Legend Overlay -->
           <div class="absolute top-4 left-4 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 shadow-md flex items-center gap-3 text-[11px]">

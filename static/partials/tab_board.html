@@ -67,6 +67,19 @@
                     </div>
                   </template>
 
+                  <!-- Touch- & Mobile-friendly Stage Mover (alternative to HTML5 Drag & Drop) -->
+                  <div class="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2" @click.stop>
+                    <label class="text-[10px] font-medium text-slate-400 dark:text-slate-500 shrink-0">Phase:</label>
+                    <select :value="stageData.stage.id"
+                            @change.stop="moveDeal(deal.id, $event.target.value)"
+                            aria-label="Deal-Phase verschieben"
+                            class="w-full py-1 px-2 text-[11px] font-semibold rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer">
+                      <template x-for="st in boardStages" :key="'mv-' + deal.id + '-' + st.stage.id">
+                        <option :value="st.stage.id" x-text="st.stage.name" :selected="st.stage.id === stageData.stage.id"></option>
+                      </template>
+                    </select>
+                  </div>
+
                 </div>
               </template>
             </div>

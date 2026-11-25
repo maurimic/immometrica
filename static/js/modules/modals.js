@@ -71,6 +71,10 @@ window.immoModalsModule = {
   isImportingUrl: false,
   importError: '',
 
+  // Deal Notes State
+  newNoteText: '',
+  isSavingNote: false,
+
   async openApiKeyModal(pendingPropId = null) {
     this.pendingPropertyIdForAnalysis = pendingPropId;
     this.apiKeyFeedback = null;
@@ -669,6 +673,37 @@ E-Mail: ${this.offerData.buyerEmail}`;
       this.showToast(this.importError, 'error');
     } finally {
       this.isImportingUrl = false;
+    }
+  },
+
+  async addPropertyNote() {
+    if (!this.selectedProperty || !this.selectedProperty.id) return;
+    const text = (this.newNoteText || '').trim();
+    if (!text) {
+      this.showToast('Bitte gib eine Notiz ein.', 'info');
+      return;
+    }
+    this.isSavingNote = true;
+    try {
+      const res = this.handleAuthResponse(await fetch(`/api/properties/${this.selectedProperty.id}/notes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: text })
+      }));
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.detail || `Notiz konnte nicht gespeichert werden (${res.status})`);
+      }
+      this.selectedProperty.notes = Array.isArray(data.notes) ? data.notes : (this.selectedProperty.notes || []);
+      this.newNoteText = '';
+      this.showToast('Notiz gespeichert.', 'success');
+      this.$nextTick(() => {
+        if (window.lucide) window.lucide.createIcons();
+      });
+    } catch (err) {
+      this.showToast('Fehler beim Speichern der Notiz: ' + err.message, 'error');
+    } finally {
+      this.isSavingNote = false;
     }
   }
 };

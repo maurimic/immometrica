@@ -42,270 +42,293 @@ def extract_immoscout_id(url_or_id: str) -> Optional[str]:
     return None
 
 
+def _map_immoscout_types(property_type: str = "all") -> List[tuple]:
+    """Maps configured property_type to (api_type, property_type, building_type) tuples."""
+    pt = str(property_type or "all").lower().strip()
+    if any(k in pt for k in ("grundst", "plot", "land")):
+        return [("sitebuy", "Grundstück", "Grundstück")]
+    if any(k in pt for k in ("mehrfamilien", "mfh", "zinshaus")):
+        return [("housebuy", "Mehrfamilienhaus", "Mehrfamilienhaus")]
+    if any(k in pt for k in ("einfamilien", "efh", "haus", "house")):
+        return [("housebuy", "Einfamilienhaus", "Haus")]
+    if any(k in pt for k in ("wohnung", "etw", "apartment", "maisonette", "penthouse")):
+        return [("apartmentbuy", "Eigentumswohnung", "Etagenwohnung")]
+    return [
+        ("apartmentbuy", "Eigentumswohnung", "Etagenwohnung"),
+        ("housebuy", "Einfamilienhaus", "Haus"),
+    ]
+
+
 def search_immoscout_deals(
     city: str,
     query: str = "",
     radius_km: int = 15,
     max_results: int = 15,
-    property_type: str = "apartmentbuy",
-    exclude_urls: Optional[Any] = None
+    property_type: str = "all",
+    exclude_urls: Optional[Any] = None,
+    postal_code: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Queries live ImmoScout24 listings using the reverse-engineered mobile REST API.
-    Resolves geo-coordinates for the city centroid, sorts by newest ('firstactivation'),
-    supports pagination (pages 1 to 3), and skips known candidate URLs.
+    Resolves geo-coordinates for the city/PLZ centroid, sorts by newest ('firstactivation'),
+    supports multiple property types (ETW/EFH/MFH/Grundstück), pagination (pages 1 to 3),
+    and skips known candidate URLs.
     """
     from app.geo_resolver import resolve_city_coordinates, resolve_location_and_tax
     from app.calculator import calculate_cashflow
     from app.valuation import evaluate_property_valuation
+    from app.scrapers.deal_fusion import normalize_portal_url
 
-    # Map property type
-    pt_norm = property_type.lower()
-    if "haus" in pt_norm or "house" in pt_norm:
-        api_type = "housebuy"
-        detected_p_type = "Einfamilienhaus"
-        detected_b_type = "Haus"
-    else:
-        api_type = "apartmentbuy"
-        detected_p_type = "Eigentumswohnung"
-        detected_b_type = "Etagenwohnung"
-
-    # Resolve city center coordinates
-    center_lat, center_lng = resolve_city_coordinates(city=city)
+    api_targets = _map_immoscout_types(property_type)
+    plz_clean = re.sub(r"\D", "", str(postal_code or ""))[:5]
+    center_lat, center_lng = resolve_city_coordinates(city=city, postal_code=plz_clean or None)
+    eff_radius = max(1, int(radius_km if radius_km is not None and int(radius_km) > 0 else 15))
 
     url = f"{BASE_API_URL}/search/list"
-    exclude_set = set(exclude_urls) if exclude_urls else set()
+    exclude_set = {normalize_portal_url(u) for u in exclude_urls} if exclude_urls else set()
     results: List[Dict[str, Any]] = []
     seen_urls = set()
 
-    for page in range(1, 4):
+    for api_type, detected_p_type, detected_b_type in api_targets:
         if len(results) >= max_results:
             break
-
-        params = {
-            "searchType": "radius",
-            "realestatetype": api_type,
-            "geocoordinates": f"{center_lat:.4f};{center_lng:.4f};{radius_km}",
-            "pagesize": min(max_results * 2, 50),
-            "pagenumber": page,
-            "sorting": "firstactivation"
-        }
-
-        try:
-            resp = requests.post(
-                url,
-                params=params,
-                headers=MOBILE_HEADERS,
-                json={},
-                timeout=6.0
-            )
-            if resp.status_code != 200:
-                logger.warning(f"ImmoScout mobile API returned HTTP {resp.status_code}: {resp.text[:200]}")
+        for page in range(1, 4):
+            if len(results) >= max_results:
                 break
 
-            data = resp.json()
-            items = data.get("resultListItems", [])
-            if not items:
-                break
+            params = {
+                "searchType": "radius",
+                "realestatetype": api_type,
+                "geocoordinates": f"{center_lat:.4f};{center_lng:.4f};{eff_radius}",
+                "pagesize": min(max_results * 2, 50),
+                "pagenumber": page,
+                "sorting": "firstactivation"
+            }
 
-            for wrap in items:
-                it = wrap.get("item")
-                if not it or not it.get("id"):
-                    continue
-
-                expose_id = str(it["id"])
-                title = it.get("title") or "Immobilienangebot ImmoScout24"
-                portal_url = f"https://www.immobilienscout24.de/expose/{expose_id}"
-
-                if portal_url in seen_urls:
-                    continue
-                if exclude_set and portal_url in exclude_set:
-                    continue
-                seen_urls.add(portal_url)
-
-                # Filter query keyword if provided
-                if query and query.lower() not in title.lower():
-                    continue
-    
-                # Extract price, sqm, rooms from attributes array
-                price = 0.0
-                sqm = 0.0
-                rooms = 2.0
-                for attr in it.get("attributes", []):
-                    val = str(attr.get("value", "")).strip()
-                    lbl = str(attr.get("label", "")).lower()
-                    if "€" in val and price <= 0 and "m²" not in val and "hausgeld" not in lbl and "miete" not in lbl:
-                        # Strip optional decimal cents (",00") before removing thousands separators
-                        no_dec = re.sub(r",\d{1,2}\b", "", val)
-                        clean_pr = re.sub(r"[^\d]", "", no_dec)
-                        if clean_pr:
-                            price = float(clean_pr)
-                    elif "m²" in val and sqm <= 0 and "grundstück" not in lbl and "nutzfläche" not in lbl:
-                        m_sq = re.search(r"([\d,\.]+)", val)
-                        if m_sq:
-                            raw_sq = m_sq.group(1)
-                            try:
-                                if "," in raw_sq:
-                                    norm_sq = raw_sq.replace(".", "").replace(",", ".")
-                                elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
-                                    norm_sq = raw_sq.replace(".", "")
-                                else:
-                                    norm_sq = raw_sq
-                                sqm = float(norm_sq)
-                            except ValueError:
-                                pass
-                    elif "Zi" in val and rooms == 2.0:
-                        clean_rm = re.sub(r"[^\d,\.]", "", val).replace(",", ".")
-                        if clean_rm:
-                            try:
-                                rooms = float(clean_rm)
-                            except ValueError:
-                                pass
-    
-                if price < 15000:
-                    continue
-    
-                if sqm <= 0:
-                    sqm = max(30.0, round(price / 3000.0, 1))
-    
-                # Address & Coordinates
-                addr_obj = it.get("address") or {}
-                line = addr_obj.get("line") or f"{city}"
-                raw_lat = addr_obj.get("lat")
-                raw_lon = addr_obj.get("lon")
-    
-                # Extract PLZ and City from line
-                plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", line)
-                if plz_match:
-                    extracted_plz = plz_match.group(1)
-                    extracted_city = plz_match.group(2)
-                else:
-                    extracted_plz = ""
-                    extracted_city = city
-    
-                resolved_city = extracted_city or city
-                geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
-                resolved_state = geo_info["state"]
-
-                if raw_lat is not None and raw_lon is not None and float(raw_lat) > 0:
-                    prop_lat = float(raw_lat)
-                    prop_lng = float(raw_lon)
-                else:
-                    prop_lat, prop_lng = resolve_city_coordinates(
-                        city=resolved_city,
-                        postal_code=extracted_plz,
-                        street=line,
-                        fallback_city=city,
-                        index=len(results),
-                        allow_geocoder=True
-                    )
-    
-                # Image & Gallery
-                gallery = []
-                if it.get("pictures"):
-                    for pic in it["pictures"]:
-                        raw_p = pic.get("urlScaleAndCrop") or pic.get("url") or pic.get("full") or ""
-                        if raw_p:
-                            gallery.append(raw_p.replace("%WIDTH%", "1200").replace("%HEIGHT%", "900"))
-    
-                tp = it.get("titlePicture") or {}
-                img_url = tp.get("full") or tp.get("preview")
-                if not img_url and gallery:
-                    img_url = gallery[0]
-    
-                if not img_url:
-                    img_url = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
-    
-                if not gallery and img_url:
-                    gallery = [img_url]
-    
-                # Benchmark, Rent & Cashflow
-                benchmark = evaluate_property_valuation(resolved_city, sqm, price)
-                expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
-                expected_rent = round(sqm * expected_rent_per_sqm, 2)
-                is_rented = 1 if "vermietet" in title.lower() else 0
-                current_rent = expected_rent if is_rented else 0.0
-                gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if price > 0 else 0.0
-    
-                cf = calculate_cashflow(
-                    price=price,
-                    rent=expected_rent,
-                    city=resolved_city,
-                    state=resolved_state,
-                    living_space=sqm
+            try:
+                resp = requests.post(
+                    url,
+                    params=params,
+                    headers=MOBILE_HEADERS,
+                    json={},
+                    timeout=6.0
                 )
-                monthly_cashflow = cf.get("monthly_cashflow", 0.0)
-    
-                is_private = 1 if it.get("isPrivate") or "privat" in title.lower() else 0
-                comm_pct = 0.0 if is_private else 3.57
-    
-                tags = ["Live Scraped", "ImmoScout24", resolved_state]
-                if gross_yield >= 5.5:
-                    tags.append("Top-Rendite")
-                if monthly_cashflow > 0:
-                    tags.append("Positiver Cashflow")
-                if is_private:
-                    tags.append("Provisionsfrei")
-    
-                from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
-                now_str = get_berlin_now_str()
-    
-                deal_record = {
-                    "title": title,
-                    "address": line,
-                    "postal_code": extracted_plz,
-                    "city": resolved_city,
-                    "state": resolved_state,
-                    "country": "DE",
-                    "property_type": detected_p_type,
-                    "building_type": detected_b_type,
-                    "rooms": rooms,
-                    "living_space": sqm,
-                    "land_area": 0.0,
-                    "year_built": 1980,
-                    "condition": "Gepflegt",
-                    "purchase_price": price,
-                    "original_price": price,
-                    "price_drop_amount": 0.0,
-                    "price_drop_percent": 0.0,
-                    "commission_percent": comm_pct,
-                    "current_rent": current_rent,
-                    "expected_rent": expected_rent,
-                    "gross_yield": gross_yield,
-                    "monthly_cashflow": monthly_cashflow,
-                    "market_value": benchmark.get("estimated_market_value", price),
-                    "market_value_per_sqm": benchmark.get("estimated_market_value_per_sqm", 2800.0),
-                    "market_deviation_percent": benchmark.get("market_deviation_percent", 0.0),
-                    "source_portal": "ImmoScout24",
-                    "portal_url": portal_url,
-                    "source_portals": [{"portal": "ImmoScout24", "url": portal_url, "price": price}],
-                    "image_url": img_url,
-                    "gallery_images": json.dumps(gallery),
-                    "days_online": 1,
-                    "first_seen_date": get_berlin_today_str(),
-                    "is_private": is_private,
-                    "is_rented": is_rented,
-                    "is_foreclosure": 0,
-                    "is_favorite": 0,
-                    "pipeline_stage": "merkliste" if gross_yield >= 5.0 else "neu",
-                    "tags": str(tags).replace("'", '"'),
-                    "lat": prop_lat,
-                    "lng": prop_lng,
-                    "parcel_id": None,
-                    "parcel_area": 0.0,
-                    "is_online": 1,
-                    "availability_status": "online",
-                    "status_message": "Live erreichbar & aktiv (ImmoScout24 API verifiziert)",
-                    "last_checked_at": now_str,
-                    "live_search_url": f"https://www.immobilienscout24.de/Suche/de/{resolved_city.lower()}/wohnung-kaufen"
-                }
-                results.append(deal_record)
-    
-                if len(results) >= max_results:
+                if resp.status_code != 200:
+                    logger.warning(f"ImmoScout mobile API returned HTTP {resp.status_code}: {resp.text[:200]}")
                     break
-    
-        except Exception as e:
-            logger.error(f"Error querying ImmoScout mobile API: {e}")
+
+                data = resp.json()
+                items = data.get("resultListItems", [])
+                if not items:
+                    break
+
+                for wrap in items:
+                    it = wrap.get("item")
+                    if not it or not it.get("id"):
+                        continue
+
+                    expose_id = str(it["id"])
+                    title = it.get("title") or "Immobilienangebot ImmoScout24"
+                    portal_url = normalize_portal_url(f"https://www.immobilienscout24.de/expose/{expose_id}")
+
+                    if portal_url in seen_urls:
+                        continue
+                    if exclude_set and portal_url in exclude_set:
+                        continue
+                    seen_urls.add(portal_url)
+
+                    # Filter query keyword if provided
+                    if query and query.lower() not in title.lower():
+                        continue
+        
+                    # Extract price, sqm, rooms from attributes array
+                    price = 0.0
+                    sqm = 0.0
+                    rooms = 2.0
+                    for attr in it.get("attributes", []):
+                        val = str(attr.get("value", "")).strip()
+                        lbl = str(attr.get("label", "")).lower()
+                        if "€" in val and price <= 0 and "m²" not in val and "hausgeld" not in lbl and "miete" not in lbl:
+                            # Strip optional decimal cents (",00") before removing thousands separators
+                            no_dec = re.sub(r",\d{1,2}\b", "", val)
+                            clean_pr = re.sub(r"[^\d]", "", no_dec)
+                            if clean_pr:
+                                price = float(clean_pr)
+                        elif "m²" in val and sqm <= 0 and "grundstück" not in lbl and "nutzfläche" not in lbl:
+                            m_sq = re.search(r"([\d,\.]+)", val)
+                            if m_sq:
+                                raw_sq = m_sq.group(1)
+                                try:
+                                    if "," in raw_sq:
+                                        norm_sq = raw_sq.replace(".", "").replace(",", ".")
+                                    elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
+                                        norm_sq = raw_sq.replace(".", "")
+                                    else:
+                                        norm_sq = raw_sq
+                                    sqm = float(norm_sq)
+                                except ValueError:
+                                    pass
+                        elif "Zi" in val and rooms == 2.0:
+                            clean_rm = re.sub(r"[^\d,\.]", "", val).replace(",", ".")
+                            if clean_rm:
+                                try:
+                                    rooms = float(clean_rm)
+                                except ValueError:
+                                    pass
+        
+                    if price < 15000:
+                        continue
+        
+                    if sqm <= 0:
+                        sqm = max(30.0, round(price / 3000.0, 1))
+        
+                    # Address & Coordinates
+                    addr_obj = it.get("address") or {}
+                    line = addr_obj.get("line") or f"{city or plz_clean}"
+                    raw_lat = addr_obj.get("lat")
+                    raw_lon = addr_obj.get("lon")
+        
+                    # Extract PLZ and City from line
+                    plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", line)
+                    if plz_match:
+                        extracted_plz = plz_match.group(1)
+                        extracted_city = plz_match.group(2)
+                    else:
+                        extracted_plz = plz_clean or ""
+                        extracted_city = city
+        
+                    resolved_city = extracted_city or city
+                    geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
+                    resolved_state = geo_info["state"]
+
+                    if raw_lat is not None and raw_lon is not None and float(raw_lat) > 0:
+                        prop_lat = float(raw_lat)
+                        prop_lng = float(raw_lon)
+                    else:
+                        prop_lat, prop_lng = resolve_city_coordinates(
+                            city=resolved_city,
+                            postal_code=extracted_plz,
+                            street=line,
+                            fallback_city=city,
+                            index=len(results),
+                            allow_geocoder=True
+                        )
+
+                    # Refine property type from title when housebuy covers EFH and MFH
+                    row_p_type = detected_p_type
+                    row_b_type = detected_b_type
+                    t_low = title.lower()
+                    if api_type == "housebuy" and any(k in t_low for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
+                        row_p_type = "Mehrfamilienhaus"
+                        row_b_type = "Mehrfamilienhaus"
+        
+                    # Image & Gallery
+                    gallery = []
+                    if it.get("pictures"):
+                        for pic in it["pictures"]:
+                            raw_p = pic.get("urlScaleAndCrop") or pic.get("url") or pic.get("full") or ""
+                            if raw_p:
+                                gallery.append(raw_p.replace("%WIDTH%", "1200").replace("%HEIGHT%", "900"))
+        
+                    tp = it.get("titlePicture") or {}
+                    img_url = tp.get("full") or tp.get("preview")
+                    if not img_url and gallery:
+                        img_url = gallery[0]
+        
+                    if not img_url:
+                        img_url = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
+        
+                    if not gallery and img_url:
+                        gallery = [img_url]
+        
+                    # Benchmark, Rent & Cashflow
+                    benchmark = evaluate_property_valuation(resolved_city, sqm, price, property_type=row_p_type)
+                    expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
+                    expected_rent = round(sqm * expected_rent_per_sqm, 2) if row_p_type != "Grundstück" else 0.0
+                    is_rented = 1 if ("vermietet" in t_low and "unvermietet" not in t_low) else 0
+                    current_rent = 0.0
+                    gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
+        
+                    cf = calculate_cashflow(
+                        price=price,
+                        rent=expected_rent,
+                        city=resolved_city,
+                        state=resolved_state,
+                        postal_code=extracted_plz,
+                        living_space=sqm
+                    )
+                    monthly_cashflow = cf.get("monthly_cashflow", 0.0)
+        
+                    is_private = 1 if it.get("isPrivate") or "privat" in t_low else 0
+                    comm_pct = 0.0 if is_private else 3.57
+        
+                    tags = ["Live Scraped", "ImmoScout24", resolved_state]
+                    if gross_yield >= 5.5:
+                        tags.append("Top-Rendite")
+                    if monthly_cashflow > 0:
+                        tags.append("Positiver Cashflow")
+                    if is_private:
+                        tags.append("Provisionsfrei")
+        
+                    from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+                    now_str = get_berlin_now_str()
+        
+                    deal_record = {
+                        "title": title,
+                        "address": line,
+                        "postal_code": extracted_plz,
+                        "city": resolved_city,
+                        "state": resolved_state,
+                        "country": "DE",
+                        "property_type": row_p_type,
+                        "building_type": row_b_type,
+                        "rooms": rooms,
+                        "living_space": sqm,
+                        "land_area": 0.0,
+                        "year_built": 1980,
+                        "condition": "Gepflegt",
+                        "purchase_price": price,
+                        "original_price": price,
+                        "price_drop_amount": 0.0,
+                        "price_drop_percent": 0.0,
+                        "commission_percent": comm_pct,
+                        "current_rent": current_rent,
+                        "expected_rent": expected_rent,
+                        "gross_yield": gross_yield,
+                        "monthly_cashflow": monthly_cashflow,
+                        "market_value": benchmark.get("estimated_market_value", price),
+                        "market_value_per_sqm": benchmark.get("estimated_market_value_per_sqm", 2800.0),
+                        "market_deviation_percent": benchmark.get("market_deviation_percent", 0.0),
+                        "source_portal": "ImmoScout24",
+                        "portal_url": portal_url,
+                        "source_portals": [{"portal": "ImmoScout24", "url": portal_url, "price": price}],
+                        "image_url": img_url,
+                        "gallery_images": json.dumps(gallery),
+                        "days_online": 1,
+                        "first_seen_date": get_berlin_today_str(),
+                        "is_private": is_private,
+                        "is_rented": is_rented,
+                        "is_foreclosure": 0,
+                        "is_favorite": 0,
+                        "pipeline_stage": "merkliste" if gross_yield >= 5.0 else "neu",
+                        "tags": str(tags).replace("'", '"'),
+                        "lat": prop_lat,
+                        "lng": prop_lng,
+                        "parcel_id": None,
+                        "parcel_area": 0.0,
+                        "is_online": 1,
+                        "availability_status": "online",
+                        "status_message": "Live erreichbar & aktiv (ImmoScout24 API verifiziert)",
+                        "last_checked_at": now_str,
+                        "live_search_url": f"https://www.immobilienscout24.de/Suche/de/{resolved_city.lower()}/wohnung-kaufen"
+                    }
+                    results.append(deal_record)
+        
+                    if len(results) >= max_results:
+                        break
+        
+            except Exception as e:
+                logger.error(f"Error querying ImmoScout mobile API: {e}")
 
     return results
 

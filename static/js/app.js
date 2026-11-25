@@ -397,6 +397,12 @@ document.addEventListener('alpine:init', () => {
     },
 
     async triggerLiveScrape(targetCity = null) {
+      if (targetCity !== null && String(targetCity).trim() === '') {
+        this.scrapeStatusMsg = '';
+        this.showScrapeModal = true;
+        this.$nextTick(() => { if (window.lucide) lucide.createIcons(); });
+        return;
+      }
       const cityToScrape = (targetCity || this.scrapeCity || this.filters.q || 'Dortmund').trim();
       if (!cityToScrape) {
         this.showToast('Bitte gib eine Stadt ein (z. B. Dortmund, Saarlouis, Nürnberg oder Bochum).', 'warning');

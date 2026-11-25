@@ -8,8 +8,10 @@ and feeds real-time interest rates into the Cashflow & Investment Calculator.
 import re
 import json
 import logging
+import time
+import threading
 from datetime import datetime, timedelta
-from app.datetime_utils import get_berlin_now_str
+from app.datetime_utils import get_berlin_now, get_berlin_now_str
 from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 import requests
@@ -18,6 +20,10 @@ from bs4 import BeautifulSoup
 from app.database import get_system_setting, set_system_setting
 
 logger = logging.getLogger("immometrica.interest_service")
+
+_MEM_QUOTE_LOCK = threading.RLock()
+_MEM_QUOTE_CACHE: Dict[str, tuple] = {}
+_MEM_QUOTE_TTL_SECONDS = 300.0
 
 # Fallback rates if external internet source is temporarily unavailable
 FALLBACK_RATES: Dict[str, Any] = {
@@ -139,7 +145,8 @@ def get_live_mortgage_rates(force_refresh: bool = False) -> Dict[str, Any]:
                 fetched_at_str = cached_data.get("last_fetched_at")
                 if fetched_at_str:
                     fetched_at = datetime.strptime(fetched_at_str, "%Y-%m-%d %H:%M:%S")
-                    if datetime.now() - fetched_at < timedelta(hours=6):
+                    berlin_now = get_berlin_now().replace(tzinfo=None)
+                    if berlin_now - fetched_at < timedelta(hours=6):
                         cached_data["cached"] = True
                         return cached_data
             except Exception as e:
@@ -166,8 +173,10 @@ def get_live_mortgage_rates(force_refresh: bool = False) -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Hard fallback
+    # Hard fallback (dynamische Berliner Zeitstempel statt Modul-Import-Zeit)
     fallback = dict(FALLBACK_RATES)
+    fallback["as_of_date"] = get_berlin_now_str("%d.%m.%Y")
+    fallback["last_fetched_at"] = get_berlin_now_str()
     fallback["cached"] = False
     fallback["warning"] = "Live-Abfrage fehlgeschlagen, Referenz-Marktzins verwendet."
     return fallback
@@ -317,6 +326,14 @@ def fetch_drklein_quote_for_property(
     cache_key = f"drklein_quote_{p_bracket}_{loan_bracket}_{plz_clean or 'none'}_{term_years}_{repay_bracket}"
 
     if not force_refresh:
+        with _MEM_QUOTE_LOCK:
+            mem_entry = _MEM_QUOTE_CACHE.get(cache_key)
+            if mem_entry and (time.monotonic() - mem_entry[0]) < _MEM_QUOTE_TTL_SECONDS:
+                cached_copy = dict(mem_entry[1])
+                cached_copy["cached"] = True
+                cached_copy["calculator_url"] = calc_url
+                return cached_copy
+
         raw_cache = get_system_setting(cache_key)
         if raw_cache:
             try:
@@ -324,9 +341,12 @@ def fetch_drklein_quote_for_property(
                 fetched_at_str = cached_data.get("fetched_at")
                 if fetched_at_str:
                     fetched_at = datetime.strptime(fetched_at_str, "%Y-%m-%d %H:%M:%S")
-                    if datetime.now() - fetched_at < timedelta(hours=12):
+                    berlin_now = get_berlin_now().replace(tzinfo=None)
+                    if berlin_now - fetched_at < timedelta(hours=12):
                         cached_data["cached"] = True
                         cached_data["calculator_url"] = calc_url
+                        with _MEM_QUOTE_LOCK:
+                            _MEM_QUOTE_CACHE[cache_key] = (time.monotonic(), dict(cached_data))
                         return cached_data
             except Exception as e:
                 logger.warning(f"Error reading quote cache for {cache_key}: {e}")
@@ -383,6 +403,8 @@ def fetch_drklein_quote_for_property(
                     "is_live_quote": True,
                     "fetched_at": get_berlin_now_str()
                 }
+                with _MEM_QUOTE_LOCK:
+                    _MEM_QUOTE_CACHE[cache_key] = (time.monotonic(), dict(result))
                 try:
                     set_system_setting(cache_key, json.dumps(result, ensure_ascii=False))
                 except Exception as e:

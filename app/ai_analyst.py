@@ -1941,7 +1941,9 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         commission_percent=commission_pct,
         additional_costs=non_rec_monthly
     )
+    resolved_quote_rate = cf_data.get("interest_rate")
 
+    # Rent variation does not change purchase price / loan volume -> reuse quote interest rate without extra HTTP requests
     potential_cf_data = calculate_cashflow(
         price=price,
         rent=expected_market_rent,
@@ -1950,7 +1952,8 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         postal_code=prop_plz,
         living_space=sqm,
         commission_percent=commission_pct,
-        additional_costs=non_rec_monthly
+        additional_costs=non_rec_monthly,
+        interest_rate=resolved_quote_rate
     )
     potential_monthly_cashflow = potential_cf_data.get("monthly_cashflow", 0.0)
 
@@ -1968,11 +1971,12 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         living_space=sqm,
         commission_percent=commission_pct,
         additional_costs=non_rec_monthly,
-        renovation_costs=capex_amount
+        renovation_costs=capex_amount,
+        interest_rate=resolved_quote_rate if capex_amount <= 0 else None
     ) if capex_amount > 0 else cf_data
 
-    monthly_hausgeld = float(insights.get("hausgeld") or 250.0)
-    non_recoverable_annual = non_rec_monthly * 12.0 if insights.get("has_explicit_hausgeld") else (monthly_hausgeld * 12.0 * 0.35)
+    # Einheitliche Basis mit calculator.py: non_rec_monthly (50 €/M Standard sofern kein explizites Hausgeld vorliegt)
+    non_recoverable_annual = non_rec_monthly * 12.0
     net_rental_income = (annual_rent if annual_rent > 0 else potential_annual_rent) - non_recoverable_annual
     real_net_yield = round((net_rental_income / effective_total_investment) * 100.0, 2) if effective_total_investment > 0 else 0.0
 

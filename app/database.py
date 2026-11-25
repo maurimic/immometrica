@@ -172,15 +172,27 @@ def init_db():
             cursor.execute("UPDATE properties SET lat = ?, lng = ? WHERE id = ?", (key[0], key[1], pid))
         seen_coords.add(key)
 
+    # Deduplicate existing identical portal_url entries before enforcing UNIQUE index
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS saved_searches (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        filters TEXT NOT NULL,
-        notify_email INTEGER DEFAULT 1,
-        frequency TEXT DEFAULT 'instant',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
+        SELECT portal_url, MIN(id) AS keep_id
+        FROM properties
+        WHERE portal_url IS NOT NULL AND portal_url != ''
+        GROUP BY portal_url
+        HAVING COUNT(*) > 1
+    """)
+    for dup_url, keep_id in cursor.fetchall():
+        cursor.execute("SELECT id FROM properties WHERE portal_url = ? AND id != ?", (dup_url, keep_id))
+        dup_ids = [r[0] for r in cursor.fetchall()]
+        if dup_ids:
+            placeholders = ",".join("?" for _ in dup_ids)
+            cursor.execute(f"UPDATE deal_notes SET property_id = ? WHERE property_id IN ({placeholders})", [keep_id, *dup_ids])
+            cursor.execute(f"UPDATE deal_alerts SET property_id = ? WHERE property_id IN ({placeholders})", [keep_id, *dup_ids])
+            cursor.execute(f"DELETE FROM properties WHERE id IN ({placeholders})", dup_ids)
+
+    cursor.execute("""
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_properties_portal_url_unique
+    ON properties(portal_url)
+    WHERE portal_url IS NOT NULL AND portal_url != ''
     """)
 
     cursor.execute("""
@@ -669,15 +681,6 @@ def seed_data(conn):
             item["is_private"], item["is_rented"], item["is_foreclosure"], 0, "neu",
             json.dumps(tags), item["lat"], item["lng"], item["parcel_id"], item["parcel_area"]
         ))
-
-    # Add default saved searches
-    cursor.execute("""
-    INSERT OR IGNORE INTO saved_searches (name, filters)
-    VALUES 
-    ('NRW Cashflow MFH ab 7%', '{"state": "Nordrhein-Westfalen", "property_type": "Mehrfamilienhaus", "min_yield": 6.5, "positive_cashflow": true}'),
-    ('Leipzig & Dresden Schnäppchen unter Marktwert', '{"cities": ["Leipzig", "Dresden"], "undervalued_only": true, "max_price": 300000}'),
-    ('Bundesweite ZVG Zwangsversteigerungen', '{"foreclosure_only": true}')
-    """)
 
     # Add initial API Token if table is empty
     cursor.execute("SELECT COUNT(*) FROM api_tokens")

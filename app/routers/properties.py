@@ -222,8 +222,14 @@ def list_properties(
         params.append(max_price)
 
     if min_yield is not None:
+        actual_yield_sql = (
+            "CASE "
+            "WHEN is_rented = 1 AND current_rent > 0 THEN ((current_rent * 12.0 / NULLIF(purchase_price, 0)) * 100.0) "
+            "WHEN is_rented = 1 AND gross_yield > 0 AND (expected_rent <= 0 OR ABS(gross_yield - ((expected_rent * 12.0 / NULLIF(purchase_price, 0)) * 100.0)) > 0.05) THEN gross_yield "
+            "ELSE 0.0 END"
+        )
         if yield_basis == "actual":
-            conditions.append("gross_yield >= ?")
+            conditions.append(f"{actual_yield_sql} >= ?")
             params.append(min_yield)
         elif yield_basis == "potential":
             conditions.append("((expected_rent * 12.0 / NULLIF(purchase_price, 0)) * 100.0) >= ?")
@@ -1046,11 +1052,12 @@ def run_property_ai_audit(
     insights["postal_code"] = new_plz
     insights["corrected_city"] = new_city
 
-    # Recalculate micro-location analysis and Google Maps links with verified address & coordinates
+    # Recalculate micro-location precision and Google Maps links without unused heuristic POI calculations
     report["location_analysis"] = analyze_property_location_and_pois(
         prop,
         full_description=desc_clean,
-        insights=insights
+        insights=insights,
+        include_pois=False
     )
     new_prop_type = insights.get("corrected_property_type") or prop.get("property_type")
     new_year_built = int(insights["year_built_extracted"]) if insights.get("year_built_extracted") else prop.get("year_built")
@@ -1488,7 +1495,10 @@ def trigger_live_scrape(payload: Dict[str, Any] = Body(...), request: Request = 
         min_yield=min_yield,
         yield_basis=yield_basis,
         min_price=min_price,
-        max_price=max_price
+        max_price=max_price,
+        postal_code=(payload.get("postal_code") or "").strip() or None,
+        radius_km=int(payload.get("radius_km") or 25),
+        property_type=(payload.get("property_type") or "all").strip()
     )
     new_ids = import_scraped_deals_returning_ids(deals)
     saved_count = len(new_ids)

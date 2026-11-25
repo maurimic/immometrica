@@ -150,6 +150,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         }
 
     city = profile.get("city", "").strip()
+    postal_code = (profile.get("postal_code") or "").strip() or None
     search_query = profile.get("search_query", "").strip()
     radius_km = int(profile.get("radius_km") or 25)
     max_price = float(profile.get("max_price") or 0.0)
@@ -161,13 +162,21 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
     min_living_space = float(profile.get("min_living_space") or 0.0)
     property_type = (profile.get("property_type") or "all").lower().strip()
 
-    logger.info(f"Running search profile #{profile_id} '{profile['name']}' for {city} across portals...")
+    logger.info(f"Running search profile #{profile_id} '{profile['name']}' for {city or postal_code} across portals...")
 
     # Load seen URLs for this profile to prevent re-crawling identical deals
     seen_urls = get_seen_listing_urls(profile_id)
 
     # 1. Multi-Portal Meta-Search (Kleinanzeigen, ImmoScout24, Immowelt)
-    scraped_deals = scrape_multi_portal_deals(city=city, query=search_query, max_results=50, exclude_urls=seen_urls)
+    scraped_deals = scrape_multi_portal_deals(
+        city=city,
+        query=search_query,
+        max_results=50,
+        exclude_urls=seen_urls,
+        postal_code=postal_code,
+        radius_km=radius_km,
+        property_type=property_type
+    )
 
     qualified_deals: List[Dict[str, Any]] = []
     new_alerts_count = 0
@@ -246,7 +255,15 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         if min_yield > 0:
             from app.valuation import get_mietspiegel_size_benchmark, evaluate_property_valuation
             deal_city = deal.get("city") or city
-            actual_yield = raw_yield
+            deal_cur_rent = float(deal.get("current_rent") or 0.0)
+            deal_is_rented = bool(deal.get("is_rented"))
+            # For 'actual', keep rented deals even if card summary didn't list rent yet so Stage 3 exposé can extract actual rent;
+            # reject unrented deals unless actual rent was extracted or benchmark mode applies.
+            actual_yield = (
+                round(((deal_cur_rent * 12.0) / raw_price) * 100.0, 2)
+                if (deal_is_rented and deal_cur_rent > 0 and raw_price > 0)
+                else 0.0
+            )
 
             # 1. Erwartete Benchmark-Rendite (mit Baujahr & Zustand falls im Inserat vorhanden)
             exp_rent = float(deal.get("expected_rent") or 0.0)
@@ -271,11 +288,12 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             potential_yield = max(expected_yield, mietspiegel_size_yield)
 
             if yield_basis == "actual":
-                effective_yield = actual_yield
+                # Do not discard a 'vermietet' listing in Stage 1 solely because the teaser card omitted exact EUR rent
+                effective_yield = actual_yield if (deal_cur_rent > 0 or not deal_is_rented) else max(actual_yield, raw_yield)
             elif yield_basis == "potential":
                 effective_yield = potential_yield
             else: # "any" (Standard: Ist- ODER Mietspiegel-Potenzial)
-                effective_yield = max(actual_yield, potential_yield)
+                effective_yield = max(actual_yield, raw_yield, potential_yield)
 
             if effective_yield < min_yield:
                 filtered_stage1_2 += 1
@@ -341,6 +359,12 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         audited_sqm = float(metrics.get("living_space") or raw_sqm)
         audited_price_per_sqm = round(audited_price / audited_sqm) if audited_sqm > 0 else raw_price_per_sqm
         audited_yield = float(metrics.get("gross_yield") or deal.get("gross_yield") or 0.0)
+        if metrics.get("actual_gross_yield") is not None:
+            audited_actual_yield = float(metrics.get("actual_gross_yield") or 0.0)
+        elif metrics.get("rent_is_verified") and float(metrics.get("current_monthly_rent") or 0.0) > 0 and audited_price > 0:
+            audited_actual_yield = round(((float(metrics["current_monthly_rent"]) * 12.0) / audited_price) * 100.0, 2)
+        else:
+            audited_actual_yield = 0.0
         audited_potential_yield = float(metrics.get("potential_gross_yield") or audited_yield)
         audited_cashflow = float(metrics.get("monthly_cashflow") if metrics.get("monthly_cashflow") is not None else deal.get("monthly_cashflow", 0.0))
         audited_potential_cf = float(metrics.get("potential_monthly_cashflow") if metrics.get("potential_monthly_cashflow") is not None else audited_cashflow)
@@ -395,11 +419,11 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
 
         # Stage 4: Verbindlicher Abgleich gegen die Renditevorgaben des Ankaufsprofils ('actual', 'potential', 'any')
         if yield_basis == "actual":
-            eff_audited_yield = audited_yield
+            eff_audited_yield = audited_actual_yield
         elif yield_basis == "potential":
             eff_audited_yield = audited_potential_yield
         else: # "any" (Standard: Höhere Rendite aus Ist und verifiziertem Mietspiegel-Potenzial)
-            eff_audited_yield = max(audited_yield, audited_potential_yield)
+            eff_audited_yield = max(audited_actual_yield, audited_potential_yield, audited_yield)
 
         meets_profile_limits = (
             (max_price <= 0 or audited_price <= max_price)
@@ -423,11 +447,11 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 reasons.append(f"Wohnfläche ({audited_sqm:.0f} m²) unter Profil-Minimum ({min_living_space:.0f} m²)")
             if min_yield > 0 and eff_audited_yield < min_yield:
                 if yield_basis == "actual":
-                    reasons.append(f"Ist-Bruttorendite ({audited_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
+                    reasons.append(f"Verifizierte Ist-Bruttorendite ({audited_actual_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
                 elif yield_basis == "potential":
                     reasons.append(f"Mietspiegel-Potenzialrendite ({audited_potential_yield:.1f}%) unter Profil-Ziel ({min_yield:.1f}%)")
                 else:
-                    reasons.append(f"Weder Ist-Rendite ({audited_yield:.1f}%) noch Mietspiegel-Rendite ({audited_potential_yield:.1f}%) erreichen Profil-Ziel ({min_yield:.1f}%)")
+                    reasons.append(f"Weder Ist-Rendite ({audited_actual_yield:.1f}%) noch Mietspiegel-Rendite ({audited_potential_yield:.1f}%) erreichen Profil-Ziel ({min_yield:.1f}%)")
             if min_discount_pct > 0 and audited_market_dev > -min_discount_pct:
                 reasons.append(f"Untermarktwert-Abschlag ({audited_market_dev:+.1f}%) erreicht nicht Mindestabschlag von -{min_discount_pct:.1f}%")
             if has_critical:

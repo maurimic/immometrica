@@ -330,7 +330,8 @@ def build_google_maps_links(
 def analyze_property_location_and_pois(
     property_data: Dict[str, Any],
     full_description: str = "",
-    insights: Optional[Dict[str, Any]] = None
+    insights: Optional[Dict[str, Any]] = None,
+    include_pois: bool = True
 ) -> Dict[str, Any]:
     """
     Generates an institutional micro-location & infrastructure proximity report.
@@ -424,6 +425,24 @@ def analyze_property_location_and_pois(
         )
 
     maps_links = build_google_maps_links(addr, plz, city, district=clean_dist if not is_exact else district, lat=lat, lng=lng, is_exact=is_exact)
+
+    if not include_pois:
+        return {
+            "is_exact_address": is_exact,
+            "precision_type": precision_type,
+            "precision_badge": precision_badge,
+            "precision_sub": precision_sub,
+            "display_address": display_address,
+            "street_address": addr,
+            "postal_code": plz,
+            "city": city,
+            "district": clean_dist or district or "",
+            "lat": lat,
+            "lng": lng,
+            "disclaimer": disclaimer,
+            "maps": maps_links,
+            "pois": []
+        }
 
     # --------------------------------------------------------------------------
     # INFRASTRUKTUR- & POI-DISTANZEN BERECHNEN

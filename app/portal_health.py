@@ -316,9 +316,8 @@ def get_portal_health_status() -> Dict[str, Any]:
 
 def record_portal_incident(portal: str, reason: str, details: str = "", target_url: str = ""):
     """
-    Instantly records an incident when a real scrape or single URL import fails
-    due to missing fields or bot protection.
-    Surfaces the notification banner on the startpage and notifies Telegram.
+    Records an incident when a portal parser fails due to missing mandatory fields or schema changes.
+    Surfaces the notification banner on the startpage and notifies Telegram (max 1x/hour per portal).
     """
     now_iso = get_berlin_now_str("%Y-%m-%d %H:%M:%S")
     logger.warning(f"Recording portal incident for {portal}: {reason} ({details})")
@@ -329,7 +328,6 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
     set_system_setting("portal_alert_level", "critical" if "Schema" in reason else "warning")
     set_system_setting("portal_alert_updated_at", now_iso)
 
-    # Update portals status dict
     raw_status = get_system_setting("portal_health_status")
     portals = {}
     if raw_status:
@@ -348,7 +346,6 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
     set_system_setting("portal_health_status", json.dumps(portals))
     set_system_setting("portal_health_overall", "degraded")
 
-    # Send Telegram alert (cooldown: max 1 per hour per incident)
     last_tg = get_system_setting(f"telegram_last_alert_{portal.lower()}")
     should_send = True
     if last_tg:

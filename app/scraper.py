@@ -40,17 +40,21 @@ def scrape_multi_portal_deals(
     yield_basis: str = "any",
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    exclude_urls: Optional[Any] = None
+    exclude_urls: Optional[Any] = None,
+    postal_code: Optional[str] = None,
+    radius_km: int = 25,
+    property_type: str = "all"
 ) -> List[Dict[str, Any]]:
     """
     Coordinates multi-portal meta-search across Kleinanzeigen, ImmoScout24, and Immowelt.
-    Fuses cross-portal duplicates into canonical deals with best price and multi-portal badges.
-    Strictly filters out deals below min_yield (evaluating both actual and Mietspiegel potential)
-    or outside price boundaries BEFORE saving to DB.
+    Supports property_type, postal_code and radius_km parameters, deduplicates identical
+    normalized URLs while keeping cross-portal listings strictly separated, and filters
+    out deals below min_yield (respecting yield_basis) or outside price boundaries.
     """
+    from app.scrapers.deal_fusion import normalize_portal_url
     target_portals = [p.lower() for p in (portals or ["kleinanzeigen", "immoscout24", "immowelt"])]
     all_raw_deals: List[Dict[str, Any]] = []
-    exclude_set = set(exclude_urls) if exclude_urls else set()
+    exclude_set = {normalize_portal_url(u) for u in exclude_urls} if exclude_urls else set()
 
     # If filters like min_yield are requested, fetch more raw candidates so we still reach max_results after filtering
     raw_fetch_count = min(max_results * 3, 50) if (min_yield is not None or max_price is not None or min_price is not None) else max_results
@@ -60,9 +64,17 @@ def scrape_multi_portal_deals(
         if price <= 0:
             return False
 
-        portal_url = d.get("portal_url", "")
+        portal_url = normalize_portal_url(d.get("portal_url", ""))
         if exclude_set and portal_url in exclude_set:
             return False
+
+        if property_type and property_type.lower() != "all":
+            pt_req = property_type.lower().strip()
+            pt_deal = str(d.get("property_type") or "").lower()
+            if pt_req not in pt_deal and pt_deal not in pt_req:
+                # Allow Mehrfamilienhaus / Haus overlap cleanly if portal returned generic Haus
+                if not ("mehrfamilien" in pt_req and "haus" in pt_deal):
+                    return False
 
         if max_price is not None and max_price > 0 and price > max_price:
             return False
@@ -73,7 +85,9 @@ def scrape_multi_portal_deals(
             from app.valuation import get_mietspiegel_size_benchmark, evaluate_property_valuation
             sqm = float(d.get("living_space") or 0.0)
             deal_city = d.get("city") or city
-            act_yield = float(d.get("gross_yield") or 0.0)
+            cur_rent = float(d.get("current_rent") or 0.0)
+            is_rented_flag = bool(d.get("is_rented"))
+            act_yield = round(((cur_rent * 12.0) / price) * 100.0, 2) if (is_rented_flag and cur_rent > 0 and price > 0) else 0.0
 
             # 1. Erwartete Benchmark-Rendite
             exp_rent = float(d.get("expected_rent") or 0.0)
@@ -105,11 +119,35 @@ def scrape_multi_portal_deals(
     def _fetch_portal(portal_name: str) -> List[Dict[str, Any]]:
         try:
             if "kleinanzeigen" in portal_name:
-                raw_list = scrape_kleinanzeigen_deals(city=city, query=query, max_results=raw_fetch_count, exclude_urls=exclude_set)
+                raw_list = scrape_kleinanzeigen_deals(
+                    city=city,
+                    query=query,
+                    max_results=raw_fetch_count,
+                    exclude_urls=exclude_set,
+                    postal_code=postal_code,
+                    radius_km=radius_km,
+                    property_type=property_type
+                )
             elif "scout" in portal_name:
-                raw_list = search_immoscout_deals(city=city, query=query, max_results=raw_fetch_count, exclude_urls=exclude_set)
+                raw_list = search_immoscout_deals(
+                    city=city,
+                    query=query,
+                    radius_km=radius_km,
+                    max_results=raw_fetch_count,
+                    property_type=property_type,
+                    exclude_urls=exclude_set,
+                    postal_code=postal_code
+                )
             elif "immowelt" in portal_name:
-                raw_list = search_immowelt_deals(city=city, query=query, max_results=raw_fetch_count, exclude_urls=exclude_set)
+                raw_list = search_immowelt_deals(
+                    city=city,
+                    query=query,
+                    max_results=raw_fetch_count,
+                    exclude_urls=exclude_set,
+                    postal_code=postal_code,
+                    radius_km=radius_km,
+                    property_type=property_type
+                )
             else:
                 raw_list = []
             
@@ -143,7 +181,15 @@ def scrape_multi_portal_deals(
 
     # Fallback to Kleinanzeigen alone if other portals were empty
     if not all_raw_deals:
-        raw_k = scrape_kleinanzeigen_deals(city=city, query=query, max_results=raw_fetch_count, exclude_urls=exclude_set)
+        raw_k = scrape_kleinanzeigen_deals(
+            city=city,
+            query=query,
+            max_results=raw_fetch_count,
+            exclude_urls=exclude_set,
+            postal_code=postal_code,
+            radius_km=radius_km,
+            property_type=property_type
+        )
         all_raw_deals = [d for d in raw_k if _matches_criteria(d)]
 
     # Cross-Portal Deal Fusion is deactivated: every portal listing remains strictly independent
@@ -162,6 +208,7 @@ def import_scraped_deals_returning_ids(deals: List[Dict[str, Any]]) -> List[int]
         return []
 
     from app.geo_resolver import ensure_distinct_coord
+    from app.scrapers.deal_fusion import normalize_portal_url
     conn = get_connection()
     inserted_ids: List[int] = []
     try:
@@ -170,7 +217,7 @@ def import_scraped_deals_returning_ids(deals: List[Dict[str, Any]]) -> List[int]
         occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
 
         for idx_d, d in enumerate(deals):
-            portal_url = d.get("portal_url", "")
+            portal_url = normalize_portal_url(d.get("portal_url", ""))
             # Check if portal_url already exists
             cursor.execute("SELECT id, source_portals FROM properties WHERE portal_url = ?", (portal_url,))
             existing_row = cursor.fetchone()

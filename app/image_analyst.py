@@ -1338,9 +1338,15 @@ def analyze_property_images(
                         p_idxs = found_photos
 
                 # Specific Gewerk Reconciliation:
-                # 1. KÜCHE: If kitchen is visible in photos, cancel fake EBK purchase cost!
+                # 1. KÜCHE: Only reset blind "keine EBK sichtbar" guesses if an EBK actually appears on the photos;
+                # do NOT erase legitimate renovation/replacement costs when the kitchen is visibly worn or obsolete.
                 if any(k in combined_l for k in ["küche", "ebk"]):
-                    if has_existing_ebk or kitchen_photos:
+                    cur_k_cost = float(it.get("cost") or 0.0)
+                    is_blind_k_guess = any(
+                        m in combined_l
+                        for m in ["nicht fotografiert", "keinem der", "nicht auf fotos", "keine einbauküche", "fehlt", "ohne besichtigungsbeleg"]
+                    )
+                    if has_existing_ebk and (cur_k_cost <= 0 or is_blind_k_guess):
                         it["cost"] = 0.0
                         it["urgency"] = "Kein Handlungsbedarf"
                         it["title"] = "Einbauküche vorhanden & funktionstüchtig"
@@ -1349,19 +1355,26 @@ def analyze_property_images(
                         refs = ", ".join(f"#{i}" for i in p_idxs)
                         it["evidence_source"] = f"📸 Sichtbar auf Foto {refs}: Vorhandene Einbauküche mit Schränken und Elektrogeräten – keine Neuanschaffung nötig (0 €)."
                         it["description"] = "Die Einbauküche ist im Objekt vorhanden und funktionstüchtig für Vermietung."
+                    elif kitchen_photos:
+                        p_idxs = kitchen_photos
+                        it["source_type"] = "FOTO_BELEG"
 
-                # 2. BAD: If bathroom is documented in photos, adjust inflated blind estimate
+                # 2. BAD: Only override blind fallback guesses ("ohne Besichtigungsbeleg" / "nicht auf Fotos sichtbar");
+                # preserve higher photo-evidenced CapEx estimates when bathroom defects are documented.
                 if any(k in combined_l for k in ["bad", "sanitär", "wc", "dusche", "wanne"]):
                     if bath_photos:
                         p_idxs = bath_photos
-                        cur_cost = float(it.get("cost") or 0.0)
-                        if cur_cost > 3500.0 or "ohne besichtigungsbeleg" in str(it.get("description", "")).lower():
+                        is_blind_b_guess = any(
+                            m in combined_l
+                            for m in ["ohne besichtigungsbeleg", "nicht fotografiert", "keinem der", "nicht auf fotos", "kein badezimmerfoto"]
+                        )
+                        if is_blind_b_guess:
                             it["cost"] = 1500.0
                             it["title"] = "Badezimmer-Modernisierung / Sanitärauffrischung"
                             it["description"] = "Badezimmer ist verfliest und mit Sanitärobjekten ausgestattet; optische Auffrischung/Silikonfugen eingeplant."
                         it["source_type"] = "FOTO_BELEG"
                         refs = ", ".join(f"#{i}" for i in p_idxs)
-                        it["evidence_source"] = f"📸 Sichtbar auf Foto {refs}: Verfliestes Wannenbad mit Sanitärobjekten dokumentiert."
+                        it["evidence_source"] = f"📸 Sichtbar auf Foto {refs}: Badezimmer auf den Objektfotos dokumentiert."
 
                 if not has_interior_real:
                     src_type = "BAUJAHR_MUTMASSUNG"
@@ -1402,7 +1415,15 @@ def analyze_property_images(
             # Reconcile categories for kitchen & bath based on all analyzed photos
             if kitchen_photos:
                 k_cat = gem_categories.setdefault("kitchen", {})
-                if has_existing_ebk or float(k_cat.get("cost") or 0.0) > 0 or "nicht fotografiert" in str(k_cat.get("findings", "")).lower() or "kein" in str(k_cat.get("status", "")).lower():
+                k_findings_l = str(k_cat.get("findings", "")).lower()
+                k_status_l = str(k_cat.get("status", "")).lower()
+                if has_existing_ebk and (
+                    "nicht fotografiert" in k_findings_l
+                    or "keinem" in k_findings_l
+                    or "nicht auf fotos" in k_findings_l
+                    or "keine" in k_status_l
+                    or float(k_cat.get("cost") or 0.0) <= 0
+                ):
                     k_cat["score"] = max(float(k_cat.get("score") or 0.0), 7.5)
                     k_cat["status"] = "Gepflegte Einbauküche vorhanden"
                     k_cat["cost"] = 0.0
@@ -1412,7 +1433,7 @@ def analyze_property_images(
             if bath_photos:
                 b_cat = gem_categories.setdefault("bathroom", {})
                 b_findings = str(b_cat.get("findings", "")).lower()
-                if "kein badezimmerfoto" in b_findings or "nicht fotografiert" in b_findings or float(b_cat.get("cost") or 0.0) > 3500.0:
+                if "kein badezimmerfoto" in b_findings or "nicht fotografiert" in b_findings or "ohne besichtigungsbeleg" in b_findings:
                     b_cat["score"] = max(float(b_cat.get("score") or 0.0), 7.0)
                     b_cat["status"] = "Solider Zustand / Verfliest"
                     b_cat["cost"] = 1500.0
@@ -1610,15 +1631,9 @@ def analyze_property_images(
     notice = None
     if not has_interior_photos:
         if is_renovierungsbeduerftig:
-            # Case like Deal #44: Seller explicitly says "Renovieren!!!!" and provides only plans
-            notice = (
-                f"Hinweis: Das Inserat enthält ausschließlich {len(analyzed_photos)} Bauzeichnungen/Pläne und keine Innenraum-Fotos. "
-                f"Da der Verkäufer im Inserat ausdrücklich 'Renovieren!!!!' angibt, basiert die CaPEx-Kalkulation (15.960 €) "
-                f"auf einer fundierten Altbau-Vollrenovierung vor Neuvermietung."
-            )
             bad_score = 4.5
             bad_status = "Vollsanierung kalkuliert"
-            bad_findings = "Keine Innenraum-Fotos vorhanden. Aufgrund des Altbau-Zustands ('Renovieren!!!!') ist eine Bad-Sanierung einzuplanen."
+            bad_findings = "Keine Innenraum-Fotos vorhanden. Aufgrund des im Exposé genannten Sanierungsbedarfs ist eine Bad-Sanierung einzuplanen."
             bad_cost = 5800.0
 
             kitchen_score = 4.0
@@ -1638,13 +1653,21 @@ def analyze_property_images(
 
             heat_score = 5.0
             heat_status = "Elektrik-Überprüfung"
-            heat_findings = "FI-Schutzschalter und Schalterprogramm bei Altbau sanierungsrelevant."
+            heat_findings = "FI-Schutzschalter und Schalterprogramm bei Sanierungsstau prüfen."
             heat_cost = 1560.0
 
             wall_score = 4.5
             wall_status = "Maler- & Spachtelarbeiten"
             wall_findings = "Umfassender Maleraufwand vor Neuvermietung erforderlich."
             wall_cost = 1500.0
+
+            est_total = bad_cost + kitchen_cost + floor_cost + win_cost + heat_cost + wall_cost
+            est_fmt = f"{est_total:,.0f}".replace(",", ".")
+            notice = (
+                f"Hinweis: Das Inserat enthält ausschließlich {len(analyzed_photos)} Bauzeichnungen/Pläne und keine Innenraum-Fotos. "
+                f"Da im Exposé Renovierungs- bzw. Sanierungsbedarf genannt wird, basiert die CaPEx-Kalkulation ({est_fmt} €) "
+                f"auf einer fundierten Komplettrenovierung vor Neuvermietung."
+            )
 
             overall_visual_score = 4.8
             condition_rating = "RENOVIERUNGSBEDUERFTIG"

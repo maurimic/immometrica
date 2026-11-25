@@ -101,290 +101,327 @@ def clean_immowelt_title(raw_title: str, rooms: float, sqm: float, district: str
     return t
 
 
+def _build_immowelt_search_paths(property_type: str = "all") -> List[tuple]:
+    """Maps configured property_type to (url_path_segment, default_prop_type, default_bldg_type)."""
+    pt = str(property_type or "all").lower().strip()
+    if any(k in pt for k in ("grundst", "plot", "land")):
+        return [("grundstuecke/kaufen", "Grundstück", "Grundstück")]
+    if any(k in pt for k in ("mehrfamilien", "mfh", "zinshaus", "einfamilien", "efh", "haus", "house")):
+        return [("haeuser/kaufen", "Mehrfamilienhaus" if ("mehrfamilien" in pt or "mfh" in pt or "zinshaus" in pt) else "Einfamilienhaus", "Haus")]
+    if any(k in pt for k in ("wohnung", "etw", "apartment", "maisonette", "penthouse")):
+        return [("wohnungen/kaufen", "Eigentumswohnung", "Etagenwohnung")]
+    return [
+        ("wohnungen/kaufen", "Eigentumswohnung", "Etagenwohnung"),
+        ("haeuser/kaufen", "Einfamilienhaus", "Haus"),
+    ]
+
+
 def search_immowelt_deals(
     city: str,
     query: str = "",
     max_results: int = 15,
-    exclude_urls: Optional[Any] = None
+    exclude_urls: Optional[Any] = None,
+    postal_code: Optional[str] = None,
+    radius_km: int = 0,
+    property_type: str = "all"
 ) -> List[Dict[str, Any]]:
     """
-    Scrapes live listings from Immowelt for a given German city.
+    Scrapes live listings from Immowelt for a given German city or postal code.
+    Supports property types (Wohnung, Haus/MFH, Grundstück) and search radius.
     Extracts real prices, living spaces, rooms, high-resolution property photos,
     and investor metrics (yield, cashflow, benchmark comparisons).
-    Supports sorting by newest ('createdate_desc'), pagination (pages 1 to 3),
-    and skipping known candidate URLs.
     """
     from app.calculator import calculate_cashflow
     from app.valuation import evaluate_property_valuation
     from app.geo_resolver import resolve_location_and_tax, resolve_city_coordinates
+    from app.scrapers.deal_fusion import normalize_portal_url
 
-    city_slug = clean_city_slug(city)
-    exclude_set = set(exclude_urls) if exclude_urls else set()
+    plz_clean = re.sub(r"\D", "", str(postal_code or ""))[:5]
+    loc_input = (city or plz_clean or "").strip()
+    if not loc_input:
+        return []
+    city_slug = clean_city_slug(loc_input)
+    exclude_set = {normalize_portal_url(u) for u in exclude_urls} if exclude_urls else set()
+    search_targets = _build_immowelt_search_paths(property_type)
+    radius_param = f"&r={int(radius_km)}" if int(radius_km or 0) > 0 else ""
+
     results: List[Dict[str, Any]] = []
     seen_urls = set()
 
-    for page in range(1, 4):
+    for path_seg, default_p_type, default_b_type in search_targets:
         if len(results) >= max_results:
             break
-
-        url = f"https://www.immowelt.de/suche/{city_slug}/wohnungen/kaufen?sp={page}&sort=createdate_desc"
-
-        try:
-            resp = fetch_immowelt_html(url, timeout=10.0)
-            if resp.status_code != 200:
-                logger.warning(f"Immowelt search returned HTTP {resp.status_code} (page {page})")
-                break
-        except Exception as e:
-            logger.warning(f"Immowelt request error for {city} (page {page}): {e}")
-            break
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        expose_links = soup.find_all("a", href=re.compile(r"/expose/[a-f0-9\-]+", re.IGNORECASE))
-        if not expose_links:
-            break
-
-        for link in expose_links:
-            raw_href = link["href"]
-            if not raw_href.startswith("http"):
-                full_url = "https://www.immowelt.de" + raw_href
-            else:
-                full_url = raw_href
-
-            # Normalize URL (strip query params)
-            clean_url = full_url.split("?")[0]
-            if clean_url in seen_urls:
-                continue
-            if exclude_set and clean_url in exclude_set:
-                continue
-            seen_urls.add(clean_url)
-            # Locate complete card element
-            card = None
-            curr = link
-            for _ in range(7):
-                if curr.parent:
-                    curr = curr.parent
-                    if "€" in curr.get_text():
-                        card = curr
-                        break
-            if not card:
-                card = link.find_parent("div") or link
-    
-            card_text = card.get_text(" | ", strip=True)
-            stripped_strings = [s.strip() for s in card.stripped_strings]
-    
-            # Extract Price
-            price = 0.0
-            price_match = re.search(r"([\d\.]+)\s*€", card_text)
-            if price_match:
-                try:
-                    price = float(price_match.group(1).replace(".", ""))
-                except ValueError:
-                    pass
-    
-            if price < 15000:
-                continue
-    
-            # Extract Living space & Rooms
-            sqm = 0.0
-            sqm_match = re.search(r"([\d,\.]+)\s*m²", card_text)
-            if sqm_match:
-                try:
-                    sqm = float(sqm_match.group(1).replace(".", "").replace(",", "."))
-                except ValueError:
-                    pass
-    
-            rooms = 2.0
-            room_match = re.search(r"([\d,\.]+)\s*Zi", card_text)
-            if room_match:
-                try:
-                    rooms = float(room_match.group(1).replace(",", "."))
-                except ValueError:
-                    pass
-    
-            if sqm <= 0:
-                sqm = max(30.0, round(price / 3000.0, 1))
-    
-            # Extract postal code & location
-            extracted_plz = ""
-            plz_match = re.search(r"\b(\d{5})\b", card_text)
-            if plz_match:
-                extracted_plz = plz_match.group(1)
-    
-            # Extract district
-            district = ""
-            dist_match = re.search(r"([A-Za-zÄÖÜäöüß\s\-]+),\s*" + re.escape(city), card_text, re.IGNORECASE)
-            if dist_match:
-                district = dist_match.group(1).strip()
-    
-            # Extract property type (Maisonette, Etagenwohnung, Penthouse, etc.)
-            p_type = "Eigentumswohnung"
-            b_type = "Etagenwohnung"
-            if "maisonette" in card_text.lower():
-                p_type = "Maisonette"
-                b_type = "Maisonette"
-            elif "penthouse" in card_text.lower():
-                p_type = "Penthouse"
-                b_type = "Penthouse"
-            elif "dachgeschoss" in card_text.lower():
-                b_type = "Dachgeschosswohnung"
-            elif "erdgeschoss" in card_text.lower() or " eg " in card_text.lower():
-                b_type = "Erdgeschosswohnung"
-    
-            # Energy efficiency class
-            energy_class = ""
-            energy_match = re.search(r"\b([A-H])\b", card_text)
-            if energy_match and any(k in card_text for k in ["kWh", "Energie", "frei ab"]):
-                energy_class = energy_match.group(1)
-    
-            # Title & Description Teaser
-            # Look for descriptive teaser in stripped strings
-            teasers = [
-                s for s in stripped_strings 
-                if len(s) > 35 
-                and not any(k in s for k in ["€/m²", "provisionsfrei", "Herr ", "Frau ", "GmbH", "Immobilien"])
-            ]
-            desc_teaser = teasers[-1] if teasers else ""
-    
-            title_h = card.find(["h2", "h3", "h1"])
-            raw_title = title_h.text.strip() if (title_h and title_h.text.strip()) else desc_teaser
-            title = clean_immowelt_title(raw_title, rooms, sqm, district, city, p_type)
-    
-            # Filter query if requested
-            if query and query.lower() not in title.lower() and query.lower() not in card_text.lower():
-                continue
-    
-            resolved_city = city.strip().capitalize()
-            geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
-            resolved_state = geo_info["state"]
-    
-            # Coordinates
-            import zlib
-            url_seed = zlib.crc32(clean_url.encode("utf-8"))
-            prop_lat, prop_lng = resolve_city_coordinates(
-                city=resolved_city,
-                postal_code=extracted_plz,
-                index=(len(results) + (url_seed % 17))
-            )
-    
-            # Extract High-Resolution Images & Gallery
-            card_imgs = card.find_all("img")
-            gallery_images: List[str] = []
-            main_img = None
-            for im in card_imgs:
-                src = im.get("src") or im.get("data-src")
-                if src and "immowelt" in src and not src.startswith("data:"):
-                    # Clean up query params to get full high-res 626x470
-                    high_res = re.sub(r"\?.*$", "?w=626&h=470", src)
-                    if high_res not in gallery_images:
-                        gallery_images.append(high_res)
-                    if not main_img:
-                        main_img = high_res
-    
-            if not main_img:
-                main_img = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
-    
-            # Benchmark & Cashflow
-            benchmark = evaluate_property_valuation(resolved_city, sqm, price)
-            expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
-            expected_rent = round(sqm * expected_rent_per_sqm, 2)
-            is_rented = 1 if "vermietet" in card_text.lower() else 0
-            current_rent = 0.0
-            gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if price > 0 else 0.0
-    
-            cf = calculate_cashflow(
-                price=price,
-                rent=current_rent if (is_rented and current_rent > 0) else expected_rent,
-                city=resolved_city,
-                state=resolved_state,
-                living_space=sqm
-            )
-            monthly_cashflow = cf.get("monthly_cashflow", 0.0)
-    
-            is_private = 1 if ("provisionsfrei" in card_text.lower() or "privat" in card_text.lower()) else 0
-            comm_pct = 0.0 if is_private else 3.57
-    
-            tags = ["Live Scraped", "Immowelt", resolved_state]
-            if gross_yield >= 5.5:
-                tags.append("Top-Rendite")
-            if monthly_cashflow > 0:
-                tags.append("Positiver Cashflow")
-            if is_private:
-                tags.append("Provisionsfrei")
-    
-            from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
-            now_str = get_berlin_now_str()
-    
-            # Build informative description text from Immowelt listing details
-            loc_display = f"{extracted_plz} {resolved_city}" + (f"-{district}" if district else "")
-            desc_body = desc_teaser if desc_teaser else f"Attraktive {p_type} in begehrter Lage von {loc_display}."
-            full_desc = (
-                f"{title}\n\n"
-                f"{desc_body}\n\n"
-                f"Eckdaten des Objekts:\n"
-                f"- Zimmer: {rooms:.1f}\n"
-                f"- Wohnfläche: {sqm:.1f} m²\n"
-                f"- Lage: {loc_display}\n"
-                f"- Kaufpreis: {price:,.0f} € (ca. {round(price/sqm):,.0f} €/m²)\n"
-                f"- Status: {'Vermietet' if is_rented else 'Bezugsfrei / Leerstehend'}\n"
-                + (f"- Energieeffizienzklasse: {energy_class}\n" if energy_class else "")
-                + f"- Provision: {'Provisionsfrei (0,0 %)' if is_private else f'{comm_pct:.2f} % inkl. MwSt.'}\n"
-                f"- Portal: Immowelt (Exposé-ID: {clean_url.split('/')[-1]})\n"
-            )
-    
-            results.append({
-                "title": title,
-                "address": loc_display.strip(),
-                "postal_code": extracted_plz,
-                "city": resolved_city,
-                "state": resolved_state,
-                "country": "DE",
-                "property_type": p_type,
-                "building_type": b_type,
-                "rooms": rooms,
-                "living_space": sqm,
-                "land_area": 0.0,
-                "year_built": 1980,
-                "condition": "Gepflegt",
-                "purchase_price": price,
-                "original_price": price,
-                "price_drop_amount": 0.0,
-                "price_drop_percent": 0.0,
-                "commission_percent": comm_pct,
-                "current_rent": current_rent,
-                "expected_rent": expected_rent,
-                "gross_yield": gross_yield,
-                "monthly_cashflow": monthly_cashflow,
-                "market_value": benchmark.get("estimated_market_value", price),
-                "market_value_per_sqm": benchmark.get("estimated_market_value_per_sqm", 2800.0),
-                "market_deviation_percent": benchmark.get("market_deviation_percent", 0.0),
-                "source_portal": "Immowelt",
-                "portal_url": clean_url,
-                "source_portals": [{"portal": "Immowelt", "url": clean_url, "price": price}],
-                "image_url": main_img,
-                "gallery_images": gallery_images,
-                "description": full_desc,
-                "days_online": 1,
-                "first_seen_date": get_berlin_today_str(),
-                "is_private": is_private,
-                "is_rented": is_rented,
-                "is_foreclosure": 0,
-                "is_favorite": 0,
-                "pipeline_stage": "merkliste" if gross_yield >= 5.0 else "neu",
-                "tags": str(tags).replace("'", '"'),
-                "lat": prop_lat,
-                "lng": prop_lng,
-                "parcel_id": None,
-                "parcel_area": 0.0,
-                "is_online": 1,
-                "availability_status": "online",
-                "status_message": "Live erreichbar & aktiv (Immowelt verifiziert)",
-                "last_checked_at": now_str,
-                "live_search_url": url
-            })
-    
+        for page in range(1, 4):
             if len(results) >= max_results:
                 break
-    
+
+            url = f"https://www.immowelt.de/suche/{city_slug}/{path_seg}?sp={page}&sort=createdate_desc{radius_param}"
+
+            try:
+                resp = fetch_immowelt_html(url, timeout=10.0)
+                if resp.status_code != 200:
+                    logger.warning(f"Immowelt search returned HTTP {resp.status_code} ({path_seg}, page {page})")
+                    break
+            except Exception as e:
+                logger.warning(f"Immowelt request error for {loc_input} ({path_seg}, page {page}): {e}")
+                break
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+            expose_links = soup.find_all("a", href=re.compile(r"/expose/[a-f0-9\-]+", re.IGNORECASE))
+            if not expose_links:
+                break
+
+            for link in expose_links:
+                raw_href = link["href"]
+                if not raw_href.startswith("http"):
+                    full_url = "https://www.immowelt.de" + raw_href
+                else:
+                    full_url = raw_href
+
+                clean_url = normalize_portal_url(full_url.split("?")[0])
+                if clean_url in seen_urls:
+                    continue
+                if exclude_set and clean_url in exclude_set:
+                    continue
+                seen_urls.add(clean_url)
+
+                card = None
+                curr = link
+                for _ in range(7):
+                    if curr.parent:
+                        curr = curr.parent
+                        if "€" in curr.get_text():
+                            card = curr
+                            break
+                if not card:
+                    card = link.find_parent("div") or link
+
+                card_text = card.get_text(" | ", strip=True)
+                stripped_strings = [s.strip() for s in card.stripped_strings]
+
+                # Extract Price
+                price = 0.0
+                price_match = re.search(r"([\d\.]+)\s*€", card_text)
+                if price_match:
+                    try:
+                        price = float(price_match.group(1).replace(".", ""))
+                    except ValueError:
+                        pass
+
+                if price < 15000:
+                    continue
+
+                # Extract Living space & Rooms
+                sqm = 0.0
+                sqm_match = re.search(r"([\d,\.]+)\s*m²", card_text)
+                if sqm_match:
+                    raw_sq = sqm_match.group(1)
+                    try:
+                        if "," in raw_sq:
+                            norm_sq = raw_sq.replace(".", "").replace(",", ".")
+                        elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
+                            norm_sq = raw_sq.replace(".", "")
+                        else:
+                            norm_sq = raw_sq
+                        sqm = float(norm_sq)
+                    except ValueError:
+                        pass
+
+                rooms = 2.0
+                room_match = re.search(r"([\d,\.]+)\s*Zi", card_text)
+                if room_match:
+                    try:
+                        rooms = float(room_match.group(1).replace(",", "."))
+                    except ValueError:
+                        pass
+
+                if sqm <= 0 and default_p_type != "Grundstück":
+                    sqm = max(30.0, round(price / 3000.0, 1))
+
+                # Extract postal code & location
+                extracted_plz = plz_clean
+                plz_match = re.search(r"\b(\d{5})\b", card_text)
+                if plz_match:
+                    extracted_plz = plz_match.group(1)
+
+                # Extract district
+                district = ""
+                if city:
+                    dist_match = re.search(r"([A-Za-zÄÖÜäöüß\s\-]+),\s*" + re.escape(city), card_text, re.IGNORECASE)
+                    if dist_match:
+                        district = dist_match.group(1).strip()
+
+                # Detect property type across ETW, Maisonette, Penthouse, EFH, MFH, Grundstück
+                ct_lower = card_text.lower()
+                p_type = default_p_type
+                b_type = default_b_type
+                if any(k in ct_lower for k in ["grundstück", "baugrundstück", "bauplatz"]) or default_p_type == "Grundstück":
+                    p_type = "Grundstück"
+                    b_type = "Grundstück"
+                elif any(k in ct_lower for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
+                    p_type = "Mehrfamilienhaus"
+                    b_type = "Mehrfamilienhaus"
+                elif any(k in ct_lower for k in ["einfamilienhaus", "doppelhaushälfte", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus"]):
+                    p_type = "Einfamilienhaus"
+                    b_type = "Haus"
+                elif "maisonette" in ct_lower:
+                    p_type = "Maisonette"
+                    b_type = "Maisonette"
+                elif "penthouse" in ct_lower:
+                    p_type = "Penthouse"
+                    b_type = "Penthouse"
+                elif "dachgeschoss" in ct_lower:
+                    b_type = "Dachgeschosswohnung"
+                elif "erdgeschoss" in ct_lower or " eg " in ct_lower:
+                    b_type = "Erdgeschosswohnung"
+
+                energy_class = ""
+                energy_match = re.search(r"\b([A-H])\b", card_text)
+                if energy_match and any(k in card_text for k in ["kWh", "Energie", "frei ab"]):
+                    energy_class = energy_match.group(1)
+
+                teasers = [
+                    s for s in stripped_strings
+                    if len(s) > 35
+                    and not any(k in s for k in ["€/m²", "provisionsfrei", "Herr ", "Frau ", "GmbH", "Immobilien"])
+                ]
+                desc_teaser = teasers[-1] if teasers else ""
+
+                title_h = card.find(["h2", "h3", "h1"])
+                raw_title = title_h.text.strip() if (title_h and title_h.text.strip()) else desc_teaser
+                resolved_city = (city or extracted_plz or "Deutschland").strip().capitalize()
+                title = clean_immowelt_title(raw_title, rooms, sqm, district, resolved_city, p_type)
+
+                if query and query.lower() not in title.lower() and query.lower() not in ct_lower:
+                    continue
+
+                geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
+                resolved_state = geo_info["state"]
+
+                import zlib
+                url_seed = zlib.crc32(clean_url.encode("utf-8"))
+                prop_lat, prop_lng = resolve_city_coordinates(
+                    city=resolved_city,
+                    postal_code=extracted_plz,
+                    index=(len(results) + (url_seed % 17))
+                )
+
+                card_imgs = card.find_all("img")
+                gallery_images: List[str] = []
+                main_img = None
+                for im in card_imgs:
+                    src = im.get("src") or im.get("data-src")
+                    if src and "immowelt" in src and not src.startswith("data:"):
+                        high_res = re.sub(r"\?.*$", "?w=626&h=470", src)
+                        if high_res not in gallery_images:
+                            gallery_images.append(high_res)
+                        if not main_img:
+                            main_img = high_res
+
+                if not main_img:
+                    main_img = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
+
+                eff_sqm = sqm if sqm > 0 else 50.0
+                benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=p_type)
+                expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
+                expected_rent = round(eff_sqm * expected_rent_per_sqm, 2) if p_type != "Grundstück" else 0.0
+                is_rented = 1 if ("vermietet" in ct_lower and "unvermietet" not in ct_lower) else 0
+                current_rent = 0.0
+                gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
+
+                cf = calculate_cashflow(
+                    price=price,
+                    rent=expected_rent,
+                    city=resolved_city,
+                    state=resolved_state,
+                    postal_code=extracted_plz,
+                    living_space=eff_sqm
+                )
+                monthly_cashflow = cf.get("monthly_cashflow", 0.0)
+
+                is_private = 1 if ("provisionsfrei" in ct_lower or "privat" in ct_lower) else 0
+                comm_pct = 0.0 if is_private else 3.57
+
+                tags = ["Live Scraped", "Immowelt", resolved_state]
+                if gross_yield >= 5.5:
+                    tags.append("Top-Rendite")
+                if monthly_cashflow > 0:
+                    tags.append("Positiver Cashflow")
+                if is_private:
+                    tags.append("Provisionsfrei")
+
+                from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+                now_str = get_berlin_now_str()
+
+                loc_display = f"{extracted_plz} {resolved_city}" + (f"-{district}" if district else "")
+                desc_body = desc_teaser if desc_teaser else f"Attraktive {p_type} in begehrter Lage von {loc_display}."
+                full_desc = (
+                    f"{title}\n\n"
+                    f"{desc_body}\n\n"
+                    f"Eckdaten des Objekts:\n"
+                    f"- Zimmer: {rooms:.1f}\n"
+                    f"- Wohnfläche: {sqm:.1f} m²\n"
+                    f"- Lage: {loc_display}\n"
+                    f"- Kaufpreis: {price:,.0f} € (ca. {round(price/eff_sqm):,.0f} €/m²)\n"
+                    f"- Status: {'Vermietet' if is_rented else 'Bezugsfrei / Leerstehend'}\n"
+                    + (f"- Energieeffizienzklasse: {energy_class}\n" if energy_class else "")
+                    + f"- Provision: {'Provisionsfrei (0,0 %)' if is_private else f'{comm_pct:.2f} % inkl. MwSt.'}\n"
+                    f"- Portal: Immowelt (Exposé-ID: {clean_url.split('/')[-1]})\n"
+                )
+
+                results.append({
+                    "title": title,
+                    "address": loc_display.strip(),
+                    "postal_code": extracted_plz,
+                    "city": resolved_city,
+                    "state": resolved_state,
+                    "country": "DE",
+                    "property_type": p_type,
+                    "building_type": b_type,
+                    "rooms": rooms,
+                    "living_space": sqm,
+                    "land_area": 0.0,
+                    "year_built": 1980,
+                    "condition": "Gepflegt",
+                    "purchase_price": price,
+                    "original_price": price,
+                    "price_drop_amount": 0.0,
+                    "price_drop_percent": 0.0,
+                    "commission_percent": comm_pct,
+                    "current_rent": current_rent,
+                    "expected_rent": expected_rent,
+                    "gross_yield": gross_yield,
+                    "monthly_cashflow": monthly_cashflow,
+                    "market_value": benchmark.get("estimated_market_value", price),
+                    "market_value_per_sqm": benchmark.get("estimated_market_value_per_sqm", 2800.0),
+                    "market_deviation_percent": benchmark.get("market_deviation_percent", 0.0),
+                    "source_portal": "Immowelt",
+                    "portal_url": clean_url,
+                    "source_portals": [{"portal": "Immowelt", "url": clean_url, "price": price}],
+                    "image_url": main_img,
+                    "gallery_images": gallery_images,
+                    "description": full_desc,
+                    "days_online": 1,
+                    "first_seen_date": get_berlin_today_str(),
+                    "is_private": is_private,
+                    "is_rented": is_rented,
+                    "is_foreclosure": 0,
+                    "is_favorite": 0,
+                    "pipeline_stage": "merkliste" if gross_yield >= 5.0 else "neu",
+                    "tags": str(tags).replace("'", '"'),
+                    "lat": prop_lat,
+                    "lng": prop_lng,
+                    "parcel_id": None,
+                    "parcel_area": 0.0,
+                    "is_online": 1,
+                    "availability_status": "online",
+                    "status_message": "Live erreichbar & aktiv (Immowelt verifiziert)",
+                    "last_checked_at": now_str,
+                    "live_search_url": url
+                })
+
+                if len(results) >= max_results:
+                    break
 
     return results
 

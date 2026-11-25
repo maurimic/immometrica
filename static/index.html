@@ -1026,6 +1026,19 @@
                     </div>
                   </template>
 
+                  <!-- Touch- & Mobile-friendly Stage Mover (alternative to HTML5 Drag & Drop) -->
+                  <div class="pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2" @click.stop>
+                    <label class="text-[10px] font-medium text-slate-400 dark:text-slate-500 shrink-0">Phase:</label>
+                    <select :value="stageData.stage.id"
+                            @change.stop="moveDeal(deal.id, $event.target.value)"
+                            aria-label="Deal-Phase verschieben"
+                            class="w-full py-1 px-2 text-[11px] font-semibold rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer">
+                      <template x-for="st in boardStages" :key="'mv-' + deal.id + '-' + st.stage.id">
+                        <option :value="st.stage.id" x-text="st.stage.name" :selected="st.stage.id === stageData.stage.id"></option>
+                      </template>
+                    </select>
+                  </div>
+
                 </div>
               </template>
             </div>
@@ -1553,11 +1566,11 @@
         </div>
       </div>
 
-      <!-- Split View Grid: Left Companion Listing Column + Right Map Canvas -->
+      <!-- Split View Grid: Map Canvas first on mobile, side-by-side 4/8 split on Desktop -->
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
         
-        <!-- Left: Companion Listing Column (4 cols) -->
-        <div class="lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-4 flex flex-col h-[700px]">
+        <!-- Left: Companion Listing Column (4 cols on desktop, compact list below map on mobile) -->
+        <div class="order-2 lg:order-1 lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-3 sm:p-4 flex flex-col h-[340px] sm:h-[440px] lg:h-[700px]">
           <div class="flex items-center justify-between pb-3 mb-2 border-b border-slate-200 dark:border-slate-800">
             <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <i data-lucide="list" class="w-3.5 h-3.5"></i>
@@ -1672,8 +1685,8 @@
           </div>
         </div>
 
-        <!-- Right: Map Canvas (8 cols) -->
-        <div class="lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[700px]">
+        <!-- Right: Map Canvas (8 cols on desktop, compact above list on mobile) -->
+        <div class="order-1 lg:order-2 lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[400px] sm:h-[520px] lg:h-[700px]">
           
           <!-- Map Legend Overlay -->
           <div class="absolute top-4 left-4 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 shadow-md flex items-center gap-3 text-[11px]">
@@ -2049,6 +2062,22 @@
               <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
                 <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">generate_purchase_offer</span>
                 <p class="text-slate-600 dark:text-slate-400 mt-1">Erstellt rechtssichere Unterlagen-Anforderungs-E-Mail und Letter of Intent (LOI).</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">analyze_property_images</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Führt eine KI-Bildanalyse über alle Inseratsfotos durch und ermittelt Bauteilzustand &amp; Sanierungs-CaPEx (BKI).</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">list_search_profiles</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Listet alle konfigurierten automatischen Suchprofile inkl. Filterkriterien, Status und Deal-Zähler auf.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">run_search_profiles</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Startet sofortiges Live-Crawling für ein oder alle aktiven Suchprofile inkl. KI-Filter und Telegram-Alerts.</p>
+              </div>
+              <div class="p-3 border border-slate-200 dark:border-slate-800 rounded-lg bg-slate-50/50 dark:bg-slate-800/40">
+                <span class="font-bold text-sky-700 dark:text-sky-400 font-mono">get_deal_alerts</span>
+                <p class="text-slate-600 dark:text-slate-400 mt-1">Ruft die zuletzt vom Suchagenten gefundenen Deal-Alerts inklusive Rendite-, Cashflow- und KI-Urteil ab.</p>
               </div>
             </div>
           </div>
@@ -4267,6 +4296,39 @@
                   <div x-show="showFullDesc" class="p-4 bg-slate-50/50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-800">
                     <pre class="text-xs text-slate-700 dark:text-slate-300 font-sans whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto selection:bg-sky-200" x-text="selectedProperty.description || 'Keine Beschreibung im Portal hinterlegt.'"></pre>
                   </div>
+                </div>
+
+                <!-- Persönliche Deal-Notizen & Besichtigungsprotokoll -->
+                <div class="border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden bg-white dark:bg-slate-900 p-4 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <h5 class="text-xs font-bold text-slate-800 dark:text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                      <i data-lucide="notebook-pen" class="w-3.5 h-3.5 text-sky-600"></i>
+                      <span>Persönliche Notizen (<span x-text="(selectedProperty.notes || []).length"></span>)</span>
+                    </h5>
+                  </div>
+                  <div class="flex flex-col sm:flex-row gap-2">
+                    <input type="text"
+                           x-model="newNoteText"
+                           @keyup.enter="addPropertyNote()"
+                           placeholder="Besichtigungsnotiz, Makler-Rückmeldung oder Gebotsstrategie eingeben..."
+                           class="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
+                    <button type="button"
+                            @click="addPropertyNote()"
+                            :disabled="isSavingNote"
+                            class="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg shadow-xs transition-colors shrink-0 cursor-pointer">
+                      <span x-text="isSavingNote ? 'Speichere...' : 'Notiz speichern'"></span>
+                    </button>
+                  </div>
+                  <template x-if="selectedProperty.notes && selectedProperty.notes.length > 0">
+                    <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      <template x-for="n in selectedProperty.notes" :key="'note-' + n.id">
+                        <div class="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/70 border border-slate-200/80 dark:border-slate-700/80 text-xs">
+                          <div class="text-slate-800 dark:text-slate-200 whitespace-pre-wrap" x-text="n.note"></div>
+                          <div class="text-[10px] text-slate-400 dark:text-slate-500 mt-1" x-text="formatDateTimeDE(n.created_at)"></div>
+                        </div>
+                      </template>
+                    </div>
+                  </template>
                 </div>
 
               </div>
