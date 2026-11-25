@@ -5,12 +5,14 @@ Includes connection testing, Markdown/HTML formatting, and robust error handling
 """
 
 import os
+import re
 import requests
 import html
 import logging
 from typing import Dict, Any, Optional
 from pathlib import Path
 from datetime import datetime
+from app.network_security import sanitize_error_message
 
 logger = logging.getLogger("immometrica.telegram")
 
@@ -160,13 +162,16 @@ def test_telegram_connection(bot_token: str, chat_id: str, base_url: Optional[st
             return {"success": False, "error": f"Telegram API Fehler: {desc}"}
         bot_user = data.get("result", {}).get("username", "Bot")
     except Exception as e:
-        return {"success": False, "error": f"Verbindungsfehler zu Telegram: {str(e)}"}
+        safe_err = sanitize_error_message(e)
+        return {"success": False, "error": f"Verbindungsfehler zu Telegram: {safe_err}"}
 
     # 2. Dispatch Test Message
-    url_hint = f"\n\n🔗 <b>Ziel-Adresse für KI-Audits:</b> <code>{base_url}</code>" if base_url else ""
+    safe_base = html.escape(base_url, quote=True)
+    safe_bot_user = html.escape(str(bot_user), quote=True)
+    url_hint = f"\n\n🔗 <b>Ziel-Adresse für KI-Audits:</b> <code>{safe_base}</code>" if base_url else ""
     test_text = (
         "✅ <b>ImmoMetrica Deal-Alert System verbunden!</b>\n\n"
-        f"Hallo! Dieser Chat ist nun mit deinem ImmoMetrica-Suchagenten verknüpft (Bot: @{bot_user}).\n"
+        f"Hallo! Dieser Chat ist nun mit deinem ImmoMetrica-Suchagenten verknüpft (Bot: @{safe_bot_user}).\n"
         "Ab sofort erhältst du hier blitzschnelle Push-Alerts bei neuen Untermarktwert-Angeboten und Rendite-Objekten inklusive direktem Link zum KI-Audit und zum Original-Exposé."
         f"{url_hint}"
     )
@@ -188,14 +193,15 @@ def test_telegram_connection(bot_token: str, chat_id: str, base_url: Optional[st
                 "message": f"Test-Nachricht erfolgreich an Chat-ID {cid} über @{bot_user} gesendet!"
             }
         else:
-            desc = send_data.get("description", "Senden fehlgeschlagen")
+            desc = sanitize_error_message(send_data.get("description", "Senden fehlgeschlagen"))
             return {
                 "success": False,
                 "bot_username": bot_user,
                 "error": f"Konnte keine Nachricht an Chat {cid} senden ({desc}). Hast du den Bot im Chat bereits gestartet (/start)?"
             }
     except Exception as e:
-        return {"success": False, "error": f"Sende-Fehler: {str(e)}"}
+        safe_err = sanitize_error_message(e)
+        return {"success": False, "error": f"Sende-Fehler: {safe_err}"}
 
 
 def send_deal_telegram_alert(
@@ -226,7 +232,7 @@ def send_deal_telegram_alert(
     is_test_deal = (
         "test-oneprovider" in portal_url_lower
         or "test-deal" in portal_url_lower
-        or "/test" in portal_url_lower
+        or bool(re.search(r"/test(?:[/?#-]|$)", portal_url_lower))
         or "oneprovider test" in title_lower
         or "test deal" in title_lower
         or "test-deal" in title_lower
@@ -239,11 +245,11 @@ def send_deal_telegram_alert(
         logger.info(f"Skipping Telegram notification for test deal: '{title_lower}' ({portal_url_lower})")
         return {"success": True, "skipped_test_deal": True}
 
-    city = html.escape(deal.get("city", "Deutschland"))
-    title = html.escape(deal.get("title", "Immobilienangebot"))
-    address = html.escape(deal.get("address", city))
-    portal_url = deal.get("portal_url", "")
-    safe_profile = html.escape(profile_name)
+    city = html.escape(str(deal.get("city") or "Deutschland"), quote=True)
+    title = html.escape(str(deal.get("title") or "Immobilienangebot"), quote=True)
+    address = html.escape(str(deal.get("address") or city), quote=True)
+    portal_url = str(deal.get("portal_url") or "").strip()
+    safe_profile = html.escape(str(profile_name or "Suchprofil"), quote=True)
     property_id = deal.get("property_id") or deal.get("id")
 
     price = float(deal.get("purchase_price") or deal.get("price") or 0.0)
@@ -286,11 +292,12 @@ def send_deal_telegram_alert(
 
     link_items = []
     if property_id and base_url:
-        audit_url = f"{base_url}/deal/{property_id}?view=audit"
+        audit_url = html.escape(f"{base_url}/deal/{property_id}?view=audit", quote=True)
         link_items.append(f"🔬 <a href=\"{audit_url}\"><b>Direkt zum KI-Audit in ImmoMetrica</b></a>")
 
-    if portal_url:
-        link_items.append(f"🌐 <a href=\"{portal_url}\">Zum Original-Exposé aufrufen</a>")
+    if portal_url and (portal_url.startswith("http://") or portal_url.startswith("https://")):
+        safe_portal_url = html.escape(portal_url, quote=True)
+        link_items.append(f"🌐 <a href=\"{safe_portal_url}\">Zum Original-Exposé aufrufen</a>")
 
     if link_items:
         lines.append("──────────────────────")
@@ -312,12 +319,13 @@ def send_deal_telegram_alert(
             logger.info(f"Telegram deal alert successfully sent for '{title}' to chat {cid}")
             return {"success": True}
         else:
-            err = data.get("description", "Send error")
+            err = sanitize_error_message(data.get("description", "Send error"))
             logger.warning(f"Telegram send error: {err}")
             return {"success": False, "error": err}
     except Exception as e:
-        logger.error(f"Telegram exception: {e}")
-        return {"success": False, "error": str(e)}
+        safe_err = sanitize_error_message(e)
+        logger.error(f"Telegram exception: {safe_err}")
+        return {"success": False, "error": safe_err}
 
 
 def send_system_telegram_alert(
@@ -369,7 +377,7 @@ def send_system_telegram_alert(
 
     # Clearly show the affected URL/page
     if target_url:
-        safe_url = html.escape(target_url)
+        safe_url = html.escape(str(target_url), quote=True)
         if target_url.startswith("http://") or target_url.startswith("https://"):
             lines.append(f"🔗 <b>Betroffene Seite / URL:</b> <a href=\"{safe_url}\">{safe_url}</a>")
         else:
@@ -396,14 +404,15 @@ def send_system_telegram_alert(
                 badge = "⚠️ Eingeschränkt"
             else:
                 badge = "❌ Fehler"
-            lines.append(f"  • <b>{p_name}:</b> {badge} (<i>{html.escape(msg_snippet)}</i>)")
+            lines.append(f"  • <b>{html.escape(str(p_name), quote=True)}:</b> {badge} (<i>{html.escape(msg_snippet, quote=True)}</i>)")
 
     lines.append("")
     lines.append(f"⏰ <b>Zeitpunkt:</b> {now_str}")
 
-    if base_url:
+    if base_url and (base_url.startswith("http://") or base_url.startswith("https://")):
+        safe_base_url = html.escape(base_url, quote=True)
         lines.append("──────────────────────")
-        lines.append(f"🔗 <a href=\"{base_url}\"><b>ImmoMetrica Dashboard öffnen</b></a>")
+        lines.append(f"🔗 <a href=\"{safe_base_url}\"><b>ImmoMetrica Dashboard öffnen</b></a>")
 
     payload_text = "\n".join(lines)
 
@@ -420,9 +429,10 @@ def send_system_telegram_alert(
             logger.info(f"System alert successfully sent to Telegram chat {cid}: {title}")
             return {"success": True}
         else:
-            err = res_data.get("description", "Unknown Telegram API error")
+            err = sanitize_error_message(res_data.get("description", "Unknown Telegram API error"))
             logger.warning(f"Failed to send system alert to Telegram: {err}")
             return {"success": False, "error": err}
     except Exception as e:
-        logger.error(f"Error dispatching system Telegram alert: {e}")
-        return {"success": False, "error": str(e)}
+        safe_err = sanitize_error_message(e)
+        logger.error(f"Error dispatching system Telegram alert: {safe_err}")
+        return {"success": False, "error": safe_err}

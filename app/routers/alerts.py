@@ -144,7 +144,11 @@ def trigger_profile_run(
         p = get_search_profile_by_id(profile_id)
         if not p:
             raise HTTPException(status_code=404, detail=f"Suchprofil #{profile_id} nicht gefunden.")
-        res = execute_search_profile(profile_id, force=True)
+        from app.scheduler import crawler_scan_guard
+        with crawler_scan_guard(blocking=False) as acquired:
+            if not acquired:
+                raise HTTPException(status_code=409, detail="Der Suchagent führt bereits einen Scan im Hintergrund durch.")
+            res = execute_search_profile(profile_id, force=True)
         st = res.get("stats") or {}
         scraped = res.get("total_scraped", 0)
         qualified = res.get("qualified_deals", 0)
@@ -167,7 +171,11 @@ def trigger_profile_run(
             "new_alerts": new_alerts
         }
     else:
-        results = execute_all_active_profiles()
+        from app.scheduler import crawler_scan_guard
+        with crawler_scan_guard(blocking=False) as acquired:
+            if not acquired:
+                raise HTTPException(status_code=409, detail="Der Suchagent führt bereits einen Scan im Hintergrund durch.")
+            results = execute_all_active_profiles()
         total_scraped = sum(r.get("total_scraped", 0) for r in results if isinstance(r, dict))
         total_qualified = sum(r.get("qualified_deals", 0) for r in results if isinstance(r, dict))
         total_new_alerts = sum(r.get("new_alerts", 0) for r in results if isinstance(r, dict))
@@ -290,11 +298,12 @@ def save_alert_settings(payload: Dict[str, Any] = Body(...)):
         try:
             val = max(5, int(payload["crawler_interval_minutes"]))
             set_system_setting("crawler_interval_minutes", str(val))
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     if "crawler_active" in payload:
-        is_act = "1" if payload["crawler_active"] in (True, 1, "1", "true") else "0"
+        raw_act = payload["crawler_active"]
+        is_act = "1" if (raw_act in (True, 1) or str(raw_act).strip().lower() in ("1", "true")) else "0"
         set_system_setting("crawler_active", is_act)
 
     tg_chat_id = get_system_setting("telegram_chat_id", "")

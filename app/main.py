@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from typing import Optional
+import asyncio
 import os
 import re
 from dotenv import load_dotenv
@@ -25,51 +26,77 @@ app = FastAPI(
     version="2.0.0"
 )
 
+_CORS_ORIGINS = [
+    "https://immofinder-poggel-micciche.duckdns.org",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+for _env_origin in [os.getenv("APP_BASE_URL", ""), os.getenv("CORS_ORIGINS", "")]:
+    for _item in _env_origin.split(","):
+        _cleaned = _item.strip().rstrip("/")
+        if _cleaned and _cleaned not in _CORS_ORIGINS:
+            _CORS_ORIGINS.append(_cleaned)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Authentication Middleware for API endpoints
+_cached_server_url: Optional[str] = None
+_cached_local_url: Optional[str] = None
+
+# Authentication Middleware for API and private static HTML templates
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
+    global _cached_server_url, _cached_local_url
     path = request.url.path
 
-    # Auto-detect incoming public base URL from browser traffic
+    # Auto-detect incoming public base URL from browser traffic (only persist when changed)
     try:
         if path in ("/", "/login") or path.startswith("/deal/") or path.startswith("/property/"):
             host_hdr = request.headers.get("x-forwarded-host") or request.headers.get("host")
-            proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "http"
+            proto = (request.headers.get("x-forwarded-proto") or request.url.scheme or "http").split(",")[0].strip()
             if host_hdr:
                 cleaned_host = host_hdr.split(",")[0].strip()
                 detected_url = f"{proto}://{cleaned_host}".rstrip("/")
                 is_local = any(cleaned_host.startswith(p) for p in ["127.0.0.1", "localhost", "0.0.0.0", "192.168.", "10."])
                 is_raw_ip = bool(re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?$", cleaned_host))
-                if not is_local:
-                    from app.database import get_system_setting
-                    cur_srv = get_system_setting("last_server_base_url", "")
-                    cur_is_ip = bool(re.search(r"://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?$", cur_srv))
-                    # Only save if it's a valid domain name (never save a raw IP address as the server URL)
-                    if not is_raw_ip:
-                        set_system_setting("last_server_base_url", detected_url)
-                else:
-                    set_system_setting("last_local_base_url", detected_url)
+                if not is_local and not is_raw_ip:
+                    if detected_url != _cached_server_url:
+                        _cached_server_url = detected_url
+                        await asyncio.to_thread(set_system_setting, "last_server_base_url", detected_url)
+                elif is_local:
+                    if detected_url != _cached_local_url:
+                        _cached_local_url = detected_url
+                        await asyncio.to_thread(set_system_setting, "last_local_base_url", detected_url)
     except Exception:
         pass
+
+    # Prevent unauthenticated access to assembled fallback index/layout/partials via /static
+    if path in ("/static/index.html", "/static/layout.html") or path.startswith("/static/partials"):
+        if not get_current_user(request):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Nicht autorisiert. Bitte anmelden.", "error": "unauthorized"}
+            )
+
+    # /mcp/call and /mcp/tools verify Bearer MCP token (or web session) directly in mcp_server
+    if path in ("/mcp/call", "/mcp/tools"):
+        return await call_next(request)
+
     # Public endpoints that don't require session authentication
     if (
         path in ("/login", "/favicon.ico", "/favicon.svg", "/apple-touch-icon.png", "/docs", "/openapi.json", "/ping", "/health", "/api/health")
         or path.startswith("/static")
         or path.startswith("/api/auth")
-        or path.startswith("/mcp")
-        or not path.startswith("/api/")
+        or (not path.startswith("/api/") and not path.startswith("/mcp"))
     ):
         return await call_next(request)
 
-    # Protected API endpoints
+    # Protected API and /mcp/* endpoints (/mcp/status, /mcp/snippet, /mcp/regenerate-token, /api/*)
     user = get_current_user(request)
     if not user:
         return JSONResponse(

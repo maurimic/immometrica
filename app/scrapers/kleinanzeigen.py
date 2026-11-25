@@ -179,18 +179,30 @@ def scrape_kleinanzeigen_deals(
             rooms = 2.0
             for p_tag in art.find_all("p"):
                 t = p_tag.text.strip()
-                sqm_match = re.search(r"([\d,\.]+)\s*m²", t)
-                if sqm_match:
-                    try:
-                        sqm = float(sqm_match.group(1).replace(".", "").replace(",", "."))
-                    except ValueError:
-                        pass
-                room_match = re.search(r"([\d,\.]+)\s*Zi", t)
-                if room_match:
-                    try:
-                        rooms = float(room_match.group(1).replace(",", "."))
-                    except ValueError:
-                        pass
+                if sqm <= 0:
+                    sqm_match = re.search(r"([\d,\.]+)\s*m²", t)
+                    if sqm_match:
+                        raw_sqm = sqm_match.group(1)
+                        try:
+                            # Strip dots only if they are thousands separators (e.g. 1.250), keep decimal dots (75.5)
+                            if "," in raw_sqm:
+                                norm_sqm = raw_sqm.replace(".", "").replace(",", ".")
+                            elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sqm):
+                                norm_sqm = raw_sqm.replace(".", "")
+                            else:
+                                norm_sqm = raw_sqm
+                            cand_sqm = float(norm_sqm)
+                            if 8.0 <= cand_sqm <= 10000.0:
+                                sqm = cand_sqm
+                        except ValueError:
+                            pass
+                if rooms == 2.0:
+                    room_match = re.search(r"([\d,\.]+)\s*Zi", t)
+                    if room_match:
+                        try:
+                            rooms = float(room_match.group(1).replace(",", "."))
+                        except ValueError:
+                            pass
 
             if sqm <= 0:
                 continue
@@ -280,8 +292,9 @@ def scrape_kleinanzeigen_deals(
             benchmark = evaluate_property_valuation(resolved_city, sqm, price)
             expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
             expected_rent = round(sqm * expected_rent_per_sqm, 2)
-            is_rented = 1 if "vermietet" in title.lower() else 0
-            current_rent = expected_rent if is_rented else 0.0
+            title_low = title.lower()
+            is_rented = 1 if ("vermietet" in title_low and "unvermietet" not in title_low and "nicht vermietet" not in title_low) else 0
+            current_rent = 0.0
             gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if price > 0 else 0.0
     
             cf = calculate_cashflow(

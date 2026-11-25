@@ -103,12 +103,21 @@ window.immoMapModule = {
       inner.style.backgroundColor = pinColor;
       inner.innerText = yieldText;
 
-      // Hover tooltip
+      // Hover tooltip (escaped against DOM XSS)
       const tooltip = document.createElement('div');
       tooltip.className = 'hidden group-hover:flex flex-col items-center absolute bottom-full mb-1.5 left-1/2 -translate-x-1/2 pointer-events-none z-50 whitespace-nowrap';
+      const safeCity = this.escapeHtml(prop.city || '');
+      const safePortal = this.escapeHtml(prop.source_portal || 'Immo');
+      const safeTitle = this.escapeHtml(prop.title || '');
+      const safePlz = this.escapeHtml(prop.postal_code || '');
+      const safeAddress = this.escapeHtml(prop.address || '');
+      const safeImgUrl = prop.image_url ? this.safeHttpUrl(prop.image_url) : '#';
+      const safePortalUrl = this.safeHttpUrl(prop.portal_url || '');
+      const safePropId = Number(prop.id) || 0;
+
       tooltip.innerHTML = `
         <span class="bg-slate-900/95 text-white text-[11px] font-semibold px-2 py-0.5 rounded shadow-lg">
-          ${prop.city} · ${Number(prop.purchase_price || 0).toLocaleString('de-DE')} €
+          ${safeCity} · ${Number(prop.purchase_price || 0).toLocaleString('de-DE')} €
         </span>
         <span class="w-1.5 h-1.5 bg-slate-900/95 rotate-45 -mt-0.5"></span>
       `;
@@ -123,22 +132,22 @@ window.immoMapModule = {
       const rentFmt = Number(prop.current_rent || prop.expected_rent || 0).toLocaleString('de-DE') + ' €/M';
       const spaceFmt = this.formatSqM(prop.living_space);
       
-      const imgHtml = prop.image_url 
-        ? `<img src="${prop.image_url}" alt="Foto" class="w-full h-28 object-cover rounded-md mb-2 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.immoAppInstance.openDetailModalById(${prop.id})">`
-        : `<div class="w-full h-20 bg-slate-100 dark:bg-slate-800 rounded-md mb-2 flex items-center justify-center text-slate-400 text-xs cursor-pointer" onclick="window.immoAppInstance.openDetailModalById(${prop.id})">🏢 Details & Foto ansehen</div>`;
+      const imgHtml = (prop.image_url && safeImgUrl !== '#')
+        ? `<img src="${safeImgUrl}" alt="Foto" class="w-full h-28 object-cover rounded-md mb-2 cursor-pointer hover:opacity-90 transition-opacity" onclick="window.immoAppInstance.openDetailModalById(${safePropId})">`
+        : `<div class="w-full h-20 bg-slate-100 dark:bg-slate-800 rounded-md mb-2 flex items-center justify-center text-slate-400 text-xs cursor-pointer" onclick="window.immoAppInstance.openDetailModalById(${safePropId})">🏢 Details & Foto ansehen</div>`;
 
       const popupHtml = `
         <div class="map-popup-card text-left max-w-[270px] text-slate-800 dark:text-slate-100">
           ${imgHtml}
           <div class="flex items-center justify-between gap-2 mb-1.5">
-            <span class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 truncate">${prop.source_portal || 'Immo'}</span>
-            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${isPos ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'}">${yieldText} Rendite</span>
+            <span class="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 truncate">${safePortal}</span>
+            <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${isPos ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-300'}">${this.escapeHtml(yieldText)} Rendite</span>
           </div>
-          <h4 class="font-bold text-xs text-slate-900 dark:text-white line-clamp-2 leading-snug cursor-pointer hover:text-sky-600 dark:hover:text-sky-400 transition-colors" onclick="window.immoAppInstance.openDetailModalById(${prop.id})">
-            ${prop.title}
+          <h4 class="font-bold text-xs text-slate-900 dark:text-white line-clamp-2 leading-snug cursor-pointer hover:text-sky-600 dark:hover:text-sky-400 transition-colors" onclick="window.immoAppInstance.openDetailModalById(${safePropId})">
+            ${safeTitle}
           </h4>
           <div class="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">
-            📍 ${prop.postal_code || ''} ${prop.city || ''}${prop.address ? ' · ' + prop.address : ''}
+            📍 ${safePlz} ${safeCity}${safeAddress ? ' · ' + safeAddress : ''}
           </div>
           <div class="grid grid-cols-2 gap-1.5 my-2.5 py-1.5 border-y border-slate-200 dark:border-slate-800 text-[11px]">
             <div>
@@ -160,18 +169,18 @@ window.immoMapModule = {
           </div>
           <div class="flex flex-col gap-1.5 mt-2">
             <button 
-              onclick="window.immoAppInstance.openDetailModalById(${prop.id})" 
+              onclick="window.immoAppInstance.openDetailModalById(${safePropId})" 
               class="w-full py-1.5 px-2 bg-sky-600 hover:bg-sky-700 text-white rounded text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer">
               <span>🔍 KI-Audit & Details</span>
             </button>
             <div class="flex items-center gap-1.5">
               <button 
-                onclick="window.immoAppInstance.sendToCalculatorById(${prop.id})" 
+                onclick="window.immoAppInstance.sendToCalculatorById(${safePropId})" 
                 class="flex-1 py-1 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[11px] font-medium transition-colors text-center cursor-pointer">
                 🧮 Rechner
               </button>
               <a 
-                href="${prop.portal_url || '#'}" 
+                href="${safePortalUrl}" 
                 target="_blank" 
                 rel="noopener noreferrer"
                 class="flex-1 py-1 px-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded text-[11px] font-medium transition-colors text-center truncate">

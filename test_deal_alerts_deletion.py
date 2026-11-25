@@ -19,6 +19,17 @@ class TestDealAlertsDeletion(unittest.TestCase):
         cls.client.cookies.set("immo_session", token)
 
     def setUp(self):
+        from app.database import get_connection
+        conn = get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("INSERT OR IGNORE INTO search_profiles (id, name, city) VALUES (999, 'Test Profile 999', 'Dortmund')")
+            c.execute("INSERT OR IGNORE INTO search_profiles (id, name, city) VALUES (888, 'Test Profile 888', 'Essen')")
+            conn.commit()
+        finally:
+            conn.close()
+        clear_deal_alerts(profile_id=999)
+        clear_deal_alerts(profile_id=888)
         # Create sample test alerts
         self.alert_id_1 = record_deal_alert({
             "profile_id": 999,
@@ -75,9 +86,17 @@ class TestDealAlertsDeletion(unittest.TestCase):
         })
 
     def tearDown(self):
-        # Clean up any leftover test alerts
+        # Clean up any leftover test alerts & temporary test profiles
         clear_deal_alerts(profile_id=999)
         clear_deal_alerts(profile_id=888)
+        from app.database import get_connection
+        conn = get_connection()
+        try:
+            c = conn.cursor()
+            c.execute("DELETE FROM search_profiles WHERE id IN (999, 888)")
+            conn.commit()
+        finally:
+            conn.close()
 
     def test_01_delete_single_alert_api(self):
         """Test DELETE /api/alerts/feed/{id}."""

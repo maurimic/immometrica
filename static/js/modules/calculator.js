@@ -183,7 +183,8 @@ window.immoCalculatorModule = {
       if (this.calc.city) params.append('city', this.calc.city);
       if (this.calc.state) params.append('state', this.calc.state);
 
-      const res = await fetch(`/api/calculator/resolve-geo?${params.toString()}`);
+      const res = this.handleAuthResponse(await fetch(`/api/calculator/resolve-geo?${params.toString()}`));
+      if (!res.ok) return;
       const geo = await res.json();
       if (geo.state) {
         this.calc.state = geo.state;
@@ -201,10 +202,16 @@ window.immoCalculatorModule = {
   },
 
   async runCalculator() {
+    if (this._calcAbort) {
+      try { this._calcAbort.abort(); } catch (e) {}
+    }
+    const controller = new AbortController();
+    this._calcAbort = controller;
     try {
-      const res = await fetch('/api/calculator/calculate', {
+      const res = this.handleAuthResponse(await fetch('/api/calculator/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           price: Number(this.calc.price),
           rent: Number(this.calc.rent),
@@ -225,9 +232,11 @@ window.immoCalculatorModule = {
           depreciation_years: Number(this.calc.depreciation_years) || 50,
           marginal_tax_rate: Number(this.calc.marginal_tax_rate) || 42
         })
-      });
-      this.calc.result = await res.json();
-      if (this.calc.result) {
+      }));
+      if (!res.ok) return;
+      const calcData = await res.json();
+      if (calcData && calcData.buy_costs_details) {
+        this.calc.result = calcData;
         this.calc.drklein_calculator_url = this.getDrKleinUrl();
         if (this.calc.result.mortgage_bank_name) {
           this.calc.mortgage_bank_name = this.calc.result.mortgage_bank_name;
@@ -238,6 +247,7 @@ window.immoCalculatorModule = {
         }
       }
     } catch (err) {
+      if (err && err.name === 'AbortError') return;
       console.error('Calculator error:', err);
     }
   },
@@ -327,7 +337,7 @@ window.immoCalculatorModule = {
     if (!prop) return 'https://www.drklein.de/bauzinsen-rechner.html#construction-interest-calculator';
     const p = Math.max(10000, Math.round(Number(prop.purchase_price) || 0));
     const taxRate = Number(prop.ai_analysis?.metrics?.grunderwerbsteuer_rate || 6.5);
-    const commissionPct = Number(prop.commission_percent !== undefined ? prop.commission_percent : (prop.ai_analysis?.metrics?.commission_percent || 3.57));
+    const commissionPct = Number((prop.commission_percent !== undefined && prop.commission_percent !== null) ? prop.commission_percent : (prop.ai_analysis?.metrics?.commission_percent ?? 3.57));
     const capex = Math.max(0, Math.round(
       Number((prop.image_analysis && prop.image_analysis.total_visual_capex) ||
              (prop.ai_analysis && prop.ai_analysis.capex && prop.ai_analysis.capex.total_capex) || 0)
@@ -371,7 +381,7 @@ window.immoCalculatorModule = {
         term_years: this.calc.selected_term_years || 10,
         repayment_rate: this.calc.repayment_rate || 2.0,
         renovation_costs: this.calc.renovation_costs || 0,
-        commission_percent: this.calc.commission_percent || 3.57,
+        commission_percent: this.calc.commission_percent ?? 3.57,
         buy_costs_from_equity: this.calc.buy_costs_from_equity ? 'true' : 'false'
       });
       if (this.calc.postal_code) params.append('postal_code', this.calc.postal_code);

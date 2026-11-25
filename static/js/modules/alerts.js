@@ -46,14 +46,18 @@ window.immoAlertsModule = {
 
   async loadAlertsData() {
     try {
-      const [profRes, feedRes, settRes] = await Promise.all([
-        fetch('/api/alerts/profiles').then(r => r.json()),
-        fetch('/api/alerts/feed').then(r => r.json()),
-        fetch('/api/alerts/settings').then(r => r.json())
+      const responses = await Promise.all([
+        fetch('/api/alerts/profiles'),
+        fetch('/api/alerts/feed'),
+        fetch('/api/alerts/settings')
       ]);
+      responses.forEach(r => this.handleAuthResponse(r));
+      const [profRes, feedRes, settRes] = await Promise.all(
+        responses.map(async r => (r.ok ? await r.json().catch(() => null) : null))
+      );
       if (profRes && profRes.success) this.searchProfiles = profRes.profiles || [];
       if (feedRes && feedRes.success) this.alertFeed = feedRes.alerts || [];
-      if (settRes) {
+      if (settRes && settRes.crawler_interval_minutes !== undefined) {
         this.alertSettings = settRes;
         this.telegramInputChatId = String(settRes.telegram_chat_id || '').trim();
         if (settRes.crawler_last_stats) {
@@ -178,11 +182,14 @@ window.immoAlertsModule = {
     const newActive = !profile.is_active;
     profile.is_active = newActive ? 1 : 0;
     try {
-      await fetch(`/api/alerts/profiles/${profile.id}`, {
+      const res = this.handleAuthResponse(await fetch(`/api/alerts/profiles/${profile.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_active: newActive })
-      });
+      }));
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
     } catch (e) {
       console.error('Error toggling profile:', e);
       profile.is_active = !newActive ? 1 : 0;
@@ -194,7 +201,8 @@ window.immoAlertsModule = {
       return;
     }
     try {
-      await fetch(`/api/alerts/profiles/${profile.id}`, { method: 'DELETE' });
+      const res = this.handleAuthResponse(await fetch(`/api/alerts/profiles/${profile.id}`, { method: 'DELETE' }));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await this.loadAlertsData();
       setTimeout(() => {
         if (window.lucide) window.lucide.createIcons();
@@ -258,20 +266,20 @@ window.immoAlertsModule = {
       if (this.telegramInputToken && this.telegramInputToken.trim()) {
         payload.telegram_bot_token = this.telegramInputToken.trim();
       }
-      const res = await fetch('/api/alerts/settings', {
+      const res = this.handleAuthResponse(await fetch('/api/alerts/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
+      }));
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
         this.telegramInputToken = '';
         this.alertSettings.telegram_chat_id = cleanChatId;
         this.telegramInputChatId = cleanChatId;
         await this.loadAlertsData();
         alert(`✅ Einstellungen gespeichert!\nChat-ID: ${cleanChatId || '(keine angegeben)'}`);
       } else {
-        alert('Fehler: ' + (data.detail || 'Konnte Einstellungen nicht speichern.'));
+        alert('Fehler: ' + (data.detail || `Konnte Einstellungen nicht speichern (${res.status}).`));
       }
     } catch (e) {
       alert('Fehler beim Speichern: ' + e.message);
@@ -290,17 +298,20 @@ window.immoAlertsModule = {
       if (this.telegramInputToken && this.telegramInputToken.trim()) {
         payload.telegram_bot_token = this.telegramInputToken.trim();
       }
-      const res = await fetch('/api/alerts/telegram/test', {
+      const res = this.handleAuthResponse(await fetch('/api/alerts/telegram/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      this.telegramTestResult = data;
+      }));
+      const data = await res.json().catch(() => ({}));
+      this.telegramTestResult = res.ok ? data : { success: false, error: data.detail || `HTTP ${res.status}` };
     } catch (e) {
       this.telegramTestResult = { success: false, error: 'Netzwerkfehler: ' + e.message };
     } finally {
       this.telegramTesting = false;
+      this.$nextTick(() => {
+        if (window.lucide) window.lucide.createIcons();
+      });
     }
   },
 

@@ -646,18 +646,28 @@ def resolve_location_and_tax(
 ) -> Dict[str, Any]:
     """
     Automatically infers the federal state (Bundesland) and Grunderwerbsteuer tax rate
-    from either postal code (PLZ), city name, or explicit state.
+    prioritizing explicit postal code (PLZ) and city name before falling back to an explicit/default state.
     """
     resolved_state = None
 
-    # 1. If explicit state given and valid
-    if state and state in GRUNDERWERBSTEUER_DE:
-        resolved_state = state
+    # 1. Try postal code lookup first (5-digit German PLZ, including 3-digit border overrides)
+    if postal_code:
+        plz_match = re.search(r"\b(\d{5})\b", str(postal_code))
+        plz_clean = plz_match.group(1) if plz_match else "".join(c for c in str(postal_code) if c.isdigit())
+        if len(plz_clean) >= 3:
+            prefix3 = int(plz_clean[:3])
+            if 637 <= prefix3 <= 639:
+                resolved_state = "Bayern"
+            elif 890 <= prefix3 <= 894:
+                resolved_state = "Bayern"
+            elif prefix3 == 275:
+                resolved_state = "Bremen"
+            elif prefix3 in (212, 213, 214, 216, 217):
+                resolved_state = "Niedersachsen"
+            elif prefix3 in (228, 229):
+                resolved_state = "Schleswig-Holstein"
 
-    # 2. Try postal code lookup (5-digit German PLZ)
-    if not resolved_state and postal_code:
-        plz_clean = "".join(c for c in str(postal_code) if c.isdigit())
-        if len(plz_clean) >= 2:
+        if not resolved_state and len(plz_clean) >= 2:
             prefix2 = int(plz_clean[:2])
 
             if prefix2 in [1, 2, 4, 8, 9]:
@@ -678,7 +688,7 @@ def resolve_location_and_tax(
                 resolved_state = "Hamburg"
             elif 23 <= prefix2 <= 25:
                 resolved_state = "Schleswig-Holstein"
-            elif prefix2 in [26, 27, 29, 30, 31, 37, 38]:
+            elif prefix2 in [26, 27, 29, 30, 31, 37, 38, 49]:
                 resolved_state = "Niedersachsen"
             elif prefix2 == 28:
                 resolved_state = "Bremen"
@@ -701,13 +711,20 @@ def resolve_location_and_tax(
             elif prefix2 in [98, 99]:
                 resolved_state = "Thüringen"
 
-    # 3. Try City lookup
+    # 2. Try City lookup (exact match first, then whole-word match so 'Essen' doesn't match 'Essenbach')
     if not resolved_state and city:
         city_lower = city.strip().lower()
-        for c_key, c_state in CITY_TO_STATE.items():
-            if c_key in city_lower or city_lower in c_key:
-                resolved_state = c_state
-                break
+        if city_lower in CITY_TO_STATE:
+            resolved_state = CITY_TO_STATE[city_lower]
+        else:
+            for c_key, c_state in sorted(CITY_TO_STATE.items(), key=lambda x: len(x[0]), reverse=True):
+                if re.search(rf"\b{re.escape(c_key)}\b", city_lower):
+                    resolved_state = c_state
+                    break
+
+    # 3. Fallback to explicit state only if PLZ/city could not determine it
+    if not resolved_state and state and state in GRUNDERWERBSTEUER_DE:
+        resolved_state = state
 
     # Fallback default
     if not resolved_state:

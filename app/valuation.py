@@ -124,9 +124,14 @@ def evaluate_property_valuation(
     benchmark = get_city_benchmark(city)
     base_sqm_price = benchmark["avg_sqm_buy"]
 
+    safe_year_built = int(year_built) if year_built else 1980
+    safe_condition = str(condition or "Gepflegt")
+    safe_property_type = str(property_type or "Eigentumswohnung")
+
     # Construction year multiplier
-    current_year = 2026
-    age = max(0, current_year - year_built)
+    from datetime import datetime
+    current_year = max(2026, datetime.now().year)
+    age = max(0, current_year - safe_year_built)
     if age < 5:
         age_factor = 1.25  # Neubau
     elif age < 15:
@@ -137,11 +142,11 @@ def evaluate_property_valuation(
         age_factor = 0.95
     else:
         # Altbau / älterer Bestand
-        age_factor = 1.08 if "altbau" in condition.lower() or year_built < 1930 else 0.88
+        age_factor = 1.08 if "altbau" in safe_condition.lower() or safe_year_built < 1930 else 0.88
 
     # Condition multiplier
     cond_factor = 1.0
-    cond_lower = condition.lower()
+    cond_lower = safe_condition.lower()
     if "erstbezug" in cond_lower or "neuwertig" in cond_lower:
         cond_factor = 1.20
     elif "saniert" in cond_lower or "renoviert" in cond_lower:
@@ -156,9 +161,9 @@ def evaluate_property_valuation(
 
     # Property type adjustment
     type_factor = 1.0
-    if "mehrfamilienhaus" in property_type.lower():
+    if "mehrfamilienhaus" in safe_property_type.lower():
         type_factor = 0.92 # MFH trade at slightly lower €/sqm
-    elif "einfamilienhaus" in property_type.lower():
+    elif "einfamilienhaus" in safe_property_type.lower():
         type_factor = 1.12
 
     estimated_sqm_value = round(base_sqm_price * age_factor * cond_factor * rented_factor * type_factor, 2)

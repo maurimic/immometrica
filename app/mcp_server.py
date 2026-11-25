@@ -4,19 +4,59 @@ Allows AI assistants (Claude, Cursor, Antigravity) to query real estate deals,
 calculate cashflows, evaluate Sprengnetter market benchmarks, and manage deal pipeline.
 """
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, HTTPException, Body, Depends, Request, status
 from typing import Dict, Any, List
+import hmac
+import json
 from app.database import (
     get_connection,
     get_active_mcp_token,
     regenerate_mcp_token,
     increment_mcp_quota
 )
+from app.auth import get_current_user, require_auth
 from app.calculator import calculate_cashflow
 from app.valuation import evaluate_property_valuation, get_city_benchmark, CITY_BENCHMARKS
-import json
 
 router = APIRouter(prefix="/mcp", tags=["mcp"])
+
+
+def _require_mcp_auth(request: Request) -> Dict[str, Any]:
+    """
+    Allows either an authenticated web session (require_auth / session cookie)
+    or a valid MCP Bearer token from api_tokens.
+    """
+    user = get_current_user(request)
+    if user:
+        return user
+
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.startswith("Bearer "):
+        submitted = auth_header[7:].strip()
+        active = get_active_mcp_token().get("token") or ""
+        if submitted and active and hmac.compare_digest(submitted.encode("utf-8"), active.encode("utf-8")):
+            return {"authenticated": True, "source": "mcp_token"}
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Nicht autorisiert. Gültiger MCP Bearer Token oder Session-Login erforderlich.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def _mcp_snippet_for_token(token: str) -> Dict[str, Any]:
+    from app.telegram_notifier import get_base_url
+    mcp_url = f"{get_base_url().rstrip('/')}/mcp/call"
+    return {
+        "mcpServers": {
+            "immometrica": {
+                "url": mcp_url,
+                "headers": {
+                    "Authorization": f"Bearer {token}"
+                }
+            }
+        }
+    }
 
 MCP_TOOLS = [
     {
@@ -141,43 +181,24 @@ MCP_TOOLS = [
     }
 ]
 
-@router.get("/tools")
+@router.get("/tools", dependencies=[Depends(_require_mcp_auth)])
 def list_tools():
     return {"tools": MCP_TOOLS}
 
-@router.get("/snippet")
+@router.get("/snippet", dependencies=[Depends(require_auth)])
 def get_mcp_config_snippet():
     """Generates the config snippet for Claude / Cursor / Antigravity settings"""
     token_info = get_active_mcp_token()
-    token = token_info["token"]
-    return {
-        "mcpServers": {
-            "immometrica": {
-                "url": "http://127.0.0.1:8000/mcp/call",
-                "headers": {
-                    "Authorization": f"Bearer {token}"
-                }
-            }
-        }
-    }
+    return _mcp_snippet_for_token(token_info["token"])
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(require_auth)])
 def get_mcp_status():
     """
     Returns current active token, quota usage, and configuration JSON snippet.
     """
     token_info = get_active_mcp_token()
     token = token_info["token"]
-    snippet = {
-        "mcpServers": {
-            "immometrica": {
-                "url": "http://127.0.0.1:8000/mcp/call",
-                "headers": {
-                    "Authorization": f"Bearer {token}"
-                }
-            }
-        }
-    }
+    snippet = _mcp_snippet_for_token(token)
     return {
         "token": token,
         "name": token_info.get("name", "Antigravity AI Agent & n8n Sync"),
@@ -188,23 +209,14 @@ def get_mcp_status():
         "snippet": snippet
     }
 
-@router.post("/regenerate-token")
+@router.post("/regenerate-token", dependencies=[Depends(require_auth)])
 def regenerate_token():
     """
     Regenerates a new secure MCP token in the database and returns the new status and snippet.
     """
     token_info = regenerate_mcp_token()
     token = token_info["token"]
-    snippet = {
-        "mcpServers": {
-            "immometrica": {
-                "url": "http://127.0.0.1:8000/mcp/call",
-                "headers": {
-                    "Authorization": f"Bearer {token}"
-                }
-            }
-        }
-    }
+    snippet = _mcp_snippet_for_token(token)
     return {
         "success": True,
         "token": token,
@@ -216,45 +228,53 @@ def regenerate_token():
         "snippet": snippet
     }
 
-@router.post("/call")
+@router.post("/call", dependencies=[Depends(_require_mcp_auth)])
 def call_tool(payload: Dict[str, Any] = Body(...)):
+    if not isinstance(payload, dict) or not payload.get("name"):
+        raise HTTPException(status_code=400, detail="Tool 'name' fehlt.")
     increment_mcp_quota()
     tool_name = payload.get("name")
-    args = payload.get("arguments", {})
+    args = payload.get("arguments") or {}
+    if not isinstance(args, dict):
+        raise HTTPException(status_code=400, detail="'arguments' muss ein JSON-Objekt sein.")
 
     if tool_name == "search_deals":
         conn = get_connection()
-        cursor = conn.cursor()
-        conditions = ["1=1"]
-        params = []
-        if args.get("city"):
-            conditions.append("city LIKE ?")
-            params.append(f"%{args['city']}%")
-        if args.get("state"):
-            conditions.append("state = ?")
-            params.append(args["state"])
-        if args.get("property_type"):
-            conditions.append("property_type = ?")
-            params.append(args["property_type"])
-        if args.get("min_yield"):
-            min_y = float(args["min_yield"])
-            conditions.append("(gross_yield >= ? OR ((expected_rent * 12.0 / NULLIF(purchase_price, 0)) * 100.0) >= ?)")
-            params.extend([min_y, min_y])
-        if args.get("max_price"):
-            conditions.append("purchase_price <= ?")
-            params.append(float(args["max_price"]))
-        if args.get("positive_cashflow"):
-            conditions.append("monthly_cashflow >= 0")
-        if args.get("undervalued_only"):
-            conditions.append("market_deviation_percent < -5")
+        try:
+            cursor = conn.cursor()
+            conditions = ["1=1"]
+            params = []
+            if args.get("city"):
+                conditions.append("city LIKE ?")
+                params.append(f"%{args['city']}%")
+            if args.get("state"):
+                conditions.append("state = ?")
+                params.append(args["state"])
+            if args.get("property_type"):
+                conditions.append("property_type = ?")
+                params.append(args["property_type"])
+            if args.get("min_yield"):
+                min_y = float(args["min_yield"])
+                conditions.append("(gross_yield >= ? OR ((expected_rent * 12.0 / NULLIF(purchase_price, 0)) * 100.0) >= ?)")
+                params.extend([min_y, min_y])
+            if args.get("max_price"):
+                conditions.append("purchase_price <= ?")
+                params.append(float(args["max_price"]))
+            if args.get("positive_cashflow"):
+                conditions.append("monthly_cashflow >= 0")
+            if args.get("undervalued_only"):
+                conditions.append("market_deviation_percent < -5")
 
-        query = f"SELECT * FROM properties WHERE {' AND '.join(conditions)} ORDER BY gross_yield DESC LIMIT 20"
-        cursor.execute(query, params)
-        rows = [dict(r) for r in cursor.fetchall()]
-        conn.close()
+            query = f"SELECT * FROM properties WHERE {' AND '.join(conditions)} ORDER BY gross_yield DESC LIMIT 20"
+            cursor.execute(query, params)
+            rows = [dict(r) for r in cursor.fetchall()]
+        finally:
+            conn.close()
         return {"result": rows}
 
     elif tool_name == "calculate_cashflow":
+        if "price" not in args or "rent" not in args:
+            raise HTTPException(status_code=400, detail="'price' und 'rent' sind erforderlich.")
         price = float(args["price"])
         rent = float(args["rent"])
         equity = float(args.get("equity_value", 20.0))
@@ -272,12 +292,16 @@ def call_tool(payload: Dict[str, Any] = Body(...)):
         return {"result": res}
 
     elif tool_name == "get_deal_details":
+        if "property_id" not in args:
+            raise HTTPException(status_code=400, detail="'property_id' ist erforderlich.")
         prop_id = int(args["property_id"])
         conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM properties WHERE id = ?", (prop_id,))
-        row = cursor.fetchone()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM properties WHERE id = ?", (prop_id,))
+            row = cursor.fetchone()
+        finally:
+            conn.close()
         if not row:
             raise HTTPException(status_code=404, detail="Property not found")
         return {"result": dict(row)}
@@ -290,6 +314,8 @@ def call_tool(payload: Dict[str, Any] = Body(...)):
 
     elif tool_name == "audit_property_ai":
         from app.routers.properties import run_property_ai_audit
+        if "property_id" not in args:
+            raise HTTPException(status_code=400, detail="'property_id' ist erforderlich.")
         prop_id = int(args["property_id"])
         force_refresh = bool(args.get("force_refresh", False))
         res = run_property_ai_audit(property_id=prop_id, force_refresh=force_refresh)
@@ -297,16 +323,20 @@ def call_tool(payload: Dict[str, Any] = Body(...)):
 
     elif tool_name == "generate_purchase_offer":
         from app.routers.properties import run_property_ai_audit
+        if "property_id" not in args:
+            raise HTTPException(status_code=400, detail="'property_id' ist erforderlich.")
         prop_id = int(args["property_id"])
         buyer_name = args.get("buyer_name", "Kaufinteressent")
         buyer_email = args.get("buyer_email", "investor@example.com")
         buyer_phone = args.get("buyer_phone", "+49 170 1234567")
 
         conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM properties WHERE id = ?", (prop_id,))
-        row = cursor.fetchone()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM properties WHERE id = ?", (prop_id,))
+            row = cursor.fetchone()
+        finally:
+            conn.close()
         if not row:
             raise HTTPException(status_code=404, detail="Property not found")
 

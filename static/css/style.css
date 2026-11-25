@@ -246,6 +246,10 @@ html.dark .maplibregl-popup-anchor-right .maplibregl-popup-tip {
   border-left-color: #0f172a;
 }
 
+[x-cloak] {
+  display: none !important;
+}
+
 /* Print Optimization for Investor Dossier */
 @media print {
   header, nav, .no-print, button, select, input, .kanban-board, #map, .modal-backdrop-bg {
@@ -256,14 +260,16 @@ html.dark .maplibregl-popup-anchor-right .maplibregl-popup-tip {
     color: #111827 !important;
     font-size: 10pt !important;
   }
-  .modal-container {
+  .modal-container, .immo-modal-container {
     position: static !important;
     inset: auto !important;
     padding: 0 !important;
     display: block !important;
     background: transparent !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
-  .modal-box {
+  .modal-box, .immo-modal-container > div {
     max-width: 100% !important;
     width: 100% !important;
     max-height: none !important;

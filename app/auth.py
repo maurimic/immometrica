@@ -1,9 +1,12 @@
 import os
 import hmac
 import hashlib
+import logging
 from typing import Optional, Dict, Any
 from fastapi import Request, Response, HTTPException, status
 from pathlib import Path
+
+logger = logging.getLogger("immometrica.auth")
 
 COOKIE_NAME = "immo_session"
 DEFAULT_SALT = "immotracker-session-salt-default-key-32"
@@ -83,6 +86,8 @@ def get_auth_config() -> Dict[str, Any]:
         )
         if not password:
             password = DEFAULT_PASSWORD
+            if os.environ.get("ENV") == "production":
+                logger.warning("SECURITY WARNING: APP_PASSWORD is not set in production; using default password.")
 
     # Session secret / salt resolution
     secret = (
@@ -94,6 +99,8 @@ def get_auth_config() -> Dict[str, Any]:
         or immotracker_env.get("SESSION_SECRET")
         or DEFAULT_SALT
     )
+    if secret == DEFAULT_SALT and os.environ.get("ENV") == "production":
+        logger.warning("SECURITY WARNING: SESSION_SECRET is using the default salt in production.")
 
     return {
         "username": username.strip(),
@@ -137,7 +144,7 @@ def verify_credentials(username: str, password: str) -> bool:
 def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
     """
     Checks if the incoming request has a valid session token
-    via cookie, Authorization header, or internal test client.
+    via HttpOnly cookie or Authorization Bearer header.
     """
     cfg = get_auth_config()
     expected_token = hash_session_token(cfg["username"], cfg["password"], cfg["secret"])
@@ -153,10 +160,6 @@ def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
         bearer_token = auth_header[7:].strip()
         if bearer_token and safe_str_cmp(bearer_token, expected_token):
             return {"username": cfg["username"], "authenticated": True, "source": cfg["source"]}
-
-    # 3. Check Internal Test Client Header (allows test_endpoints.py / local automation)
-    if request.headers.get("X-Test-Client") == "immometrica-internal-test":
-        return {"username": cfg["username"], "authenticated": True, "source": "Internal Test Client"}
 
     return None
 
@@ -176,27 +179,30 @@ def require_auth(request: Request) -> Dict[str, Any]:
 def set_session_cookie(
     response: Response,
     token: str,
-    max_age: int = 30 * 86400,
+    max_age: Optional[int] = 30 * 86400,
     secure: bool = False,
 ) -> None:
-    """Sets the HttpOnly session cookie on the response."""
-    response.set_cookie(
-        key=COOKIE_NAME,
-        value=token,
-        max_age=max_age,
-        expires=max_age,
-        httponly=True,
-        samesite="lax",
-        secure=secure,
-        path="/",
-    )
+    """Sets the HttpOnly session cookie on the response (session-only if max_age is None)."""
+    cookie_kwargs: Dict[str, Any] = {
+        "key": COOKIE_NAME,
+        "value": token,
+        "httponly": True,
+        "samesite": "lax",
+        "secure": secure,
+        "path": "/",
+    }
+    if max_age is not None:
+        cookie_kwargs["max_age"] = max_age
+        cookie_kwargs["expires"] = max_age
+    response.set_cookie(**cookie_kwargs)
 
 
-def clear_session_cookie(response: Response) -> None:
+def clear_session_cookie(response: Response, secure: bool = False) -> None:
     """Deletes the session cookie on logout."""
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/",
         httponly=True,
         samesite="lax",
+        secure=secure,
     )

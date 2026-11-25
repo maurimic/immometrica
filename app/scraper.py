@@ -163,90 +163,94 @@ def import_scraped_deals_returning_ids(deals: List[Dict[str, Any]]) -> List[int]
 
     from app.geo_resolver import ensure_distinct_coord
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT lat, lng FROM properties WHERE lat IS NOT NULL AND lng IS NOT NULL")
-    occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
     inserted_ids: List[int] = []
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT lat, lng FROM properties WHERE lat IS NOT NULL AND lng IS NOT NULL")
+        occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
 
-    for idx_d, d in enumerate(deals):
-        portal_url = d.get("portal_url", "")
-        # Check if portal_url already exists
-        cursor.execute("SELECT id, source_portals FROM properties WHERE portal_url = ?", (portal_url,))
-        existing_row = cursor.fetchone()
-        if existing_row:
-            # Update source_portals if newly detected portals exist
-            if d.get("source_portals"):
-                try:
-                    cur_sp = json.loads(existing_row["source_portals"] or "[]")
-                    new_sp = d["source_portals"]
-                    merged_sp = {p.get("portal"): p for p in cur_sp}
-                    for p in new_sp:
-                        merged_sp[p.get("portal")] = p
-                    cursor.execute(
-                        "UPDATE properties SET source_portals = ? WHERE id = ?",
-                        (json.dumps(list(merged_sp.values())), existing_row["id"])
-                    )
-                except Exception:
-                    pass
-            continue
+        for idx_d, d in enumerate(deals):
+            portal_url = d.get("portal_url", "")
+            # Check if portal_url already exists
+            cursor.execute("SELECT id, source_portals FROM properties WHERE portal_url = ?", (portal_url,))
+            existing_row = cursor.fetchone()
+            if existing_row:
+                # Update source_portals if newly detected portals exist
+                if d.get("source_portals"):
+                    try:
+                        cur_sp = json.loads(existing_row["source_portals"] or "[]")
+                        new_sp = d["source_portals"]
+                        merged_sp = {p.get("portal"): p for p in cur_sp}
+                        for p in new_sp:
+                            merged_sp[p.get("portal")] = p
+                        cursor.execute(
+                            "UPDATE properties SET source_portals = ? WHERE id = ?",
+                            (json.dumps(list(merged_sp.values())), existing_row["id"])
+                        )
+                    except Exception:
+                        pass
+                continue
 
-        d_lat = float(d.get("lat") or 51.5)
-        d_lng = float(d.get("lng") or 7.4)
-        clean_lat, clean_lng = ensure_distinct_coord(d_lat, d_lng, occupied_coords, seed=idx_d + 100)
+            d_lat = float(d.get("lat") or 51.5)
+            d_lng = float(d.get("lng") or 7.4)
+            clean_lat, clean_lng = ensure_distinct_coord(d_lat, d_lng, occupied_coords, seed=idx_d + 100)
 
-        sp_json = json.dumps(d.get("source_portals") or [{
-            "portal": d.get("source_portal", "Kleinanzeigen"),
-            "url": portal_url,
-            "price": float(d.get("purchase_price") or 0.0)
-        }])
+            sp_json = json.dumps(d.get("source_portals") or [{
+                "portal": d.get("source_portal", "Kleinanzeigen"),
+                "url": portal_url,
+                "price": float(d.get("purchase_price") or 0.0)
+            }])
+            raw_tags = d.get("tags", [])
+            tags_json = json.dumps(raw_tags, ensure_ascii=False) if isinstance(raw_tags, list) else (raw_tags or "[]")
 
-        cursor.execute("""
-            INSERT INTO properties (
-                title, address, postal_code, city, state, country, property_type, building_type,
-                rooms, living_space, land_area, year_built, condition, purchase_price, original_price,
-                price_drop_amount, price_drop_percent, commission_percent, current_rent, expected_rent,
-                gross_yield, monthly_cashflow, market_value, market_value_per_sqm, market_deviation_percent,
-                source_portal, portal_url, image_url, days_online, first_seen_date, is_private,
-                is_rented, is_foreclosure, is_favorite, pipeline_stage, tags, lat, lng, parcel_id,
-                parcel_area, is_online, availability_status, status_message, last_checked_at, live_search_url,
-                source_portals, description, gallery_images
-            ) VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?,
-                ?, ?, ?
-            )
-        """, (
-            d.get("title", ""), d.get("address", ""), d.get("postal_code", ""), d.get("city", ""), d.get("state", "DE"), d.get("country", "DE"),
-            d.get("property_type", "Eigentumswohnung"), d.get("building_type", "Etagenwohnung"),
-            d.get("rooms", 2.0), d.get("living_space", 50.0), d.get("land_area", 0.0), d.get("year_built", 1980), d.get("condition", "Gepflegt"),
-            d.get("purchase_price", 0.0), d.get("original_price", d.get("purchase_price", 0.0)),
-            d.get("price_drop_amount", 0.0), d.get("price_drop_percent", 0.0), d.get("commission_percent", 3.57),
-            d.get("current_rent", 0.0), d.get("expected_rent", 0.0),
-            d.get("gross_yield", 0.0), d.get("monthly_cashflow", 0.0),
-            d.get("market_value", 0.0), d.get("market_value_per_sqm", 0.0), d.get("market_deviation_percent", 0.0),
-            d.get("source_portal", "Kleinanzeigen"), portal_url, d.get("image_url", ""),
-            d.get("days_online", 1), d.get("first_seen_date", get_berlin_today_str()),
-            d.get("is_private", 0), d.get("is_rented", 0), d.get("is_foreclosure", 0),
-            d.get("is_favorite", 0), d.get("pipeline_stage", "neu"),
-            str(d.get("tags", "[]")).replace("'", '"'),
-            clean_lat, clean_lng, d.get("parcel_id"), d.get("parcel_area", 0.0),
-            d.get("is_online", 1), d.get("availability_status", "online"),
-            d.get("status_message", "Live erreichbar & aktiv"),
-            d.get("last_checked_at", get_berlin_now_str()),
-            d.get("live_search_url", ""),
-            sp_json,
-            d.get("description", ""),
-            json.dumps(d.get("gallery_images") or []) if isinstance(d.get("gallery_images"), list) else d.get("gallery_images")
-        ))
-        inserted_ids.append(cursor.lastrowid)
+            cursor.execute("""
+                INSERT INTO properties (
+                    title, address, postal_code, city, state, country, property_type, building_type,
+                    rooms, living_space, land_area, year_built, condition, purchase_price, original_price,
+                    price_drop_amount, price_drop_percent, commission_percent, current_rent, expected_rent,
+                    gross_yield, monthly_cashflow, market_value, market_value_per_sqm, market_deviation_percent,
+                    source_portal, portal_url, image_url, days_online, first_seen_date, is_private,
+                    is_rented, is_foreclosure, is_favorite, pipeline_stage, tags, lat, lng, parcel_id,
+                    parcel_area, is_online, availability_status, status_message, last_checked_at, live_search_url,
+                    source_portals, description, gallery_images
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
+                )
+            """, (
+                d.get("title", ""), d.get("address", ""), d.get("postal_code", ""), d.get("city", ""), d.get("state", "DE"), d.get("country", "DE"),
+                d.get("property_type", "Eigentumswohnung"), d.get("building_type", "Etagenwohnung"),
+                d.get("rooms", 2.0), d.get("living_space", 50.0), d.get("land_area", 0.0), d.get("year_built", 1980), d.get("condition", "Gepflegt"),
+                d.get("purchase_price", 0.0), d.get("original_price", d.get("purchase_price", 0.0)),
+                d.get("price_drop_amount", 0.0), d.get("price_drop_percent", 0.0), d.get("commission_percent", 3.57),
+                d.get("current_rent", 0.0), d.get("expected_rent", 0.0),
+                d.get("gross_yield", 0.0), d.get("monthly_cashflow", 0.0),
+                d.get("market_value", 0.0), d.get("market_value_per_sqm", 0.0), d.get("market_deviation_percent", 0.0),
+                d.get("source_portal", "Kleinanzeigen"), portal_url, d.get("image_url", ""),
+                d.get("days_online", 1), d.get("first_seen_date", get_berlin_today_str()),
+                d.get("is_private", 0), d.get("is_rented", 0), d.get("is_foreclosure", 0),
+                d.get("is_favorite", 0), d.get("pipeline_stage", "neu"),
+                tags_json,
+                clean_lat, clean_lng, d.get("parcel_id"), d.get("parcel_area", 0.0),
+                d.get("is_online", 1), d.get("availability_status", "online"),
+                d.get("status_message", "Live erreichbar & aktiv"),
+                d.get("last_checked_at", get_berlin_now_str()),
+                d.get("live_search_url", ""),
+                sp_json,
+                d.get("description", ""),
+                json.dumps(d.get("gallery_images") or []) if isinstance(d.get("gallery_images"), list) else d.get("gallery_images")
+            ))
+            inserted_ids.append(cursor.lastrowid)
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
     return inserted_ids
 
 

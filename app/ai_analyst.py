@@ -250,7 +250,7 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
     extracted_rent = None
     rent_source = "BENCHMARK_ESTIMATE"
     stated_yield = None
-    num_pat = r"(\d+(?:\.\d{3})*(?:,\d{1,2})?|\d+[\.,-]*)"
+    num_pat = r"(\d+(?:\.\d{3})*(?:,\d{1,2}|,-)?|\d+[\.,-]*)"
 
     is_package_deal = any(k in combined_text for k in [
         "wohnungspaket", "immobilienpaket", "zwei wohnungen", "2 wohnungen",
@@ -312,7 +312,7 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
     # 2. Direkte Kaltmieten-Patterns (mit Fix für ",00 €" Cent-Nachkommastellen)
     if not extracted_rent:
         rent_patterns = [
-            (rf'{num_pat}\s*(?:€|euro)?\s*kalt(?:\s*miet)?', "EXPOSE_STATED_COLD"),
+            (rf'{num_pat}\s*(?:€|euro)\s*kalt(?:\s*miet)?', "EXPOSE_STATED_COLD"),
             (rf'(?:aktuelle\s+|monatliche\s+)?kaltmiete[^\d\n\r]{{0,25}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
             (rf'vermietet\s*für\s*(?:monatlich\s*)?{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
             (rf'monatlich\s*{num_pat}\s*(?:€|euro)\s*vermietet', "EXPOSE_STATED_RENT"),
@@ -372,7 +372,7 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
 
     # Kaufpreis-Extraktion aus Fließtext (zur Diskrepanz-Erkennung)
     stated_purchase_price_in_text = None
-    kp_matches = re.finditer(r"(?:kaufpreis|angebotspreis|gesamtpreis|festpreis)\s*[:=]?\s*([\d\.]+)\s*(?:€|euro)", combined_text)
+    kp_matches = re.finditer(r"(?:kaufpreis|angebotspreis|gesamtpreis|festpreis)\s*[:=]?\s*([\d\.]+)(?:,\d{1,2}|,-)?\s*(?:€|euro)", combined_text)
     for m in kp_matches:
         raw_val = m.group(1).replace(".", "")
         try:
@@ -383,24 +383,26 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         except ValueError:
             pass
 
-    # Vermietungsstatus
+    # Vermietungsstatus (Wortgrenzen vermeiden Treffer auf 'unvermietet' / Jahreszahlen 'seit 2024 unvermietet')
     is_rented = False
-    has_rented_phrase = any(w in combined_text for w in [
-        "vermietete", "vermietet an", "ist vermietet", "seit 0", "seit 1", "seit 2",
-        "ungekündigt vermietet", "langjährig vermietet", "solide vermietet", "fest vermietet"
-    ]) or "vermietet" in title_lower
+    has_rented_phrase = bool(
+        re.search(r"\b(?:vermietete\w*|ist\s+vermietet|ungekündigt\s+vermietet|langjährig\s+vermietet|solide\s+vermietet|fest\s+vermietet)\b", combined_text)
+        or re.search(r"\bseit\s+(?:\d{1,2}\s+jahren|\d{4})\s+(?:fest\s+|solide\s+|durchgehend\s+)?vermietet\b", combined_text)
+        or (re.search(r"\bvermietet\b", title_lower) and "unvermietet" not in title_lower and "nicht vermietet" not in title_lower)
+    )
+    has_vacant_phrase = bool(re.search(r"\b(?:unvermietet|bezugsfrei|leerstand|leerstehend|sofort\s+frei|frei\s+werdend|nicht\s+vermietet)\b", combined_text))
 
-    if has_rented_phrase and "nicht vermietet" not in combined_text:
+    if has_rented_phrase and not has_vacant_phrase:
         is_rented = True
-    elif "vermietet" in combined_text and "nicht vermietet" not in combined_text and not any(w in combined_text for w in ["unvermietet", "leerstand", "bezugsfrei"]):
+    elif re.search(r"\bvermietet\b", combined_text) and not has_vacant_phrase:
         is_rented = True
     elif extracted_rent is not None or stated_yield is not None:
         is_rented = True
-    elif property_data.get("is_rented", 0) == 1:
+    elif property_data.get("is_rented", 0) == 1 and not has_vacant_phrase:
         is_rented = True
 
-    is_vacant = any(w in combined_text for w in ["bezugsfrei", "leerstand", "sofort frei", "frei werdend", "unvermietet"])
-    if (extracted_rent is not None or has_rented_phrase) and "vermietet" in combined_text:
+    is_vacant = has_vacant_phrase
+    if (extracted_rent is not None or has_rented_phrase) and re.search(r"\bvermietet\b", combined_text) and not has_vacant_phrase:
         is_vacant = False
         is_rented = True
     elif is_vacant and extracted_rent is None:
@@ -860,10 +862,11 @@ def call_llm_text_analysis(
                     logger.warning(f"OneProvider Text API error ({model}): {e}")
         else:
             # Google Gemini Multimodal / Text AI (Günstige Flash-Lite-Modelle für den Regelbetrieb)
+            from app.network_security import sanitize_error_message
             models = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-flash-latest"]
             for model in models:
                 try:
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                     resp = requests.post(
                         url,
                         json={
@@ -873,7 +876,7 @@ def call_llm_text_analysis(
                                 "temperature": 0.0
                             }
                         },
-                        headers={"Content-Type": "application/json"},
+                        headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
                         timeout=15.0
                     )
                     if resp.status_code == 200:
@@ -893,9 +896,9 @@ def call_llm_text_analysis(
                             }
                             return parsed
                     else:
-                        logger.warning(f"Gemini Text API status {resp.status_code} ({model}): {resp.text[:160]}")
+                        logger.warning(f"Gemini Text API status {resp.status_code} ({model}): {sanitize_error_message(resp.text[:160])}")
                 except Exception as e:
-                    logger.warning(f"Gemini Text API error ({model}): {e}")
+                    logger.warning(f"Gemini Text API error ({model}): {sanitize_error_message(e)}")
 
     if openai_key:
         try:
@@ -917,7 +920,7 @@ def call_llm_text_analysis(
             if resp.status_code == 200:
                 res_data = resp.json()
                 text_resp = res_data["choices"][0]["message"]["content"]
-                parsed = json.loads(text_resp)
+                parsed = _clean_and_parse_llm_json(text_resp)
                 if isinstance(parsed, dict):
                     parsed["ai_provider"] = "OpenAI gpt-4o-mini Text-KI (Live API-Key)"
                     usage = res_data.get("usage") or {}
@@ -930,8 +933,12 @@ def call_llm_text_analysis(
                         "total_tokens": t_tok
                     }
                     return parsed
+            else:
+                from app.network_security import sanitize_error_message
+                logger.warning(f"OpenAI Text API status {resp.status_code}: {sanitize_error_message(resp.text[:160])}")
         except Exception as e:
-            logger.warning(f"OpenAI Text API error: {e}")
+            from app.network_security import sanitize_error_message
+            logger.warning(f"OpenAI Text API error: {sanitize_error_message(e)}")
 
     return None
 
@@ -1405,7 +1412,7 @@ def estimate_capex_and_hidden_costs(
         })
 
     # 5. Bad & Sanitär (Mit Bildanalyse abgleichen!)
-    unit_mult = max(1, int(insights.get("unit_count_in_offer", 1) or 1))
+    unit_mult = max(1, int(insights.get("unit_count_in_offer", 1) or 1)) if insights.get("is_package_deal") else 1
     vis_bad = _find_visual_evidence(
         image_analysis, ["bad", "sanitär", "wc", "dusche", "wanne"], "bathroom", ["bad", "wc", "sanitär", "dusche", "wanne"]
     )
@@ -1434,7 +1441,7 @@ def estimate_capex_and_hidden_costs(
             # Determine cost safely (avoiding 0.0 or fallback bug)
             if vis_bad_item and vis_bad_item.get("cost") is not None:
                 amt = float(vis_bad_item["cost"])
-            elif vis_bad_cat and vis_bad_cat.get("cost") is not None and float(vis_bad_cat.get("cost") or 0.0) >= 0:
+            elif vis_bad_cat and vis_bad_cat.get("cost") is not None and float(vis_bad_cat.get("cost") or 0.0) > 0:
                 amt = float(vis_bad_cat["cost"])
             elif float(vis_bad_cat.get("score") or 0.0) >= 6.5 or any(k in str(vis_bad_cat.get("status", "")).lower() for k in ["gut", "gepflegt", "solide", "modern"]):
                 amt = 1500.0
@@ -1490,7 +1497,7 @@ def estimate_capex_and_hidden_costs(
         and not vis_wall_item
     )
     if not insights.get("is_kernsaniert") and not vis_surfaces_perfect:
-        vis_item_cost = float((vis_wall_item or {}).get("cost") or 0.0) + float(vis_floor_cat.get("cost") or 0.0)
+        vis_item_cost = float((vis_wall_item or {}).get("cost") or 0.0)
         vis_cat_cost = float(vis_floor_cat.get("cost") or 0.0) + float(vis_wall_cat.get("cost") or 0.0)
         cost = round(vis_item_cost if vis_item_cost > 0 else vis_cat_cost, 2) if (has_interior_vis and (vis_item_cost > 0 or vis_cat_cost > 0)) else round(sqm * (45.0 if insights.get("needs_renovation") else 20.0), 2)
         room_photos = vis_wall.get("photo_indices") or []
@@ -2224,8 +2231,8 @@ def generate_ai_due_diligence_report(
         }
 
     # 1. Baseline deterministic parsing + optional Live LLM semantic extraction
-    base_insights = extract_listing_insights(full_description, details or {}, property_data)
-    llm_raw = call_llm_text_analysis(full_description, property_data, details=details, api_key=api_key)
+    base_insights = extract_listing_insights(desc_clean, details or {}, property_data)
+    llm_raw = call_llm_text_analysis(desc_clean, property_data, details=details, api_key=api_key)
 
     if llm_raw:
         insights = _merge_llm_into_insights(base_insights, llm_raw, property_data)
@@ -2308,7 +2315,6 @@ def generate_ai_due_diligence_report(
     metrics["price_discrepancy"] = price_discrepancy
 
     # Data Quality Gate: Check if property has missing or empty description (< 50 chars)
-    desc_clean = (full_description or "").strip()
     is_missing_description = (len(desc_clean) < 50)
     portal_url_check = str(property_data.get("portal_url") or "").lower()
     is_search_url = bool(re.search(r"/(?:suche|search|s-immobilien|s-wohnung-kaufen|s-haus-kaufen)\b", portal_url_check))
@@ -2392,7 +2398,7 @@ def generate_ai_due_diligence_report(
     elif turns_profitable_miet and len(critical_risks) == 0:
         status = "GREEN" if score >= 6.8 else "YELLOW"
         status_label = "🟢 Value-Add Deal (Rentabel bei Mietspiegel)" if score >= 6.8 else "🟡 Value-Add (Rentabel bei Mietspiegel)"
-    elif score >= 5.0 or len(critical_risks) <= 1:
+    elif score >= 5.0 and len(critical_risks) == 0:
         status = "YELLOW"
         status_label = "🟡 Prüfbedarf & Risiken verhandeln"
     else:
@@ -2413,9 +2419,10 @@ def generate_ai_due_diligence_report(
         llm_narrative = re.sub(r"(?i)\n*Sprengnetter-Marktwertbenchmark:.*", "", llm_narrative).strip()
 
         # Append single authoritative, deterministically computed negotiation & Sprengnetter benchmark line
+        disc_pct_val = (recommended_discount / metrics["purchase_price"]) * 100 if metrics["purchase_price"] > 0 else 0.0
         nego_line = (
             f"VERHANDLUNGSEMPFEHLUNG: Empfohlenes Kaufpreis-Zielangebot: {fmt_de(negotiation_target_price)} € "
-            f"(Nachlass ca. {fmt_de(recommended_discount)} € bzw. {fmt_de((recommended_discount / metrics['purchase_price']) * 100, 1)}% "
+            f"(Nachlass ca. {fmt_de(recommended_discount)} € bzw. {fmt_de(disc_pct_val, 1)}% "
             f"aufgrund ermitteltem CaPEx/Prüfbedarf von {fmt_de(capex['total_capex'])} €). "
             f"Sprengnetter-Marktwertbenchmark: {fmt_de(metrics['market_value'])} € ({fmt_de(metrics['market_value_per_sqm'])} €/m²)."
         )
@@ -2489,9 +2496,10 @@ def generate_ai_due_diligence_report(
             )
 
         if recommended_discount > 0:
+            disc_pct_fb = (recommended_discount / price) * 100 if price > 0 else 0.0
             summary_paragraphs.append(
                 f"VERHANDLUNGSEMPFEHLUNG: Zielangebot ca. {fmt_de(negotiation_target_price)} € "
-                f"(Nachlass {fmt_de(recommended_discount)} € bzw. {fmt_de((recommended_discount / price) * 100, 1)}% "
+                f"(Nachlass {fmt_de(recommended_discount)} € bzw. {fmt_de(disc_pct_fb, 1)}% "
                 f"wegen CaPEx von {fmt_de(capex['total_capex'])} €)."
             )
 

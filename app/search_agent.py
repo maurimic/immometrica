@@ -763,6 +763,15 @@ def execute_all_active_profiles() -> List[Dict[str, Any]]:
     """
     Executes all active search profiles sequentially and records crawler runtime and aggregated stats.
     """
+    from app.scheduler import crawler_scan_guard
+    with crawler_scan_guard(blocking=False) as acquired:
+        if not acquired:
+            logger.warning("execute_all_active_profiles skipped: crawler already running in another thread.")
+            return [{"success": False, "error": "Crawler läuft bereits im Hintergrund."}]
+        return _execute_all_active_profiles_unlocked()
+
+
+def _execute_all_active_profiles_unlocked() -> List[Dict[str, Any]]:
     profiles = get_search_profiles()
     results = []
     now_str = get_berlin_now_str()

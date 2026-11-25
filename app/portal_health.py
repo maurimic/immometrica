@@ -4,6 +4,7 @@ Periodically verifies scraper and portal availability across Kleinanzeigen, Immo
 Triggers immediate Telegram alerts and surfaces startpage notification banners upon portal layout changes or failures.
 """
 
+import os
 import time
 import json
 import logging
@@ -235,7 +236,7 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
         target_url_str = ", ".join(failing_urls) if failing_urls else None
 
         if should_send_tg:
-            send_system_telegram_alert(
+            tg_res = send_system_telegram_alert(
                 title="Scraper-Anomalie / Portal-Format geändert",
                 message=alert_msg,
                 portal=", ".join(failing_names) if failing_names else "Unbekannt",
@@ -243,7 +244,8 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
                 portal_statuses=results,
                 level=overall
             )
-            set_system_setting("telegram_last_canary_alert", now_iso)
+            if isinstance(tg_res, dict) and tg_res.get("success"):
+                set_system_setting("telegram_last_canary_alert", now_iso)
     else:
         # Reset consecutive failure counter and alert state on success
         set_system_setting("canary_consecutive_failures", "0")
@@ -358,7 +360,7 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
             pass
 
     if should_send:
-        send_system_telegram_alert(
+        tg_res = send_system_telegram_alert(
             title=f"Format-Änderung / Scraper-Fehler bei {portal}",
             message=reason,
             portal=portal,
@@ -366,7 +368,8 @@ def record_portal_incident(portal: str, reason: str, details: str = "", target_u
             error_details=details,
             level="warning"
         )
-        set_system_setting(f"telegram_last_alert_{portal.lower()}", now_iso)
+        if isinstance(tg_res, dict) and tg_res.get("success"):
+            set_system_setting(f"telegram_last_alert_{portal.lower()}", now_iso)
 
 
 def dismiss_portal_alert() -> bool:

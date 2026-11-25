@@ -218,8 +218,8 @@
                   </div>
 
                   <!-- Favorite Button -->
-                  <button @click.stop="toggleFavorite(prop)" class="p-1.5 rounded-full bg-slate-900/60 backdrop-blur-sm text-white hover:text-amber-400 transition-colors pointer-events-auto shadow-sm cursor-pointer">
-                    <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-400 fill-amber-400' : ''"></i>
+                  <button @click.stop="toggleFavorite(prop)" class="p-1.5 rounded-full bg-slate-900/60 backdrop-blur-sm hover:text-amber-400 transition-colors pointer-events-auto shadow-sm cursor-pointer" :class="prop.is_favorite ? 'text-amber-400 [&>svg]:fill-amber-400' : 'text-white'">
+                    <i data-lucide="star" class="w-4 h-4"></i>
                   </button>
                 </div>
 
@@ -227,7 +227,7 @@
                 <div class="absolute bottom-2.5 inset-x-2.5 flex items-end justify-between pointer-events-none">
                   <div class="bg-slate-900/80 backdrop-blur-sm px-2.5 py-1 rounded-xl text-white shadow-md pointer-events-auto">
                     <div class="text-base font-extrabold" x-text="formatCurrency(prop.purchase_price)"></div>
-                    <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.price_per_sqm)"></div>
+                    <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.purchase_price, prop.living_space)"></div>
                   </div>
 
                   <template x-if="prop.market_deviation_percent < -0.1">
@@ -383,8 +383,8 @@
                   <!-- Title & Source -->
                   <td class="py-3 px-3.5 min-w-[280px] max-w-md">
                     <div class="flex items-start gap-2">
-                      <button @click="toggleFavorite(prop)" class="mt-0.5 text-slate-300 hover:text-amber-500 transition-colors">
-                        <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-500 fill-amber-500' : ''"></i>
+                      <button @click="toggleFavorite(prop)" class="mt-0.5 hover:text-amber-500 transition-colors" :class="prop.is_favorite ? 'text-amber-500 [&>svg]:fill-amber-500' : 'text-slate-300'">
+                        <i data-lucide="star" class="w-4 h-4"></i>
                       </button>
                       <div>
                         <a :href="'?deal=' + prop.id + '&view=audit'" @click.prevent="openDetailModal(prop, 'audit')" class="font-semibold text-slate-900 dark:text-slate-100 hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug" x-text="prop.title"></a>
@@ -469,7 +469,7 @@
                   <!-- Price & Price Drop -->
                   <td class="py-3 px-3.5">
                     <div class="font-bold text-slate-900 dark:text-slate-100 text-sm" x-text="formatCurrency(prop.purchase_price)"></div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="`${formatNumber(prop.purchase_price / prop.living_space, 0)} €/m²`"></div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="prop.living_space > 0 ? `${formatNumber(prop.purchase_price / prop.living_space, 0)} €/m²` : '-'"></div>
                     <template x-if="prop.price_drop_amount > 0">
                       <span class="inline-block mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1 rounded" x-text="`-${formatNumber(prop.price_drop_percent, prop.price_drop_percent % 1 === 0 ? 0 : 1)} % gesenkt`"></span>
                     </template>

@@ -10,44 +10,63 @@ import secrets
 from typing import List, Dict, Any, Optional, Set
 
 DB_PATH = os.environ.get("DATABASE_PATH") or os.path.join(os.path.dirname(__file__), "immometrica.db")
+_WAL_INITIALIZED_PATHS: Set[str] = set()
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA busy_timeout=30000;")
+    conn.execute("PRAGMA foreign_keys=ON;")
+    if DB_PATH not in _WAL_INITIALIZED_PATHS:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            _WAL_INITIALIZED_PATHS.add(DB_PATH)
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 def get_system_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    conn = None
     try:
         conn = get_connection()
         c = conn.cursor()
         c.execute("SELECT value FROM system_settings WHERE key = ?", (key,))
         row = c.fetchone()
-        conn.close()
         return row[0] if row else default
     except Exception:
         return default
+    finally:
+        if conn is not None:
+            conn.close()
 
 def set_system_setting(key: str, value: str):
     from app.datetime_utils import get_berlin_now_str
     now_berlin = get_berlin_now_str()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-    c.execute("REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, now_berlin))
-    conn.commit()
-    conn.close()
+    try:
+        c = conn.cursor()
+        try:
+            c.execute("REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, now_berlin))
+        except sqlite3.OperationalError:
+            c.execute("CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+            c.execute("REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)", (key, value, now_berlin))
+        conn.commit()
+    finally:
+        conn.close()
 
 def delete_system_setting(key: str):
+    conn = None
     try:
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM system_settings WHERE key = ?", (key,))
         conn.commit()
-        conn.close()
     except Exception:
         pass
+    finally:
+        if conn is not None:
+            conn.close()
 
 def init_db():
     conn = get_connection()
@@ -217,7 +236,7 @@ def init_db():
         property_id INTEGER NOT NULL,
         note TEXT NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (property_id) REFERENCES properties (id)
+        FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE
     )
     """)
 
@@ -777,7 +796,7 @@ def update_search_profile(profile_id: int, data: Dict[str, Any]) -> bool:
     # Wenn sich Filterkriterien ändern, gelernte 'seen_listings' leeren, damit Deals neu geprüft werden
     filter_criteria_keys = {
         "city", "postal_code", "radius_km", "max_price", "max_price_per_sqm",
-        "min_yield", "min_discount_pct", "min_rooms", "min_living_space",
+        "min_yield", "yield_basis", "min_discount_pct", "min_rooms", "min_living_space",
         "property_type", "search_query"
     }
     if any(k in data for k in filter_criteria_keys):
@@ -841,6 +860,7 @@ def mark_listing_seen(portal_url: str, profile_id: int, status: str = "checked")
     """
     Protokolliert eine vom Suchagenten für ein Profil geprüfte Portal-URL in 'seen_listings'.
     """
+    conn = None
     try:
         conn = get_connection()
         c = conn.cursor()
@@ -852,132 +872,147 @@ def mark_listing_seen(portal_url: str, profile_id: int, status: str = "checked")
                 checked_at = CURRENT_TIMESTAMP
         """, (portal_url, profile_id, status))
         conn.commit()
-        conn.close()
         return True
-    except Exception as e:
+    except Exception:
         return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def get_seen_listing_urls(profile_id: int) -> Set[str]:
     """
     Liefert ein Set aller für dieses Profil bereits geprüften Portal-URLs.
     """
+    conn = None
     try:
         conn = get_connection()
         c = conn.cursor()
         c.execute("SELECT portal_url FROM seen_listings WHERE profile_id = ?", (profile_id,))
         rows = c.fetchall()
-        conn.close()
         return {r[0] for r in rows if r[0]}
-    except Exception as e:
+    except Exception:
         return set()
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def clear_seen_listings_for_profile(profile_id: int) -> bool:
     """
     Löscht alle gespeicherten URLs eines Profils (z. B. nach Filter-Änderung).
     """
+    conn = None
     try:
         conn = get_connection()
         c = conn.cursor()
         c.execute("DELETE FROM seen_listings WHERE profile_id = ?", (profile_id,))
         conn.commit()
-        conn.close()
         return True
-    except Exception as e:
+    except Exception:
         return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def get_deal_alerts(limit: int = 50, profile_id: Optional[int] = None) -> List[Dict[str, Any]]:
     conn = get_connection()
-    c = conn.cursor()
-    if profile_id:
-        c.execute("""
-            SELECT da.*, sp.name as profile_name 
-            FROM deal_alerts da 
-            LEFT JOIN search_profiles sp ON da.profile_id = sp.id 
-            WHERE da.profile_id = ? 
-            ORDER BY da.id DESC LIMIT ?
-        """, (profile_id, limit))
-    else:
-        c.execute("""
-            SELECT da.*, sp.name as profile_name 
-            FROM deal_alerts da 
-            LEFT JOIN search_profiles sp ON da.profile_id = sp.id 
-            ORDER BY da.id DESC LIMIT ?
-        """, (limit,))
-    rows = [dict(r) for r in c.fetchall()]
-    conn.close()
-    return rows
+    try:
+        c = conn.cursor()
+        if profile_id:
+            c.execute("""
+                SELECT da.*, sp.name as profile_name 
+                FROM deal_alerts da 
+                LEFT JOIN search_profiles sp ON da.profile_id = sp.id 
+                WHERE da.profile_id = ? 
+                ORDER BY da.id DESC LIMIT ?
+            """, (profile_id, limit))
+        else:
+            c.execute("""
+                SELECT da.*, sp.name as profile_name 
+                FROM deal_alerts da 
+                LEFT JOIN search_profiles sp ON da.profile_id = sp.id 
+                ORDER BY da.id DESC LIMIT ?
+            """, (limit,))
+        return [dict(r) for r in c.fetchall()]
+    finally:
+        conn.close()
 
 
 def is_alert_already_logged(portal_url: str) -> bool:
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id FROM deal_alerts WHERE portal_url = ?", (portal_url,))
-    row = c.fetchone()
-    conn.close()
-    return bool(row)
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM deal_alerts WHERE portal_url = ?", (portal_url,))
+        row = c.fetchone()
+        return bool(row)
+    finally:
+        conn.close()
 
 
 def record_deal_alert(alert_data: Dict[str, Any]) -> int:
     from app.datetime_utils import get_berlin_now_str
     local_created_at = alert_data.get("created_at") or get_berlin_now_str()
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO deal_alerts (
-            profile_id, property_id, portal_url, title, city, price, living_space,
-            price_per_sqm, gross_yield, market_discount_pct, monthly_cashflow,
-            ai_verdict, has_critical_risks, sent_to_telegram, telegram_error, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        alert_data.get("profile_id"),
-        alert_data.get("property_id"),
-        alert_data["portal_url"],
-        alert_data.get("title", "Immobilienangebot"),
-        alert_data.get("city", ""),
-        _safe_float(alert_data.get("price"), 0.0),
-        _safe_float(alert_data.get("living_space"), 0.0),
-        _safe_float(alert_data.get("price_per_sqm"), 0.0),
-        _safe_float(alert_data.get("gross_yield"), 0.0),
-        _safe_float(alert_data.get("market_discount_pct"), 0.0),
-        _safe_float(alert_data.get("monthly_cashflow"), 0.0),
-        alert_data.get("ai_verdict", ""),
-        1 if alert_data.get("has_critical_risks") else 0,
-        1 if alert_data.get("sent_to_telegram") else 0,
-        alert_data.get("telegram_error"),
-        local_created_at
-    ))
-    new_id = c.lastrowid
-    conn.commit()
-    conn.close()
-    return new_id
+    try:
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO deal_alerts (
+                profile_id, property_id, portal_url, title, city, price, living_space,
+                price_per_sqm, gross_yield, market_discount_pct, monthly_cashflow,
+                ai_verdict, has_critical_risks, sent_to_telegram, telegram_error, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            alert_data.get("profile_id"),
+            alert_data.get("property_id"),
+            alert_data["portal_url"],
+            alert_data.get("title", "Immobilienangebot"),
+            alert_data.get("city", ""),
+            _safe_float(alert_data.get("price"), 0.0),
+            _safe_float(alert_data.get("living_space"), 0.0),
+            _safe_float(alert_data.get("price_per_sqm"), 0.0),
+            _safe_float(alert_data.get("gross_yield"), 0.0),
+            _safe_float(alert_data.get("market_discount_pct"), 0.0),
+            _safe_float(alert_data.get("monthly_cashflow"), 0.0),
+            alert_data.get("ai_verdict", ""),
+            1 if alert_data.get("has_critical_risks") else 0,
+            1 if alert_data.get("sent_to_telegram") else 0,
+            alert_data.get("telegram_error"),
+            local_created_at
+        ))
+        new_id = c.lastrowid
+        conn.commit()
+        return new_id
+    finally:
+        conn.close()
 
 
 def delete_deal_alert(alert_id: int) -> bool:
     """Deletes a single deal alert by ID from the deal_alerts stream."""
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM deal_alerts WHERE id = ?", (alert_id,))
-    conn.commit()
-    success = c.rowcount > 0
-    conn.close()
-    return success
+    try:
+        c = conn.cursor()
+        c.execute("DELETE FROM deal_alerts WHERE id = ?", (alert_id,))
+        conn.commit()
+        return c.rowcount > 0
+    finally:
+        conn.close()
 
 
 def clear_deal_alerts(profile_id: Optional[int] = None) -> int:
     """Deletes all deal alerts, optionally filtered by profile_id. Returns number of deleted rows."""
     conn = get_connection()
-    c = conn.cursor()
-    if profile_id:
-        c.execute("DELETE FROM deal_alerts WHERE profile_id = ?", (profile_id,))
-    else:
-        c.execute("DELETE FROM deal_alerts")
-    conn.commit()
-    deleted_count = c.rowcount
-    conn.close()
-    return deleted_count
+    try:
+        c = conn.cursor()
+        if profile_id:
+            c.execute("DELETE FROM deal_alerts WHERE profile_id = ?", (profile_id,))
+        else:
+            c.execute("DELETE FROM deal_alerts")
+        conn.commit()
+        return c.rowcount
+    finally:
+        conn.close()
 
 
 # ==============================================================================
@@ -990,27 +1025,29 @@ def get_active_mcp_token() -> Dict[str, Any]:
     Erzeugt automatisch einen zufälligen Token mit Präfix 'immo_live_', falls die Tabelle noch leer ist.
     """
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id, token, name, quota_limit, quota_used, created_at FROM api_tokens ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    if not row:
-        token_str = f"immo_live_{secrets.token_hex(16)}"
-        c.execute("""
-            INSERT INTO api_tokens (token, name, quota_limit, quota_used)
-            VALUES (?, 'Antigravity AI Agent & n8n Sync', 2000, 0)
-        """, (token_str,))
-        conn.commit()
-        c.execute("SELECT id, token, name, quota_limit, quota_used, created_at FROM api_tokens WHERE token = ?", (token_str,))
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id, token, name, quota_limit, quota_used, created_at FROM api_tokens ORDER BY id DESC LIMIT 1")
         row = c.fetchone()
-    conn.close()
-    return {
-        "id": row[0],
-        "token": row[1],
-        "name": row[2],
-        "quota_limit": row[3],
-        "quota_used": row[4],
-        "created_at": str(row[5]) if row[5] else ""
-    }
+        if not row:
+            token_str = f"immo_live_{secrets.token_hex(16)}"
+            c.execute("""
+                INSERT INTO api_tokens (token, name, quota_limit, quota_used)
+                VALUES (?, 'Antigravity AI Agent & n8n Sync', 2000, 0)
+            """, (token_str,))
+            conn.commit()
+            c.execute("SELECT id, token, name, quota_limit, quota_used, created_at FROM api_tokens WHERE token = ?", (token_str,))
+            row = c.fetchone()
+        return {
+            "id": row[0],
+            "token": row[1],
+            "name": row[2],
+            "quota_limit": row[3],
+            "quota_used": row[4],
+            "created_at": str(row[5]) if row[5] else ""
+        }
+    finally:
+        conn.close()
 
 
 def regenerate_mcp_token(name: str = "Antigravity AI Agent & n8n Sync") -> Dict[str, Any]:
@@ -1021,22 +1058,24 @@ def regenerate_mcp_token(name: str = "Antigravity AI Agent & n8n Sync") -> Dict[
     """
     new_token = f"immo_live_{secrets.token_hex(16)}"
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT id FROM api_tokens ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    if row:
-        c.execute("""
-            UPDATE api_tokens 
-            SET token = ?, quota_used = 0, created_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (new_token, row[0]))
-    else:
-        c.execute("""
-            INSERT INTO api_tokens (token, name, quota_limit, quota_used)
-            VALUES (?, ?, 2000, 0)
-        """, (new_token, name))
-    conn.commit()
-    conn.close()
+    try:
+        c = conn.cursor()
+        c.execute("SELECT id FROM api_tokens ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        if row:
+            c.execute("""
+                UPDATE api_tokens 
+                SET token = ?, quota_used = 0, created_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (new_token, row[0]))
+        else:
+            c.execute("""
+                INSERT INTO api_tokens (token, name, quota_limit, quota_used)
+                VALUES (?, ?, 2000, 0)
+            """, (new_token, name))
+        conn.commit()
+    finally:
+        conn.close()
     return get_active_mcp_token()
 
 
@@ -1046,21 +1085,22 @@ def increment_mcp_quota(token: Optional[str] = None) -> int:
     Gibt den neuen Zählerstand zurück.
     """
     conn = get_connection()
-    c = conn.cursor()
-    if token:
-        c.execute("UPDATE api_tokens SET quota_used = quota_used + 1 WHERE token = ?", (token,))
-    else:
-        c.execute("""
-            UPDATE api_tokens 
-            SET quota_used = quota_used + 1 
-            WHERE id = (SELECT id FROM api_tokens ORDER BY id DESC LIMIT 1)
-        """)
-    conn.commit()
-    c.execute("SELECT quota_used FROM api_tokens ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    used = row[0] if row else 0
-    conn.close()
-    return used
+    try:
+        c = conn.cursor()
+        if token:
+            c.execute("UPDATE api_tokens SET quota_used = quota_used + 1 WHERE token = ?", (token,))
+        else:
+            c.execute("""
+                UPDATE api_tokens 
+                SET quota_used = quota_used + 1 
+                WHERE id = (SELECT id FROM api_tokens ORDER BY id DESC LIMIT 1)
+            """)
+        conn.commit()
+        c.execute("SELECT quota_used FROM api_tokens ORDER BY id DESC LIMIT 1")
+        row = c.fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
 
 
 def delete_all_properties(clear_alerts: bool = True, clear_seen: bool = True) -> int:
@@ -1071,24 +1111,26 @@ def delete_all_properties(clear_alerts: bool = True, clear_seen: bool = True) ->
     Setzt 'db_seeded' auf 1, damit init_db() keine Fake-Daten automatisch nachschiebt.
     """
     conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM properties")
-    count = c.fetchone()[0]
+    try:
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM properties")
+        count = c.fetchone()[0]
 
-    c.execute("DELETE FROM properties")
-    c.execute("DELETE FROM deal_notes")
-    if clear_alerts:
-        c.execute("DELETE FROM deal_alerts")
-    if clear_seen:
-        c.execute("DELETE FROM seen_listings")
+        c.execute("DELETE FROM properties")
+        c.execute("DELETE FROM deal_notes")
+        if clear_alerts:
+            c.execute("DELETE FROM deal_alerts")
+        if clear_seen:
+            c.execute("DELETE FROM seen_listings")
 
-    c.execute("UPDATE search_profiles SET deals_found_count = 0")
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('db_seeded', '1')")
-    c.execute("DELETE FROM sqlite_sequence WHERE name IN ('properties', 'deal_alerts', 'deal_notes')")
+        c.execute("UPDATE search_profiles SET deals_found_count = 0")
+        c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('db_seeded', '1')")
+        c.execute("DELETE FROM sqlite_sequence WHERE name IN ('properties', 'deal_alerts', 'deal_notes')")
 
-    conn.commit()
-    conn.close()
-    return count
+        conn.commit()
+        return count
+    finally:
+        conn.close()
 
 
 def reseed_demo_properties() -> int:
@@ -1096,14 +1138,16 @@ def reseed_demo_properties() -> int:
     Stellt die Standard-Demo-Inserate wieder her, falls gewünscht.
     """
     conn = get_connection()
-    seed_data(conn)
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM properties")
-    count = c.fetchone()[0]
-    c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('db_seeded', '1')")
-    conn.commit()
-    conn.close()
-    return count
+    try:
+        seed_data(conn)
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM properties")
+        count = c.fetchone()[0]
+        c.execute("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('db_seeded', '1')")
+        conn.commit()
+        return count
+    finally:
+        conn.close()
 
 
 

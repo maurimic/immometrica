@@ -64,18 +64,19 @@ def verify_oneprovider_key(key: str) -> tuple:
 
 
 def verify_gemini_key(key: str) -> tuple:
-    test_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key.strip()}"
+    from app.network_security import sanitize_error_message
+    test_url = "https://generativelanguage.googleapis.com/v1beta/models"
     try:
-        resp = requests.get(test_url, timeout=7.0)
+        resp = requests.get(test_url, headers={"x-goog-api-key": key.strip()}, timeout=7.0)
         if resp.status_code == 200:
             return True, ""
         try:
             err_data = resp.json()
-            return False, err_data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+            return False, sanitize_error_message(err_data.get("error", {}).get("message", f"HTTP {resp.status_code}"))
         except Exception:
             return False, f"HTTP {resp.status_code}"
     except Exception as e:
-        return False, f"Verbindungsfehler: {str(e)}"
+        return False, f"Verbindungsfehler: {sanitize_error_message(e)}"
 
 
 @router.get("/gemini-key")

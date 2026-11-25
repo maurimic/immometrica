@@ -28,7 +28,7 @@ window.immoModalsModule = {
 
   get hasActiveApiKey() {
     if (this.activeAiProvider === 'oneprovider') return Boolean(this.hasOneProviderKey);
-    if (this.activeAiProvider === 'gemini') return Boolean(this.hasGeminiKey);
+    if (this.activeAiProvider === 'gemini') return Boolean(this.hasGeminiKey || this.geminiApiKey);
     return Boolean(this.geminiApiKey || this.hasServerApiKey);
   },
 
@@ -36,11 +36,8 @@ window.immoModalsModule = {
     if (this.activeAiProvider === 'oneprovider' && this.hasOneProviderKey) {
       return 'OneProvider: Aktiv';
     }
-    if (this.activeAiProvider === 'gemini' && this.hasGeminiKey) {
+    if (this.activeAiProvider === 'gemini' && (this.hasGeminiKey || this.geminiApiKey)) {
       return 'Gemini: Aktiv';
-    }
-    if (this.geminiApiKey || this.hasServerApiKey) {
-      return this.isOneProvider ? 'OneProvider: Aktiv' : 'Gemini: Aktiv';
     }
     return '🔑 KI API-Key';
   },
@@ -91,7 +88,8 @@ window.immoModalsModule = {
 
   async checkSavedApiKey() {
     try {
-      const res = await fetch('/api/settings/gemini-key');
+      const res = this.handleAuthResponse(await fetch('/api/settings/gemini-key'));
+      if (!res.ok) return;
       const data = await res.json();
       this.hasServerApiKey = Boolean(data.has_key);
       this.activeAiProvider = data.active_provider || (data.is_oneprovider ? 'oneprovider' : 'gemini');
@@ -105,8 +103,9 @@ window.immoModalsModule = {
         this.hasGeminiKey = Boolean(data.gemini.has_key);
         this.configuredGeminiMasked = data.gemini.masked_key || '';
       }
-      if (data.masked_key && !data.masked_key.includes('...') && !data.masked_key.includes('***')) {
-        this.geminiApiKey = data.masked_key;
+      if (this.hasServerApiKey) {
+        localStorage.removeItem('immometrica_gemini_api_key');
+        this.geminiApiKey = '';
       }
     } catch (e) {
       console.debug('Failed to check server API key status:', e);
@@ -121,13 +120,13 @@ window.immoModalsModule = {
     const hasKey = (provider === 'oneprovider') ? this.hasOneProviderKey : this.hasGeminiKey;
     if (hasKey) {
       try {
-        const res = await fetch('/api/settings/active-provider', {
+        const res = this.handleAuthResponse(await fetch('/api/settings/active-provider', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ active_provider: provider })
-        });
-        const data = await res.json();
-        if (data.success) {
+        }));
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.success) {
           if (typeof this.showToast === 'function') {
             this.showToast(data.message || `Aktiver Anbieter umgestellt auf ${provider}`, 'success');
           }
@@ -145,7 +144,8 @@ window.immoModalsModule = {
   async refreshOneProviderBalance() {
     this.refreshingBalance = true;
     try {
-      const res = await fetch('/api/settings/oneprovider-balance');
+      const res = this.handleAuthResponse(await fetch('/api/settings/oneprovider-balance'));
+      if (!res.ok) return;
       const data = await res.json();
       if (data.success) {
         this.oneproviderBalance = data.balance;
@@ -181,14 +181,16 @@ window.immoModalsModule = {
       if (gemVal) payload.gemini_key = gemVal;
       if (legacyVal && !oneVal && !gemVal) payload.api_key = legacyVal;
 
-      const res = await fetch('/api/settings/gemini-key', {
+      const res = this.handleAuthResponse(await fetch('/api/settings/gemini-key', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      });
-      const data = await res.json();
+      }));
+      const data = await res.json().catch(() => ({}));
 
-      if (data.success) {
+      if (res.ok && data.success) {
+        localStorage.removeItem('immometrica_gemini_api_key');
+        this.geminiApiKey = '';
         await this.checkSavedApiKey();
         this.oneproviderKeyInput = '';
         this.geminiKeyInput = '';
@@ -219,7 +221,7 @@ window.immoModalsModule = {
           }
         }, 900);
       } else {
-        this.apiKeyFeedback = { type: 'error', text: data.error || 'Fehler beim Validieren des API-Keys.' };
+        this.apiKeyFeedback = { type: 'error', text: data.detail || data.error || 'Fehler beim Validieren des API-Keys.' };
       }
     } catch (err) {
       this.apiKeyFeedback = { type: 'error', text: 'Netzwerkfehler: ' + err.message };
@@ -232,7 +234,10 @@ window.immoModalsModule = {
   async removeKey(provider = 'all') {
     try {
       const url = provider === 'all' ? '/api/settings/gemini-key' : `/api/settings/gemini-key?provider=${provider}`;
-      await fetch(url, { method: 'DELETE' });
+      const res = this.handleAuthResponse(await fetch(url, { method: 'DELETE' }));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      localStorage.removeItem('immometrica_gemini_api_key');
+      this.geminiApiKey = '';
       await this.checkSavedApiKey();
       if (provider === 'oneprovider' || provider === 'all') {
         this.oneproviderKeyInput = '';
@@ -545,8 +550,7 @@ E-Mail: ${this.offerData.buyerEmail}`;
   copyDocRequestEmail() {
     if (!this.offerData.docRequestText) return;
     const fullText = `Betreff: ${this.offerData.docRequestSubject}\n\n${this.offerData.docRequestText}`;
-    navigator.clipboard.writeText(fullText);
-    alert('Unterlagen-Anfrage (inkl. Betreff) in die Zwischenablage kopiert!\nNach Erhalt der Unterlagen kannst du direkt in Schritt 2 den Letter of Intent versenden.');
+    this.safeCopyText(fullText, 'Unterlagen-Anfrage in die Zwischenablage kopiert!');
   },
 
   buildOfferMailtoHref(mode = 'docs') {
@@ -617,8 +621,7 @@ E-Mail: ${this.offerData.buyerEmail}`;
 
   copyLoiText() {
     if (!this.offerData.loiText) return;
-    navigator.clipboard.writeText(this.offerData.loiText);
-    alert('Kaufangebot (Letter of Intent) in die Zwischenablage kopiert!\nDu kannst es jetzt direkt als Nachricht oder E-Mail an den Verkäufer/Makler senden.');
+    this.safeCopyText(this.offerData.loiText, 'Kaufangebot (Letter of Intent) in die Zwischenablage kopiert!');
   },
 
   // 1-Klick Gutachten Drucken / PDF Export
@@ -637,31 +640,33 @@ E-Mail: ${this.offerData.buyerEmail}`;
 
   async submitUrlImport() {
     const url = (this.importUrlInput || '').trim();
-    if (!url || !url.startsWith('http')) {
+    if (!url || !/^https?:\/\//i.test(url)) {
       this.importError = 'Bitte gib eine gültige URL (http:// oder https://) ein.';
       return;
     }
     this.isImportingUrl = true;
     this.importError = '';
     try {
-      const res = await fetch('/api/properties/import-url', {
+      const res = this.handleAuthResponse(await fetch('/api/properties/import-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url })
-      });
-      const data = await res.json();
+      }));
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data.detail || 'Import fehlgeschlagen');
+        throw new Error(data.detail || `Import fehlgeschlagen (${res.status})`);
       }
       this.urlImportModalOpen = false;
+      this.importUrlInput = '';
+      this.showToast(data.message || 'Exposé erfolgreich importiert und per KI analysiert!', 'success');
       await this.fetchProperties();
       await this.fetchBoard();
       if (data.property_id) {
         await this.openDetailModalById(data.property_id);
       }
-      alert(data.message || 'Exposé erfolgreich importiert und per KI analysiert!');
     } catch (err) {
       this.importError = 'Fehler beim Importieren: ' + err.message;
+      this.showToast(this.importError, 'error');
     } finally {
       this.isImportingUrl = false;
     }

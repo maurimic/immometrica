@@ -103,7 +103,10 @@ def _resolve_updated_geo(
                 is_cur_generic_city = True
 
         if not is_cur_generic_city and abs(float(cur_lat) - expected_lat) <= 0.05 and abs(float(cur_lng) - expected_lng) <= 0.07:
-            return float(cur_lat), float(cur_lng), new_addr, plz_val
+            kept_lat, kept_lng = float(cur_lat), float(cur_lng)
+            if occupied_set is not None:
+                occupied_set.add((round(kept_lat, 4), round(kept_lng, 4)))
+            return kept_lat, kept_lng, new_addr, plz_val
         lat_u, lng_u = ensure_distinct_coord(expected_lat, expected_lng, occupied_set, seed=prop_id)
         return lat_u, lng_u, new_addr, plz_val
 
@@ -254,7 +257,7 @@ def list_properties(
         "monthly_cashflow": "monthly_cashflow",
         "purchase_price": "purchase_price",
         "living_space": "living_space",
-        "price_per_sqm": "purchase_price / living_space",
+        "price_per_sqm": "purchase_price / NULLIF(living_space, 0)",
         "days_online": "days_online",
         "market_deviation": "market_deviation_percent"
     }
@@ -268,8 +271,11 @@ def list_properties(
     ORDER BY {sort_column} {direction}
     """
 
-    cursor.execute(query, params)
-    rows = cursor.fetchall()
+    try:
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+    finally:
+        conn.close()
 
     results = []
     for r in rows:
@@ -277,7 +283,10 @@ def list_properties(
         exp_r = float(d.get("expected_rent") or 0.0)
         p_price = float(d.get("purchase_price") or 0.0)
         d["potential_gross_yield"] = round((exp_r * 12.0 / p_price) * 100.0, 2) if p_price > 0 else 0.0
-        d["tags"] = json.loads(d["tags"] or "[]")
+        try:
+            d["tags"] = json.loads(d.get("tags") or "[]")
+        except Exception:
+            d["tags"] = []
         if d.get("ai_analysis"):
             try:
                 d["ai_analysis"] = json.loads(d["ai_analysis"])
@@ -295,7 +304,6 @@ def list_properties(
                 d["gallery_images"] = []
         results.append(d)
 
-    conn.close()
     return {
         "total": len(results),
         "properties": results
@@ -304,10 +312,12 @@ def list_properties(
 @router.get("/by-url")
 def get_property_by_url(url: str = Query(...)):
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM properties WHERE portal_url = ?", (url,))
-    row = cursor.fetchone()
-    conn.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM properties WHERE portal_url = ?", (url,))
+        row = cursor.fetchone()
+    finally:
+        conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Property not found for URL")
     return get_property(row[0])
@@ -315,48 +325,51 @@ def get_property_by_url(url: str = Query(...)):
 @router.get("/{property_id}")
 def get_property(property_id: int):
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Property not found")
 
-    cursor.execute("SELECT * FROM properties WHERE id = ?", (property_id,))
-    row = cursor.fetchone()
-    if not row:
+        prop = dict(row)
+        try:
+            prop["tags"] = json.loads(prop.get("tags") or "[]")
+        except Exception:
+            prop["tags"] = []
+        if prop.get("ai_analysis"):
+            try:
+                prop["ai_analysis"] = json.loads(prop["ai_analysis"])
+                if isinstance(prop["ai_analysis"], dict) and (not prop["ai_analysis"].get("missing_documents") or not prop["ai_analysis"].get("doc_checklist")):
+                    doc_req = build_missing_documents_request(prop, prop["ai_analysis"])
+                    prop["ai_analysis"]["missing_documents"] = doc_req.get("missing_documents", [])
+                    prop["ai_analysis"]["doc_checklist"] = doc_req.get("missing_documents", [])
+                    prop["ai_analysis"]["document_request"] = doc_req
+            except Exception:
+                pass
+        if prop.get("image_analysis"):
+            try:
+                prop["image_analysis"] = json.loads(prop["image_analysis"])
+                if isinstance(prop["image_analysis"], dict):
+                    for p in (prop["image_analysis"].get("analyzed_photos") or []):
+                        p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+            except Exception:
+                pass
+        if prop.get("gallery_images"):
+            try:
+                prop["gallery_images"] = json.loads(prop["gallery_images"])
+            except Exception:
+                prop["gallery_images"] = []
+
+        cursor.execute("SELECT * FROM deal_notes WHERE property_id = ? ORDER BY created_at DESC", (property_id,))
+        notes = [dict(n) for n in cursor.fetchall()]
+        prop["notes"] = notes
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    prop = dict(row)
-    prop["tags"] = json.loads(prop["tags"] or "[]")
-    if prop.get("ai_analysis"):
-        try:
-            prop["ai_analysis"] = json.loads(prop["ai_analysis"])
-            if isinstance(prop["ai_analysis"], dict) and (not prop["ai_analysis"].get("missing_documents") or not prop["ai_analysis"].get("doc_checklist")):
-                doc_req = build_missing_documents_request(prop, prop["ai_analysis"])
-                prop["ai_analysis"]["missing_documents"] = doc_req.get("missing_documents", [])
-                prop["ai_analysis"]["doc_checklist"] = doc_req.get("missing_documents", [])
-                prop["ai_analysis"]["document_request"] = doc_req
-        except Exception:
-            pass
-    if prop.get("image_analysis"):
-        try:
-            prop["image_analysis"] = json.loads(prop["image_analysis"])
-            if isinstance(prop["image_analysis"], dict):
-                for p in (prop["image_analysis"].get("analyzed_photos") or []):
-                    p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
-        except Exception:
-            pass
-    if prop.get("gallery_images"):
-        try:
-            prop["gallery_images"] = json.loads(prop["gallery_images"])
-        except Exception:
-            prop["gallery_images"] = []
-
-    cursor.execute("SELECT * FROM deal_notes WHERE property_id = ? ORDER BY created_at DESC", (property_id,))
-    notes = [dict(n) for n in cursor.fetchall()]
-    prop["notes"] = notes
 
     benchmark = get_city_benchmark(prop["city"])
     prop["city_benchmark"] = benchmark
 
-    conn.close()
     return prop
 
 @router.post("/{property_id}/check-availability")
@@ -366,12 +379,13 @@ def check_property_availability(property_id: int):
     Updates the database with fresh verification status and extracts full description if available.
     """
     conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT id, portal_url, source_portal, city, postal_code, address, lat, lng, description FROM properties WHERE id = ?", (property_id,))
-    row = cursor.fetchone()
-    if not row:
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, portal_url, source_portal, city, postal_code, address, lat, lng, description FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+    finally:
         conn.close()
+    if not row:
         raise HTTPException(status_code=404, detail="Property not found")
 
     prop_id, portal_url, source_portal, city, plz, addr, cur_lat, cur_lng, existing_desc = row
@@ -379,30 +393,35 @@ def check_property_availability(property_id: int):
 
     is_online_val = 1 if status_result["is_online"] else 0
     new_desc = status_result.get("description") or existing_desc or ""
-    new_lat, new_lng, new_addr, new_plz = _resolve_updated_geo(
-        cursor, prop_id, cur_lat, cur_lng, addr, plz, city, live_res=status_result
-    )
 
-    cursor.execute("""
-        UPDATE properties 
-        SET is_online = ?, availability_status = ?, status_message = ?, last_checked_at = ?, live_search_url = ?, description = ?,
-            lat = ?, lng = ?, address = ?, postal_code = COALESCE(NULLIF(?, ''), postal_code)
-        WHERE id = ?
-    """, (
-        is_online_val,
-        status_result["availability_status"],
-        status_result["status_message"],
-        status_result["last_checked_at"],
-        status_result["live_search_url"],
-        new_desc,
-        new_lat,
-        new_lng,
-        new_addr,
-        new_plz,
-        prop_id
-    ))
-    conn.commit()
-    conn.close()
+    conn_upd = get_connection()
+    try:
+        cursor = conn_upd.cursor()
+        new_lat, new_lng, new_addr, new_plz = _resolve_updated_geo(
+            cursor, prop_id, cur_lat, cur_lng, addr, plz, city, live_res=status_result
+        )
+
+        cursor.execute("""
+            UPDATE properties 
+            SET is_online = ?, availability_status = ?, status_message = ?, last_checked_at = ?, live_search_url = ?, description = ?,
+                lat = ?, lng = ?, address = ?, postal_code = COALESCE(NULLIF(?, ''), postal_code)
+            WHERE id = ?
+        """, (
+            is_online_val,
+            status_result["availability_status"],
+            status_result["status_message"],
+            status_result["last_checked_at"],
+            status_result["live_search_url"],
+            new_desc,
+            new_lat,
+            new_lng,
+            new_addr,
+            new_plz,
+            prop_id
+        ))
+        conn_upd.commit()
+    finally:
+        conn_upd.close()
 
     return {
         "property_id": prop_id,
@@ -447,8 +466,8 @@ def check_all_properties_availability():
             logger.error(f"Fehler bei Verfügbarkeitsprüfung für Objekt {prop_id}: {e}")
             from app.datetime_utils import get_berlin_now_str
             status = {
-                "is_online": True,
-                "availability_status": "online",
+                "is_online": False,
+                "availability_status": "unverified_error",
                 "status_message": f"Prüfung fehlgeschlagen: {e}",
                 "last_checked_at": get_berlin_now_str(),
                 "live_search_url": portal_url,
@@ -463,56 +482,58 @@ def check_all_properties_availability():
 
     # Sequential coordinate resolution and atomic SQLite update on main thread
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    checked_results = []
-    online_count = 0
-    offline_count = 0
-    occupied_coords = set()
+        checked_results = []
+        online_count = 0
+        offline_count = 0
+        occupied_coords = set()
 
-    for item, status in raw_results:
-        prop_id, portal_url, source_portal, city, plz, addr, cur_lat, cur_lng, existing_desc = item
-        is_online_bool = bool(status.get("is_online"))
-        is_online_val = 1 if is_online_bool else 0
-        if is_online_bool:
-            online_count += 1
-        else:
-            offline_count += 1
+        for item, status in raw_results:
+            prop_id, portal_url, source_portal, city, plz, addr, cur_lat, cur_lng, existing_desc = item
+            is_online_bool = bool(status.get("is_online"))
+            is_online_val = 1 if is_online_bool else 0
+            if is_online_bool:
+                online_count += 1
+            else:
+                offline_count += 1
 
-        new_desc = status.get("description") or existing_desc or ""
-        new_lat, new_lng, new_addr, new_plz = _resolve_updated_geo(
-            cursor, prop_id, cur_lat, cur_lng, addr, plz, city, live_res=status, occupied_set=occupied_coords
-        )
+            new_desc = status.get("description") or existing_desc or ""
+            new_lat, new_lng, new_addr, new_plz = _resolve_updated_geo(
+                cursor, prop_id, cur_lat, cur_lng, addr, plz, city, live_res=status, occupied_set=occupied_coords
+            )
 
-        cursor.execute("""
-            UPDATE properties 
-            SET is_online = ?, availability_status = ?, status_message = ?, last_checked_at = ?, live_search_url = ?, description = ?,
-                lat = ?, lng = ?, address = ?, postal_code = COALESCE(NULLIF(?, ''), postal_code)
-            WHERE id = ?
-        """, (
-            is_online_val,
-            status.get("availability_status", "unknown"),
-            status.get("status_message", ""),
-            status.get("last_checked_at"),
-            status.get("live_search_url", ""),
-            new_desc,
-            new_lat,
-            new_lng,
-            new_addr,
-            new_plz,
-            prop_id
-        ))
+            cursor.execute("""
+                UPDATE properties 
+                SET is_online = ?, availability_status = ?, status_message = ?, last_checked_at = ?, live_search_url = ?, description = ?,
+                    lat = ?, lng = ?, address = ?, postal_code = COALESCE(NULLIF(?, ''), postal_code)
+                WHERE id = ?
+            """, (
+                is_online_val,
+                status.get("availability_status", "unknown"),
+                status.get("status_message", ""),
+                status.get("last_checked_at"),
+                status.get("live_search_url", ""),
+                new_desc,
+                new_lat,
+                new_lng,
+                new_addr,
+                new_plz,
+                prop_id
+            ))
 
-        checked_results.append({
-            "id": prop_id,
-            "is_online": is_online_bool,
-            "status_message": status.get("status_message", ""),
-            "lat": new_lat,
-            "lng": new_lng
-        })
+            checked_results.append({
+                "id": prop_id,
+                "is_online": is_online_bool,
+                "status_message": status.get("status_message", ""),
+                "lat": new_lat,
+                "lng": new_lng
+            })
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
     return {
         "total_checked": len(checked_results),
@@ -809,7 +830,16 @@ def run_property_ai_audit(
                 fetch_res = check_portal_url_live(portal_url, source_portal, city)
                 fetched_desc = fetch_res.get("description", "")
                 fetched_details = fetch_res.get("details") or {}
-                if fetched_desc:
+                if not fetched_desc and not fetch_res.get("is_online") and fetch_res.get("availability_status") == "offline":
+                    prop["is_online"] = 0
+                    prop["availability_status"] = "offline"
+                    prop["status_message"] = fetch_res.get("status_message", "Inserat offline")
+                    cursor.execute(
+                        "UPDATE properties SET is_online = 0, availability_status = ?, status_message = ?, last_checked_at = ? WHERE id = ?",
+                        (prop["availability_status"], prop["status_message"], fetch_res.get("last_checked_at"), property_id),
+                    )
+                    conn.commit()
+                elif fetched_desc:
                     description = fetched_desc
                     prop["description"] = description
                     is_online_val = 1 if fetch_res["is_online"] else 0
@@ -1183,77 +1213,78 @@ def run_property_image_analysis(
     Requires/uses a Gemini API-Key (from request body, header X-Gemini-API-Key, system settings, or env).
     """
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    cursor.execute("SELECT * FROM properties WHERE id = ?", (property_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Property not found")
+        cursor.execute("SELECT * FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Property not found")
 
-    prop = dict(row)
-    description = prop.get("description") or ""
+        prop = dict(row)
+        description = prop.get("description") or ""
 
-    # Extract API key
-    api_key = None
-    if payload and isinstance(payload, dict):
-        api_key = payload.get("api_key")
-    if not api_key and request:
-        api_key = request.headers.get("X-Gemini-API-Key")
-    if api_key and ("..." in api_key or "***" in api_key or len(api_key.strip()) < 15):
+        # Extract API key
         api_key = None
-    if not api_key:
-        active_prov = get_system_setting("active_ai_provider")
-        if active_prov == "oneprovider":
-            api_key = get_system_setting("oneprovider_api_key") or get_system_setting("gemini_api_key")
-        elif active_prov == "gemini":
-            api_key = get_system_setting("google_gemini_api_key") or get_system_setting("gemini_api_key")
-        else:
-            api_key = get_system_setting("oneprovider_api_key") or get_system_setting("google_gemini_api_key") or get_system_setting("gemini_api_key")
-    if not api_key:
-        api_key = os.getenv("ONEPROVIDER_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if payload and isinstance(payload, dict):
+            api_key = payload.get("api_key")
+        if not api_key and request:
+            api_key = request.headers.get("X-Gemini-API-Key")
+        if api_key and ("..." in api_key or "***" in api_key or len(api_key.strip()) < 15):
+            api_key = None
+        if not api_key:
+            active_prov = get_system_setting("active_ai_provider")
+            if active_prov == "oneprovider":
+                api_key = get_system_setting("oneprovider_api_key") or get_system_setting("gemini_api_key")
+            elif active_prov == "gemini":
+                api_key = get_system_setting("google_gemini_api_key") or get_system_setting("gemini_api_key")
+            else:
+                api_key = get_system_setting("oneprovider_api_key") or get_system_setting("google_gemini_api_key") or get_system_setting("gemini_api_key")
+        if not api_key:
+            api_key = os.getenv("ONEPROVIDER_API_KEY") or os.getenv("GEMINI_API_KEY")
 
-    img_report = analyze_property_images(prop, full_description=description, api_key=api_key)
+        img_report = analyze_property_images(prop, full_description=description, api_key=api_key)
 
-    if isinstance(img_report, dict) and (img_report.get("error") or img_report.get("vision_failed")):
+        if isinstance(img_report, dict) and (img_report.get("error") or img_report.get("vision_failed")):
+            raise HTTPException(
+                status_code=400,
+                detail=img_report.get("error_message") or img_report.get("vision_error") or "Fehler bei der KI-Bildanalyse"
+            )
+
+        if isinstance(img_report, dict) and "analyzed_photos" in img_report:
+            for p in img_report["analyzed_photos"]:
+                p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+
+        img_json = json.dumps(img_report, ensure_ascii=False)
+        analyzed_urls = [p["url"] for p in img_report.get("analyzed_photos", []) if p.get("url")]
+        gallery_json = json.dumps(analyzed_urls, ensure_ascii=False) if analyzed_urls else None
+
+        # Also update ai_analysis if present (inkl. CaPEx-Abgleich mit neu geprüften Fotos & Unterlagen-Checkliste!)
+        ai_analysis_val = prop.get("ai_analysis")
+        updated_ai_obj = None
+        if ai_analysis_val:
+            try:
+                ai_data = json.loads(ai_analysis_val)
+                ai_data = reconcile_capex_with_images(ai_data, prop, img_report)
+                doc_req = build_missing_documents_request(prop, ai_data)
+                ai_data["missing_documents"] = doc_req.get("missing_documents", [])
+                ai_data["doc_checklist"] = doc_req.get("missing_documents", [])
+                ai_data["document_request"] = doc_req
+                updated_ai_obj = ai_data
+                ai_analysis_val = json.dumps(ai_data, ensure_ascii=False)
+            except Exception:
+                pass
+
+        cursor.execute("""
+            UPDATE properties 
+            SET image_analysis = ?,
+                gallery_images = COALESCE(?, gallery_images),
+                ai_analysis = COALESCE(?, ai_analysis)
+            WHERE id = ?
+        """, (img_json, gallery_json, ai_analysis_val, property_id))
+        conn.commit()
+    finally:
         conn.close()
-        raise HTTPException(
-            status_code=400,
-            detail=img_report.get("error_message") or img_report.get("vision_error") or "Fehler bei der KI-Bildanalyse"
-        )
-
-    if isinstance(img_report, dict) and "analyzed_photos" in img_report:
-        for p in img_report["analyzed_photos"]:
-            p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
-
-    img_json = json.dumps(img_report, ensure_ascii=False)
-    gallery_json = json.dumps([p["url"] for p in img_report.get("analyzed_photos", [])], ensure_ascii=False)
-
-    # Also update ai_analysis if present (inkl. CaPEx-Abgleich mit neu geprüften Fotos & Unterlagen-Checkliste!)
-    ai_analysis_val = prop.get("ai_analysis")
-    updated_ai_obj = None
-    if ai_analysis_val:
-        try:
-            ai_data = json.loads(ai_analysis_val)
-            ai_data = reconcile_capex_with_images(ai_data, prop, img_report)
-            doc_req = build_missing_documents_request(prop, ai_data)
-            ai_data["missing_documents"] = doc_req.get("missing_documents", [])
-            ai_data["doc_checklist"] = doc_req.get("missing_documents", [])
-            ai_data["document_request"] = doc_req
-            updated_ai_obj = ai_data
-            ai_analysis_val = json.dumps(ai_data, ensure_ascii=False)
-        except Exception:
-            pass
-
-    cursor.execute("""
-        UPDATE properties 
-        SET image_analysis = ?,
-            gallery_images = ?,
-            ai_analysis = COALESCE(?, ai_analysis)
-        WHERE id = ?
-    """, (img_json, gallery_json, ai_analysis_val, property_id))
-    conn.commit()
-    conn.close()
 
     resp_payload = {
         "property_id": property_id,
@@ -1373,18 +1404,18 @@ def run_all_ai_audits(force_refresh: bool = False):
 @router.post("/{property_id}/toggle-favorite")
 def toggle_favorite(property_id: int):
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT is_favorite FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Property not found")
 
-    cursor.execute("SELECT is_favorite FROM properties WHERE id = ?", (property_id,))
-    row = cursor.fetchone()
-    if not row:
+        new_state = 0 if row[0] == 1 else 1
+        cursor.execute("UPDATE properties SET is_favorite = ? WHERE id = ?", (new_state, property_id))
+        conn.commit()
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="Property not found")
-
-    new_state = 0 if row[0] == 1 else 1
-    cursor.execute("UPDATE properties SET is_favorite = ? WHERE id = ?", (new_state, property_id))
-    conn.commit()
-    conn.close()
 
     return {"id": property_id, "is_favorite": new_state}
 
@@ -1395,14 +1426,15 @@ def add_note(property_id: int, note_data: Dict[str, str] = Body(...)):
         raise HTTPException(status_code=400, detail="Note cannot be empty")
 
     conn = get_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO deal_notes (property_id, note) VALUES (?, ?)", (property_id, note_text))
+        conn.commit()
 
-    cursor.execute("INSERT INTO deal_notes (property_id, note) VALUES (?, ?)", (property_id, note_text))
-    conn.commit()
-
-    cursor.execute("SELECT * FROM deal_notes WHERE property_id = ? ORDER BY created_at DESC", (property_id,))
-    notes = [dict(n) for n in cursor.fetchall()]
-    conn.close()
+        cursor.execute("SELECT * FROM deal_notes WHERE property_id = ? ORDER BY created_at DESC", (property_id,))
+        notes = [dict(n) for n in cursor.fetchall()]
+    finally:
+        conn.close()
 
     return {"success": True, "notes": notes}
 
@@ -1463,17 +1495,20 @@ def trigger_live_scrape(payload: Dict[str, Any] = Body(...), request: Request = 
 
     # Run AI text & due diligence analysis in background so search responds in < 3 seconds
     if analyze_ai and new_ids:
-        def _bg_audit_batch(pids: List[int]):
+        header_api_key = request.headers.get("X-Gemini-API-Key") if request else None
+
+        def _bg_audit_batch(pids: List[int], api_key_override: Optional[str]):
+            bg_payload = {"api_key": api_key_override} if api_key_override else None
             for pid in pids:
                 try:
-                    run_property_ai_audit(property_id=pid, force_refresh=True, request=request)
+                    run_property_ai_audit(property_id=pid, force_refresh=True, request=None, payload=bg_payload)
                 except Exception as exc:
                     print(f"Auto AI-Audit failed for newly scraped deal #{pid}: {exc}")
 
         if background_tasks:
-            background_tasks.add_task(_bg_audit_batch, new_ids)
+            background_tasks.add_task(_bg_audit_batch, new_ids, header_api_key)
         else:
-            threading.Thread(target=_bg_audit_batch, args=(new_ids,), daemon=True).start()
+            threading.Thread(target=_bg_audit_batch, args=(new_ids, header_api_key), daemon=True).start()
 
     criteria_str = []
     if min_yield is not None:
@@ -1505,24 +1540,37 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     from app.scrapers.immowelt import fetch_immowelt_expose
     from app.geo_resolver import resolve_location_and_tax, resolve_city_coordinates, ensure_distinct_coord
 
+    from app.network_security import validate_external_url
     raw_url = (payload.get("url") or "").strip()
-    if not raw_url or not raw_url.startswith("http"):
-        raise HTTPException(status_code=400, detail="Bitte eine gültige URL (http:// oder https://) angeben.")
+    try:
+        raw_url = validate_external_url(raw_url)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
 
     conn = get_connection()
-    cursor = conn.cursor()
-
-    # 1. Check if already in DB
-    cursor.execute("SELECT * FROM properties WHERE portal_url = ?", (raw_url,))
-    existing = cursor.fetchone()
-    if existing:
-        existing_id = existing["id"]
-        cur_t = existing["title"] or ""
-        force = True if (not cur_t or cur_t.lower() == "beschreibung" or existing["purchase_price"] <= 0) else False
-        audit_res = run_property_ai_audit(existing_id, force_refresh=force, request=request)
-        cursor.execute("SELECT * FROM properties WHERE id = ?", (existing_id,))
-        updated_row = dict(cursor.fetchone())
+    existing_id = None
+    existing_force = False
+    try:
+        cursor = conn.cursor()
+        # 1. Check if already in DB
+        cursor.execute("SELECT * FROM properties WHERE portal_url = ?", (raw_url,))
+        existing = cursor.fetchone()
+        if existing:
+            existing_id = existing["id"]
+            cur_t = existing["title"] or ""
+            existing_force = True if (not cur_t or cur_t.lower() == "beschreibung" or existing["purchase_price"] <= 0) else False
+    finally:
         conn.close()
+
+    if existing_id is not None:
+        audit_res = run_property_ai_audit(existing_id, force_refresh=existing_force, request=request)
+        conn2 = get_connection()
+        try:
+            c2 = conn2.cursor()
+            c2.execute("SELECT * FROM properties WHERE id = ?", (existing_id,))
+            updated_row = dict(c2.fetchone())
+        finally:
+            conn2.close()
         return {
             "status": "already_exists",
             "message": f"Dieses Inserat existiert bereits in Ihrer Pipeline (Deal #{existing_id}).",
@@ -1749,65 +1797,74 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     if gross_yield >= 5.5:
         tags.append("Top-Rendite")
 
-    cursor.execute("SELECT lat, lng FROM properties WHERE lat IS NOT NULL AND lng IS NOT NULL")
-    occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
-    clean_lat, clean_lng = ensure_distinct_coord(lat, lng, occupied_coords, seed=999)
+    conn_ins = get_connection()
+    try:
+        cursor = conn_ins.cursor()
+        cursor.execute("SELECT lat, lng FROM properties WHERE lat IS NOT NULL AND lng IS NOT NULL")
+        occupied_coords = {(round(float(r[0]), 4), round(float(r[1]), 4)) for r in cursor.fetchall()}
+        clean_lat, clean_lng = ensure_distinct_coord(lat, lng, occupied_coords, seed=999)
 
-    from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
-    now_str = get_berlin_now_str()
-    sp_json = json.dumps([{"portal": source_portal, "url": raw_url, "price": price}])
+        from app.datetime_utils import get_berlin_now_str, get_berlin_today_str
+        now_str = get_berlin_now_str()
+        sp_json = json.dumps([{"portal": source_portal, "url": raw_url, "price": price}])
 
-    cursor.execute("""
-        INSERT INTO properties (
-            title, address, postal_code, city, state, country, property_type, building_type,
-            rooms, living_space, land_area, year_built, condition, purchase_price, original_price,
-            price_drop_amount, price_drop_percent, commission_percent, current_rent, expected_rent,
-            gross_yield, monthly_cashflow, market_value, market_value_per_sqm, market_deviation_percent,
-            source_portal, portal_url, image_url, days_online, first_seen_date, is_private,
-            is_rented, is_foreclosure, is_favorite, pipeline_stage, tags, lat, lng, parcel_id,
-            parcel_area, is_online, availability_status, status_message, last_checked_at, live_search_url,
-            description, gallery_images, source_portals
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?
-        )
-    """, (
-        title, address, postal_code, city, state, "DE",
-        "Eigentumswohnung", "Etagenwohnung",
-        rooms, sqm, 0.0, year_built, "Gepflegt",
-        price, price, 0.0, 0.0, comm_pct,
-        0.0, expected_rent, gross_yield, monthly_cashflow,
-        benchmark.get("estimated_market_value", price),
-        benchmark.get("estimated_market_value_per_sqm", 2800.0),
-        benchmark.get("market_deviation_percent", 0.0),
-        source_portal, raw_url, img_url,
-        1, get_berlin_today_str(),
-        is_private, 0, 0, 0, "neu",
-        str(tags).replace("'", '"'),
-        clean_lat, clean_lng, None, 0.0,
-        1, "online", "Live importiert & verifiziert",
-        now_str, raw_url,
-        description, json.dumps(gallery_images), sp_json
-    ))
-    new_prop_id = cursor.lastrowid
-    conn.commit()
+        cursor.execute("""
+            INSERT INTO properties (
+                title, address, postal_code, city, state, country, property_type, building_type,
+                rooms, living_space, land_area, year_built, condition, purchase_price, original_price,
+                price_drop_amount, price_drop_percent, commission_percent, current_rent, expected_rent,
+                gross_yield, monthly_cashflow, market_value, market_value_per_sqm, market_deviation_percent,
+                source_portal, portal_url, image_url, days_online, first_seen_date, is_private,
+                is_rented, is_foreclosure, is_favorite, pipeline_stage, tags, lat, lng, parcel_id,
+                parcel_area, is_online, availability_status, status_message, last_checked_at, live_search_url,
+                description, gallery_images, source_portals
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?
+            )
+        """, (
+            title, address, postal_code, city, state, "DE",
+            "Eigentumswohnung", "Etagenwohnung",
+            rooms, sqm, 0.0, year_built, "Gepflegt",
+            price, price, 0.0, 0.0, comm_pct,
+            0.0, expected_rent, gross_yield, monthly_cashflow,
+            benchmark.get("estimated_market_value", price),
+            benchmark.get("estimated_market_value_per_sqm", 2800.0),
+            benchmark.get("market_deviation_percent", 0.0),
+            source_portal, raw_url, img_url,
+            1, get_berlin_today_str(),
+            is_private, 0, 0, 0, "neu",
+            json.dumps(tags, ensure_ascii=False),
+            clean_lat, clean_lng, None, 0.0,
+            1, "online", "Live importiert & verifiziert",
+            now_str, raw_url,
+            description, json.dumps(gallery_images), sp_json
+        ))
+        new_prop_id = cursor.lastrowid
+        conn_ins.commit()
+    finally:
+        conn_ins.close()
 
-    # 4. Trigger full AI Due Diligence Audit immediately
+    # 4. Trigger full AI Due Diligence Audit immediately (without holding an outer DB lock open)
     audit_res = {}
     try:
         audit_res = run_property_ai_audit(new_prop_id, force_refresh=True, request=request)
     except Exception as e:
         print(f"Error running initial AI audit on imported deal #{new_prop_id}: {e}")
 
-    cursor.execute("SELECT * FROM properties WHERE id = ?", (new_prop_id,))
-    final_prop = dict(cursor.fetchone())
-    conn.close()
+    conn_read = get_connection()
+    try:
+        c_read = conn_read.cursor()
+        c_read.execute("SELECT * FROM properties WHERE id = ?", (new_prop_id,))
+        final_prop = dict(c_read.fetchone())
+    finally:
+        conn_read.close()
 
     return {
         "status": "success",
@@ -1832,17 +1889,19 @@ def delete_all_properties_endpoint(clear_alerts: bool = True, clear_seen: bool =
 def delete_property(property_id: int):
     """Delete a single property from the database"""
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title FROM properties WHERE id = ?", (property_id,))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Property not found")
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, title FROM properties WHERE id = ?", (property_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Property not found")
 
-    cursor.execute("DELETE FROM properties WHERE id = ?", (property_id,))
-    cursor.execute("DELETE FROM deal_notes WHERE property_id = ?", (property_id,))
-    conn.commit()
-    conn.close()
+        cursor.execute("DELETE FROM deal_alerts WHERE property_id = ?", (property_id,))
+        cursor.execute("DELETE FROM deal_notes WHERE property_id = ?", (property_id,))
+        cursor.execute("DELETE FROM properties WHERE id = ?", (property_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
     return {"status": "success", "deleted_id": property_id, "message": f"Deal #{property_id} erfolgreich gelöscht."}
 
@@ -1850,17 +1909,19 @@ def delete_property(property_id: int):
 def delete_all_offline_properties():
     """Bulk delete all properties that are marked as deactivated / offline"""
     conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id FROM properties WHERE is_online = 0")
-    offline_ids = [r[0] for r in cursor.fetchall()]
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM properties WHERE is_online = 0")
+        offline_ids = [r[0] for r in cursor.fetchall()]
 
-    if offline_ids:
-        placeholders = ",".join("?" * len(offline_ids))
-        cursor.execute(f"DELETE FROM properties WHERE id IN ({placeholders})", offline_ids)
-        cursor.execute(f"DELETE FROM deal_notes WHERE property_id IN ({placeholders})", offline_ids)
-        conn.commit()
-
-    conn.close()
+        if offline_ids:
+            placeholders = ",".join("?" * len(offline_ids))
+            cursor.execute(f"DELETE FROM deal_alerts WHERE property_id IN ({placeholders})", offline_ids)
+            cursor.execute(f"DELETE FROM deal_notes WHERE property_id IN ({placeholders})", offline_ids)
+            cursor.execute(f"DELETE FROM properties WHERE id IN ({placeholders})", offline_ids)
+            conn.commit()
+    finally:
+        conn.close()
     return {
         "status": "success",
         "deleted_count": len(offline_ids),

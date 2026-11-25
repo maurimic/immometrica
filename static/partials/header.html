@@ -59,15 +59,15 @@
 
         <!-- Dark Mode / Theme Toggle Button -->
         <button @click="toggleTheme()" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" :title="`Farbschema: ${theme === 'system' ? 'System (Auto)' : (theme === 'dark' ? 'Dunkel' : 'Hell')} - Klicken zum Umschalten`">
-          <template x-if="theme === 'system'">
+          <span x-show="theme === 'system'" class="inline-flex items-center">
             <i data-lucide="monitor" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
-          </template>
-          <template x-if="theme === 'dark'">
+          </span>
+          <span x-show="theme === 'dark'" class="inline-flex items-center">
             <i data-lucide="moon" class="w-4 h-4 text-amber-400"></i>
-          </template>
-          <template x-if="theme === 'light'">
+          </span>
+          <span x-show="theme === 'light'" class="inline-flex items-center">
             <i data-lucide="sun" class="w-4 h-4 text-amber-500"></i>
-          </template>
+          </span>
         </button>
 
         <!-- CSV Export Button -->
@@ -109,22 +109,23 @@
 
         <!-- Dark Mode / Theme Toggle Button -->
         <button @click="toggleTheme()" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-          <template x-if="theme === 'system'">
+          <span x-show="theme === 'system'" class="inline-flex items-center">
             <i data-lucide="monitor" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
-          </template>
-          <template x-if="theme === 'dark'">
+          </span>
+          <span x-show="theme === 'dark'" class="inline-flex items-center">
             <i data-lucide="moon" class="w-4 h-4 text-amber-400"></i>
-          </template>
-          <template x-if="theme === 'light'">
+          </span>
+          <span x-show="theme === 'light'" class="inline-flex items-center">
             <i data-lucide="sun" class="w-4 h-4 text-amber-500"></i>
-          </template>
+          </span>
         </button>
 
         <!-- Mobile Tools Drawer Toggle Button -->
         <button @click="mobileMenuOpen = !mobileMenuOpen" 
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer"
                 :class="mobileMenuOpen ? 'bg-sky-600 text-white border-sky-600' : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'">
-          <i :data-lucide="mobileMenuOpen ? 'x' : 'menu'" class="w-4 h-4"></i>
+          <span x-show="!mobileMenuOpen" class="inline-flex items-center"><i data-lucide="menu" class="w-4 h-4"></i></span>
+          <span x-show="mobileMenuOpen" class="inline-flex items-center"><i data-lucide="x" class="w-4 h-4"></i></span>
           <span>Tools</span>
         </button>
       </div>

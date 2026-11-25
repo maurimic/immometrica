@@ -121,15 +121,15 @@
 
         <!-- Dark Mode / Theme Toggle Button -->
         <button @click="toggleTheme()" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors" :title="`Farbschema: ${theme === 'system' ? 'System (Auto)' : (theme === 'dark' ? 'Dunkel' : 'Hell')} - Klicken zum Umschalten`">
-          <template x-if="theme === 'system'">
+          <span x-show="theme === 'system'" class="inline-flex items-center">
             <i data-lucide="monitor" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
-          </template>
-          <template x-if="theme === 'dark'">
+          </span>
+          <span x-show="theme === 'dark'" class="inline-flex items-center">
             <i data-lucide="moon" class="w-4 h-4 text-amber-400"></i>
-          </template>
-          <template x-if="theme === 'light'">
+          </span>
+          <span x-show="theme === 'light'" class="inline-flex items-center">
             <i data-lucide="sun" class="w-4 h-4 text-amber-500"></i>
-          </template>
+          </span>
         </button>
 
         <!-- CSV Export Button -->
@@ -171,22 +171,23 @@
 
         <!-- Dark Mode / Theme Toggle Button -->
         <button @click="toggleTheme()" class="p-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-          <template x-if="theme === 'system'">
+          <span x-show="theme === 'system'" class="inline-flex items-center">
             <i data-lucide="monitor" class="w-4 h-4 text-sky-600 dark:text-sky-400"></i>
-          </template>
-          <template x-if="theme === 'dark'">
+          </span>
+          <span x-show="theme === 'dark'" class="inline-flex items-center">
             <i data-lucide="moon" class="w-4 h-4 text-amber-400"></i>
-          </template>
-          <template x-if="theme === 'light'">
+          </span>
+          <span x-show="theme === 'light'" class="inline-flex items-center">
             <i data-lucide="sun" class="w-4 h-4 text-amber-500"></i>
-          </template>
+          </span>
         </button>
 
         <!-- Mobile Tools Drawer Toggle Button -->
         <button @click="mobileMenuOpen = !mobileMenuOpen" 
                 class="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer"
                 :class="mobileMenuOpen ? 'bg-sky-600 text-white border-sky-600' : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'">
-          <i :data-lucide="mobileMenuOpen ? 'x' : 'menu'" class="w-4 h-4"></i>
+          <span x-show="!mobileMenuOpen" class="inline-flex items-center"><i data-lucide="menu" class="w-4 h-4"></i></span>
+          <span x-show="mobileMenuOpen" class="inline-flex items-center"><i data-lucide="x" class="w-4 h-4"></i></span>
           <span>Tools</span>
         </button>
       </div>
@@ -310,7 +311,7 @@
                 <span>Push-Benachrichtigung an Telegram gesendet</span>
               </span>
               <template x-if="portalHealth && portalHealth.last_checked_at">
-                <span>Geprüft: <span x-text="portalHealth.last_checked_at"></span></span>
+                <span>Geprüft: <span x-text="formatDateTimeDE(portalHealth.last_checked_at)"></span></span>
               </template>
             </div>
           </div>
@@ -553,8 +554,8 @@
                   </div>
 
                   <!-- Favorite Button -->
-                  <button @click.stop="toggleFavorite(prop)" class="p-1.5 rounded-full bg-slate-900/60 backdrop-blur-sm text-white hover:text-amber-400 transition-colors pointer-events-auto shadow-sm cursor-pointer">
-                    <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-400 fill-amber-400' : ''"></i>
+                  <button @click.stop="toggleFavorite(prop)" class="p-1.5 rounded-full bg-slate-900/60 backdrop-blur-sm hover:text-amber-400 transition-colors pointer-events-auto shadow-sm cursor-pointer" :class="prop.is_favorite ? 'text-amber-400 [&>svg]:fill-amber-400' : 'text-white'">
+                    <i data-lucide="star" class="w-4 h-4"></i>
                   </button>
                 </div>
 
@@ -562,7 +563,7 @@
                 <div class="absolute bottom-2.5 inset-x-2.5 flex items-end justify-between pointer-events-none">
                   <div class="bg-slate-900/80 backdrop-blur-sm px-2.5 py-1 rounded-xl text-white shadow-md pointer-events-auto">
                     <div class="text-base font-extrabold" x-text="formatCurrency(prop.purchase_price)"></div>
-                    <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.price_per_sqm)"></div>
+                    <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.purchase_price, prop.living_space)"></div>
                   </div>
 
                   <template x-if="prop.market_deviation_percent < -0.1">
@@ -718,8 +719,8 @@
                   <!-- Title & Source -->
                   <td class="py-3 px-3.5 min-w-[280px] max-w-md">
                     <div class="flex items-start gap-2">
-                      <button @click="toggleFavorite(prop)" class="mt-0.5 text-slate-300 hover:text-amber-500 transition-colors">
-                        <i data-lucide="star" class="w-4 h-4" :class="prop.is_favorite ? 'text-amber-500 fill-amber-500' : ''"></i>
+                      <button @click="toggleFavorite(prop)" class="mt-0.5 hover:text-amber-500 transition-colors" :class="prop.is_favorite ? 'text-amber-500 [&>svg]:fill-amber-500' : 'text-slate-300'">
+                        <i data-lucide="star" class="w-4 h-4"></i>
                       </button>
                       <div>
                         <a :href="'?deal=' + prop.id + '&view=audit'" @click.prevent="openDetailModal(prop, 'audit')" class="font-semibold text-slate-900 dark:text-slate-100 hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug" x-text="prop.title"></a>
@@ -804,7 +805,7 @@
                   <!-- Price & Price Drop -->
                   <td class="py-3 px-3.5">
                     <div class="font-bold text-slate-900 dark:text-slate-100 text-sm" x-text="formatCurrency(prop.purchase_price)"></div>
-                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="`${formatNumber(prop.purchase_price / prop.living_space, 0)} €/m²`"></div>
+                    <div class="text-[11px] text-slate-500 dark:text-slate-400" x-text="prop.living_space > 0 ? `${formatNumber(prop.purchase_price / prop.living_space, 0)} €/m²` : '-'"></div>
                     <template x-if="prop.price_drop_amount > 0">
                       <span class="inline-block mt-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-1 rounded" x-text="`-${formatNumber(prop.price_drop_percent, prop.price_drop_percent % 1 === 0 ? 0 : 1)} % gesenkt`"></span>
                     </template>
@@ -960,8 +961,8 @@
     <div x-show="activeTab === 'board'" class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-bold text-slate-900">Dealboard CRM Pipeline</h2>
-          <p class="text-xs text-slate-500">Ziehe gefundene Immobilien per Drag & Drop durch die Phasen Deiner Ankaufsprüfung.</p>
+          <h2 class="text-lg font-bold text-slate-900 dark:text-slate-100">Dealboard CRM Pipeline</h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">Ziehe gefundene Immobilien per Drag & Drop durch die Phasen Deiner Ankaufsprüfung.</p>
         </div>
       </div>
 
@@ -984,12 +985,12 @@
           <div :id="'lane-' + stageData.stage.id" class="kanban-lane snap-center" @dragover="dragOver($event)" @drop="dropDeal($event, stageData.stage.id)">
             
             <!-- Lane Header -->
-            <div class="flex items-center justify-between pb-3 border-b border-slate-200 mb-3">
+            <div class="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700 mb-3">
               <div class="flex items-center gap-2">
                 <span class="w-2.5 h-2.5 rounded-full" :style="`background-color: ${stageData.stage.color}`"></span>
-                <span class="font-bold text-xs text-slate-800" x-text="stageData.stage.name"></span>
+                <span class="font-bold text-xs text-slate-800 dark:text-slate-100" x-text="stageData.stage.name"></span>
               </div>
-              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-white text-slate-600 border border-slate-200" x-text="stageData.count"></span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700" x-text="stageData.count"></span>
             </div>
 
             <!-- Cards list -->
@@ -998,8 +999,8 @@
                 <div class="deal-card p-3 space-y-2 cursor-pointer" draggable="true" @dragstart="dragStart($event, deal)" @dragend="dragEnd($event)" @click="openDetailModal(deal, 'audit')">
                   
                   <div class="flex items-start justify-between">
-                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-100" x-text="deal.source_portal"></span>
-                    <span class="text-xs font-bold text-slate-900" x-text="formatCurrency(deal.purchase_price)"></span>
+                    <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-sky-50 dark:bg-sky-950/70 text-sky-800 dark:text-sky-300 border border-sky-100 dark:border-sky-800" x-text="deal.source_portal"></span>
+                    <span class="text-xs font-bold text-slate-900 dark:text-slate-100" x-text="formatCurrency(deal.purchase_price)"></span>
                   </div>
 
                   <h4 class="text-xs font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">
@@ -3440,7 +3441,6 @@
                         <span class="text-[10px] text-amber-700 dark:text-amber-400 font-semibold">Im Rechner zuschaltbar</span>
                       </div>
                     </template>
-                    </div>
 
                     <!-- Summary explanation text -->
                     <template x-if="selectedProperty.ai_analysis.metrics.mietspiegel_analysis?.summary">
@@ -3687,7 +3687,7 @@
                         <button @click="openApiKeyModal(selectedProperty.id)" 
                                 class="px-3 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer">
                           <i data-lucide="key" class="w-3.5 h-3.5 text-amber-500"></i>
-                          <span x-text="(geminiApiKey || hasServerApiKey) ? 'API-Key aktiv ✓' : 'API-Key hinterlegen'"></span>
+                          <span x-text="hasActiveApiKey ? 'API-Key aktiv ✓' : 'API-Key hinterlegen'"></span>
                         </button>
                       </div>
                     </div>
@@ -3732,11 +3732,12 @@
                         <div class="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 flex items-center gap-3">
                           <div class="w-12 h-12 rounded-full flex items-center justify-center font-black text-sm text-white shadow-xs shrink-0"
                                :class="{
-                                 'bg-emerald-500': selectedProperty.image_analysis.overall_visual_score >= 7.5,
-                                 'bg-amber-500': selectedProperty.image_analysis.overall_visual_score >= 5.5 && selectedProperty.image_analysis.overall_visual_score < 7.5,
-                                 'bg-rose-500': selectedProperty.image_analysis.overall_visual_score < 5.5
+                                 'bg-emerald-500': (selectedProperty.image_analysis.overall_visual_score ?? -1) >= 7.5,
+                                 'bg-amber-500': (selectedProperty.image_analysis.overall_visual_score ?? -1) >= 5.5 && (selectedProperty.image_analysis.overall_visual_score ?? -1) < 7.5,
+                                 'bg-rose-500': (selectedProperty.image_analysis.overall_visual_score ?? -1) >= 0 && (selectedProperty.image_analysis.overall_visual_score ?? -1) < 5.5,
+                                 'bg-slate-400 dark:bg-slate-600': selectedProperty.image_analysis.overall_visual_score === null || selectedProperty.image_analysis.overall_visual_score === undefined
                                }"
-                               x-text="selectedProperty.image_analysis.overall_visual_score">
+                               x-text="selectedProperty.image_analysis.overall_visual_score ?? '–'">
                           </div>
                           <div class="min-w-0">
                             <span class="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Visueller IST-Zustand</span>
@@ -3768,7 +3769,8 @@
                         </div>
                       </div>
 
-                      <!-- 6 Bauteil-Kategorien (Grid) -->
+                      <!-- 6 Bauteil-Kategorien (Grid, nur rendern wenn Kategorien vorliegen) -->
+                      <template x-if="selectedProperty.image_analysis.categories && Object.keys(selectedProperty.image_analysis.categories).length > 0">
                       <div>
                         <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 block mb-2">
                           Geprüfte Bauteile & Zustandskomponenten:
@@ -3776,151 +3778,164 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                           
                           <!-- Bad & Sanitär -->
+                          <template x-if="selectedProperty.image_analysis.categories?.bathroom">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>🚿</span> Bad & Sanitär
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.bathroom.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.bathroom.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.bathroom?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.bathroom?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.bathroom.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.bathroom.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.bathroom.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.bathroom?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.bathroom?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.bathroom?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.bathroom.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.bathroom.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.bathroom.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.bathroom.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.bathroom?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.bathroom?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.bathroom?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.bathroom?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                           <!-- Küche & EBK -->
+                          <template x-if="selectedProperty.image_analysis.categories?.kitchen">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>🍳</span> Küche & EBK
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.kitchen.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.kitchen.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.kitchen?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.kitchen?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.kitchen.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.kitchen.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.kitchen.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.kitchen?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.kitchen?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.kitchen?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.kitchen.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.kitchen.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.kitchen.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.kitchen.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.kitchen?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.kitchen?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.kitchen?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.kitchen?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                           <!-- Böden & Beläge -->
+                          <template x-if="selectedProperty.image_analysis.categories?.flooring">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>🪵</span> Böden & Beläge
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.flooring.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.flooring.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.flooring?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.flooring?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.flooring.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.flooring.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.flooring.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.flooring?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.flooring?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.flooring?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.flooring.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.flooring.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.flooring.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.flooring.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.flooring?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.flooring?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.flooring?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.flooring?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                           <!-- Fenster & Dämmung -->
+                          <template x-if="selectedProperty.image_analysis.categories?.windows">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>🪟</span> Fenster & Dämmung
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.windows.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.windows.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.windows?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.windows?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.windows.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.windows.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.windows.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.windows?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.windows?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.windows?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.windows.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.windows.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.windows.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.windows.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.windows?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.windows?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.windows?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.windows?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                           <!-- Elektrik & Heizung -->
+                          <template x-if="selectedProperty.image_analysis.categories?.heating_electrics">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>⚡</span> Elektrik & Heizung
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.heating_electrics.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.heating_electrics.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.heating_electrics?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.heating_electrics?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.heating_electrics.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.heating_electrics.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.heating_electrics.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.heating_electrics?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.heating_electrics?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.heating_electrics?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.heating_electrics.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.heating_electrics.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.heating_electrics.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.heating_electrics.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.heating_electrics?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.heating_electrics?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.heating_electrics?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.heating_electrics?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                           <!-- Wände & Bausubstanz -->
+                          <template x-if="selectedProperty.image_analysis.categories?.walls_substance">
                           <div class="p-2.5 rounded-lg bg-slate-50/70 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700/80 text-xs space-y-1">
                             <div class="flex items-center justify-between">
                               <span class="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                                 <span>🧱</span> Wände & Bausubstanz
                               </span>
                               <span class="px-1.5 py-0.2 rounded text-[10px] font-bold font-mono"
-                                    :class="selectedProperty.image_analysis.categories.walls_substance.score >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
-                                    x-text="`${selectedProperty.image_analysis.categories.walls_substance.score} / 10`">
+                                    :class="(selectedProperty.image_analysis.categories?.walls_substance?.score ?? 0) >= 7.5 ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300' : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'"
+                                    x-text="`${selectedProperty.image_analysis.categories?.walls_substance?.score ?? '-'} / 10`">
                               </span>
                             </div>
                             <div class="w-full bg-slate-200 dark:bg-slate-700 h-1.5 rounded-full overflow-hidden">
                               <div class="h-full rounded-full"
-                                   :class="selectedProperty.image_analysis.categories.walls_substance.score >= 7.5 ? 'bg-emerald-500' : (selectedProperty.image_analysis.categories.walls_substance.score >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
-                                   :style="`width: ${selectedProperty.image_analysis.categories.walls_substance.score * 10}%`">
+                                   :class="(selectedProperty.image_analysis.categories?.walls_substance?.score ?? 0) >= 7.5 ? 'bg-emerald-500' : ((selectedProperty.image_analysis.categories?.walls_substance?.score ?? 0) >= 5.5 ? 'bg-amber-500' : 'bg-rose-500')"
+                                   :style="`width: ${(selectedProperty.image_analysis.categories?.walls_substance?.score ?? 0) * 10}%`">
                               </div>
                             </div>
-                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories.walls_substance.status"></div>
-                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories.walls_substance.findings"></div>
-                            <template x-if="selectedProperty.image_analysis.categories.walls_substance.cost > 0">
-                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories.walls_substance.cost)}`"></div>
+                            <div class="text-[11px] font-semibold text-slate-700 dark:text-slate-300" x-text="selectedProperty.image_analysis.categories?.walls_substance?.status"></div>
+                            <div class="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed" x-text="selectedProperty.image_analysis.categories?.walls_substance?.findings"></div>
+                            <template x-if="(selectedProperty.image_analysis.categories?.walls_substance?.cost ?? 0) > 0">
+                              <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 pt-0.5" x-text="`Kosten: +${formatCurrency(selectedProperty.image_analysis.categories?.walls_substance?.cost)}`"></div>
                             </template>
                           </div>
+                          </template>
 
                         </div>
                       </div>
+                      </template>
 
                       <!-- Fotogalerie der ausgewerteten Fotos mit Raum-Tags (Klick = Großansicht) -->
                       <template x-if="selectedProperty.image_analysis.analyzed_photos && selectedProperty.image_analysis.analyzed_photos.length">
@@ -4007,8 +4022,8 @@
                                 <div class="text-right shrink-0">
                                   <div class="font-bold text-slate-900 dark:text-slate-100" x-text="formatCurrency(vItem.cost)"></div>
                                   <span class="text-[9px] font-bold px-1 py-0.2 rounded uppercase"
-                                        :class="vItem.urgency.includes('Sofort') || vItem.urgency.includes('Sicherheits') ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'"
-                                        x-text="vItem.urgency">
+                                        :class="(vItem.urgency || '').includes('Sofort') || (vItem.urgency || '').includes('Sicherheits') ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'"
+                                        x-text="vItem.urgency || 'MITTEL'">
                                   </span>
                                 </div>
                               </div>

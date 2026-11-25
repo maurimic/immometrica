@@ -111,12 +111,27 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
     now_iso = get_berlin_now_str("%Y-%m-%d %H:%M:%S")
     live_fallback = generate_live_search_url(source_portal, city)
 
-    if not url or not url.startswith("http"):
+    if not url or not str(url).strip():
         return {
             "is_online": False,
             "availability_status": "offline",
             "status_code": 400,
             "status_message": "Keine gültige Portal-URL hinterlegt",
+            "last_checked_at": now_iso,
+            "live_search_url": live_fallback,
+            "description": "",
+            "details": {}
+        }
+
+    from app.network_security import validate_external_url, safe_requests_get
+    try:
+        url = validate_external_url(url)
+    except ValueError as ssrf_err:
+        return {
+            "is_online": False,
+            "availability_status": "blocked_unsafe_url",
+            "status_code": 400,
+            "status_message": str(ssrf_err),
             "last_checked_at": now_iso,
             "live_search_url": live_fallback,
             "description": "",
@@ -166,11 +181,23 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                     "gallery_images": scout_res.get("pictures", [])
                 }
             else:
+                st = int(scout_res.get("status_code") or 0)
+                if st in (404, 410):
+                    return {
+                        "is_online": False,
+                        "availability_status": "offline",
+                        "status_code": st,
+                        "status_message": "Angebot nicht gefunden (bereits gelöscht oder ungültige Scout-ID)",
+                        "last_checked_at": now_iso,
+                        "live_search_url": live_fallback,
+                        "description": "",
+                        "details": {}
+                    }
                 return {
                     "is_online": False,
-                    "availability_status": "offline",
-                    "status_code": 404,
-                    "status_message": "Angebot nicht gefunden (bereits gelöscht oder ungültige Scout-ID)",
+                    "availability_status": "unverified_bot_restricted",
+                    "status_code": st or 503,
+                    "status_message": scout_res.get("error") or "ImmoScout24 vorübergehend nicht erreichbar / Bot-Schutz",
                     "last_checked_at": now_iso,
                     "live_search_url": live_fallback,
                     "description": "",
@@ -218,11 +245,10 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                 }
 
     try:
-        response = requests.get(
+        response = safe_requests_get(
             url,
             headers=BROWSER_HEADERS,
             timeout=5.5,
-            allow_redirects=True
         )
 
         status_code = response.status_code
@@ -423,6 +449,30 @@ def check_portal_url_live(url: str, source_portal: str = "", city: str = "") -> 
                     "image_url": ad_images[0] if ad_images else "",
                     "gallery_images": ad_images
                 }
+
+            # If Kleinanzeigen did not expose #viewad-title, distinguish bot-wall vs deactivated ad
+            page_low = response.text.lower()
+            if any(sig in page_low for sig in ["captcha", "cloudflare", "access denied", "enable javascript", "zugriff verweigert"]):
+                return {
+                    "is_online": False,
+                    "availability_status": "unverified_bot_restricted",
+                    "status_code": 403,
+                    "status_message": "Kleinanzeigen Bot-Schutz erkannt (bitte im Browser prüfen)",
+                    "last_checked_at": now_iso,
+                    "live_search_url": live_fallback,
+                    "description": "",
+                    "details": {}
+                }
+            return {
+                "is_online": False,
+                "availability_status": "offline",
+                "status_code": status_code,
+                "status_message": "Kleinanzeigen-Inserat nicht mehr aktiv (Titel nicht gefunden)",
+                "last_checked_at": now_iso,
+                "live_search_url": live_fallback,
+                "description": "",
+                "details": {}
+            }
 
         # 2. Immowelt & ImmoScout DOM check
         is24_inactive = soup.find(id=re.compile(r"is24-expose-inactive|error-box|offmarket-banner"))

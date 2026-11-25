@@ -136,14 +136,20 @@
     // Toggle password visibility
     const passwordInput = document.getElementById('password');
     const toggleBtn = document.getElementById('toggle-password');
-    const eyeIcon = document.getElementById('eye-icon');
     let showPassword = false;
 
     toggleBtn.addEventListener('click', () => {
       showPassword = !showPassword;
       passwordInput.type = showPassword ? 'text' : 'password';
-      eyeIcon.setAttribute('data-lucide', showPassword ? 'eye-off' : 'eye');
-      if (window.lucide) lucide.createIcons();
+      const curIcon = toggleBtn.querySelector('[data-lucide], svg');
+      if (curIcon) {
+        const iconEl = document.createElement('i');
+        iconEl.id = 'eye-icon';
+        iconEl.setAttribute('data-lucide', showPassword ? 'eye-off' : 'eye');
+        iconEl.className = 'w-4 h-4';
+        curIcon.replaceWith(iconEl);
+        if (window.lucide) lucide.createIcons();
+      }
     });
 
     // Form submission
@@ -185,8 +191,9 @@
         if (res.ok && data.success) {
           btnText.textContent = 'Erfolgreich! Lade App...';
           const params = new URLSearchParams(window.location.search);
-          const from = params.get('from');
-          if (from) {
+          const from = (params.get('from') || '').trim();
+          const isSafeRelative = from.startsWith('/') && !from.startsWith('//') && !from.startsWith('/\\');
+          if (isSafeRelative) {
             window.location.href = from;
           } else if (window.location.pathname === '/login') {
             window.location.href = '/';

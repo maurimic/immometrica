@@ -15,11 +15,15 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from fastapi.testclient import TestClient
 from app.database import init_db, get_search_profiles, get_deal_alerts
+from app.auth import get_auth_config, hash_session_token
 from app.search_agent import quick_ai_deal_precheck, execute_search_profile
 from app.main import app
 
 init_db()
-client = TestClient(app, headers={"X-Test-Client": "immometrica-internal-test"})
+cfg = get_auth_config()
+token = hash_session_token(cfg["username"], cfg["password"], cfg["secret"])
+client = TestClient(app)
+client.cookies.set("immo_session", token)
 
 print("=== RUNNING SEARCH AGENT & DEAL ALERT TESTS ===")
 

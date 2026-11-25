@@ -90,7 +90,7 @@
                 <span>Push-Benachrichtigung an Telegram gesendet</span>
               </span>
               <template x-if="portalHealth && portalHealth.last_checked_at">
-                <span>Geprüft: <span x-text="portalHealth.last_checked_at"></span></span>
+                <span>Geprüft: <span x-text="formatDateTimeDE(portalHealth.last_checked_at)"></span></span>
               </template>
             </div>
           </div>

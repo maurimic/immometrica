@@ -6,6 +6,8 @@ Controlled via system settings (crawler_active, crawler_interval_minutes).
 
 import asyncio
 import logging
+import threading
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional
 
@@ -15,14 +17,38 @@ from app.datetime_utils import get_berlin_now
 logger = logging.getLogger("immometrica.scheduler")
 
 _scheduler_task: Optional[asyncio.Task] = None
+_crawler_lock = threading.RLock()
 _is_running_scan: bool = False
+_scan_depth: int = 0
+
+
+@contextmanager
+def crawler_scan_guard(blocking: bool = False):
+    """
+    Re-entrant thread-safe lock ensuring scheduled, manual, and MCP crawler runs never overlap
+    across different threads while allowing nested calls within the same thread.
+    Yields True if acquired, False if another thread already holds the crawler lock.
+    """
+    global _is_running_scan, _scan_depth
+    acquired = _crawler_lock.acquire(blocking=blocking)
+    if not acquired:
+        yield False
+        return
+    _scan_depth += 1
+    _is_running_scan = True
+    try:
+        yield True
+    finally:
+        _scan_depth = max(0, _scan_depth - 1)
+        if _scan_depth == 0:
+            _is_running_scan = False
+        _crawler_lock.release()
 
 
 async def _crawler_loop():
     """
     Periodic loop checking interval and triggering active search profiles.
     """
-    global _is_running_scan
     logger.info("ImmoMetrica background crawler scheduler loop started.")
 
     while True:
@@ -53,16 +79,15 @@ async def _crawler_loop():
                         should_run = True
 
                 if should_run:
-                    _is_running_scan = True
-                    logger.info(f"Triggering scheduled crawler scan (Interval: {interval_min} min)...")
-                    try:
-                        from app.search_agent import execute_all_active_profiles
-                        # Run blocking scraping & AI pre-check in separate thread
-                        await asyncio.to_thread(execute_all_active_profiles)
-                    except Exception as e:
-                        logger.error(f"Error during scheduled crawler run: {e}")
-                    finally:
-                        _is_running_scan = False
+                    with crawler_scan_guard(blocking=False) as acquired:
+                        if acquired:
+                            logger.info(f"Triggering scheduled crawler scan (Interval: {interval_min} min)...")
+                            try:
+                                from app.search_agent import execute_all_active_profiles
+                                # Run blocking scraping & AI pre-check in separate thread
+                                await asyncio.to_thread(execute_all_active_profiles)
+                            except Exception as e:
+                                logger.error(f"Error during scheduled crawler run: {e}")
 
             # Periodic Portal Health / Canary Check (every 6 hours or upon initial start)
             last_canary_str = get_system_setting("portal_health_last_check")

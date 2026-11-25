@@ -428,7 +428,8 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                 classified = data.get("app_demand_referral_cldp", {}).get("data", {}).get("classified", {})
             except Exception:
                 try:
-                    unescaped = m.group(1).encode('utf-8').decode('unicode-escape').encode('latin1').decode('utf-8')
+                    import codecs
+                    unescaped = codecs.decode(m.group(1), "unicode_escape")
                     data = json.loads(unescaped)
                     classified = data.get("app_demand_referral_cldp", {}).get("data", {}).get("classified", {})
                 except Exception:
@@ -527,7 +528,11 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                         except Exception:
                             pass
                     if price_val <= 0:
-                        price_str = price_obj.get("base", {}).get("main", {}).get("value", {}).get("main", {}).get("value", "")
+                        base_node = price_obj.get("base") if isinstance(price_obj, dict) else None
+                        main1 = base_node.get("main") if isinstance(base_node, dict) else None
+                        val1 = main1.get("value") if isinstance(main1, dict) else None
+                        main2 = val1.get("main") if isinstance(val1, dict) else None
+                        price_str = str(main2.get("value", "")) if isinstance(main2, dict) else ""
                         m_pr = re.search(r'([\d\.]+)', price_str)
                         if m_pr:
                             try:
@@ -682,11 +687,20 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
 
         # Fallback to HTML BeautifulSoup & Regex extraction if JSON state was not present (e.g. hydrated client DOM)
         soup = BeautifulSoup(html, "html.parser")
+        html_lower = html.lower()
+        if any(sig in html_lower for sig in ["datadome", "captcha", "access denied", "enable javascript", "cf-browser-verification"]):
+            return {
+                "success": False,
+                "status_code": 403,
+                "error": "Immowelt Bot-Schutz / JS-Challenge erkannt.",
+                "portal": "Immowelt"
+            }
+
         h1 = soup.find("h1")
         title_tag = soup.find("title")
         raw_title_text = title_tag.text.strip() if title_tag else (h1.text.strip() if h1 else f"Immowelt Exposé #{expose_id[:8]}")
         desc_elem = soup.find(class_=re.compile(r"description|section-content|text-content"))
-        desc = desc_elem.get_text("\n", strip=True) if desc_elem else raw_title_text
+        desc = desc_elem.get_text("\n", strip=True) if desc_elem else ""
 
         # Extract Price from Title, Meta tags, and Text
         fb_price = 0.0
@@ -754,11 +768,19 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
             if img_url not in fb_images:
                 fb_images.append(img_url)
 
+        if fb_price <= 0 and fb_sqm <= 0:
+            return {
+                "success": False,
+                "status_code": 404,
+                "error": "Immowelt Exposé enthält weder Kaufpreis noch Wohnfläche (offline oder geschützt).",
+                "portal": "Immowelt"
+            }
+
         return {
             "success": True,
             "expose_id": expose_id,
             "title": raw_title_text,
-            "description": desc,
+            "description": desc or raw_title_text,
             "price": fb_price,
             "living_space": fb_sqm,
             "rooms": fb_rooms,
@@ -772,8 +794,8 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
     except Exception as e:
         logger.warning(f"Error fetching Immowelt expose {clean_url}: {e}")
         return {
-            "success": True,
-            "title": f"Immowelt Exposé #{expose_id[:8]}",
-            "description": f"Exposé auf Immowelt: {clean_url}",
+            "success": False,
+            "status_code": 500,
+            "error": f"Fehler beim Laden des Immowelt-Exposés: {e}",
             "portal": "Immowelt"
         }

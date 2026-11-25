@@ -133,18 +133,28 @@ def search_immoscout_deals(
                 rooms = 2.0
                 for attr in it.get("attributes", []):
                     val = str(attr.get("value", "")).strip()
-                    if "€" in val:
-                        clean_pr = re.sub(r"[^\d]", "", val)
+                    lbl = str(attr.get("label", "")).lower()
+                    if "€" in val and price <= 0 and "m²" not in val and "hausgeld" not in lbl and "miete" not in lbl:
+                        # Strip optional decimal cents (",00") before removing thousands separators
+                        no_dec = re.sub(r",\d{1,2}\b", "", val)
+                        clean_pr = re.sub(r"[^\d]", "", no_dec)
                         if clean_pr:
                             price = float(clean_pr)
-                    elif "m²" in val:
-                        clean_sqm = re.sub(r"[^\d,\.]", "", val).replace(",", ".")
-                        if clean_sqm:
+                    elif "m²" in val and sqm <= 0 and "grundstück" not in lbl and "nutzfläche" not in lbl:
+                        m_sq = re.search(r"([\d,\.]+)", val)
+                        if m_sq:
+                            raw_sq = m_sq.group(1)
                             try:
-                                sqm = float(clean_sqm)
+                                if "," in raw_sq:
+                                    norm_sq = raw_sq.replace(".", "").replace(",", ".")
+                                elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
+                                    norm_sq = raw_sq.replace(".", "")
+                                else:
+                                    norm_sq = raw_sq
+                                sqm = float(norm_sq)
                             except ValueError:
                                 pass
-                    elif "Zi" in val:
+                    elif "Zi" in val and rooms == 2.0:
                         clean_rm = re.sub(r"[^\d,\.]", "", val).replace(",", ".")
                         if clean_rm:
                             try:
@@ -315,7 +325,7 @@ def fetch_immoscout_expose(url_or_id: str) -> Dict[str, Any]:
     try:
         resp = requests.get(url, headers=MOBILE_HEADERS, timeout=7.0)
         if resp.status_code != 200:
-            return {"success": False, "error": f"ImmoScout API HTTP {resp.status_code}"}
+            return {"success": False, "status_code": resp.status_code, "error": f"ImmoScout API HTTP {resp.status_code}"}
 
         data = resp.json()
         sections = data.get("sections", [])
@@ -356,21 +366,22 @@ def fetch_immoscout_expose(url_or_id: str) -> Dict[str, Any]:
                     if lbl and val:
                         details[lbl] = val
                         lbl_lower = lbl.lower()
-                        if "kaufpreis" in lbl_lower or "preis" in lbl_lower:
-                            m = re.search(r"([\d\.]+)", val)
+                        if price <= 0 and ("kaufpreis" in lbl_lower or lbl_lower == "preis") and "m²" not in lbl_lower and "stellplatz" not in lbl_lower:
+                            no_dec = re.sub(r",\d{1,2}\b", "", val)
+                            m = re.search(r"([\d\.]+)", no_dec)
                             if m:
                                 try:
                                     price = float(m.group(1).replace(".", ""))
                                 except ValueError:
                                     pass
-                        elif "wohnfläche" in lbl_lower or "fläche" in lbl_lower:
+                        elif living_space <= 0 and ("wohnfläche" in lbl_lower or lbl_lower == "fläche") and "grundstück" not in lbl_lower and "nutz" not in lbl_lower:
                             m = re.search(r"([\d,\.]+)", val)
                             if m:
                                 try:
                                     living_space = float(m.group(1).replace(".", "").replace(",", "."))
                                 except ValueError:
                                     pass
-                        elif "zimmer" in lbl_lower:
+                        elif rooms <= 0 and lbl_lower in ("zimmer", "zimmeranzahl"):
                             m = re.search(r"([\d,\.]+)", val)
                             if m:
                                 try:
@@ -461,4 +472,4 @@ def fetch_immoscout_expose(url_or_id: str) -> Dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Error fetching ImmoScout expose #{expose_id}: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "status_code": 500, "error": str(e)}

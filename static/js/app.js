@@ -36,6 +36,11 @@ document.addEventListener('alpine:init', () => {
     showFullDesc: false,
     theme: localStorage.getItem('immo_theme') || 'system',
     _isPopStateNavigation: false,
+    _suppressFilterWatch: false,
+    _fetchPropsAbort: null,
+    _detailAbort: null,
+    _detailReqSeq: 0,
+    _calcAbort: null,
 
     // Kaufangebot / Letter of Intent (LOI) & Unterlagen-Anfrage State
 
@@ -109,13 +114,22 @@ document.addEventListener('alpine:init', () => {
     async init() {
       window.immoAppInstance = this;
       window.addEventListener('keydown', (e) => {
-        if (!this.lightboxOpen) return;
+        if (this.lightboxOpen) {
+          if (e.key === 'Escape') {
+            this.closePhotoLightbox();
+          } else if (e.key === 'ArrowRight') {
+            this.nextLightboxPhoto();
+          } else if (e.key === 'ArrowLeft') {
+            this.prevLightboxPhoto();
+          }
+          return;
+        }
         if (e.key === 'Escape') {
-          this.closePhotoLightbox();
-        } else if (e.key === 'ArrowRight') {
-          this.nextLightboxPhoto();
-        } else if (e.key === 'ArrowLeft') {
-          this.prevLightboxPhoto();
+          if (this.showApiKeyModal) this.showApiKeyModal = false;
+          else if (this.urlImportModalOpen && !this.isImportingUrl) this.urlImportModalOpen = false;
+          else if (this.offerModalOpen) this.offerModalOpen = false;
+          else if (this.profileModalOpen) this.profileModalOpen = false;
+          else if (this.detailModalOpen) this.closeDetailModal();
         }
       });
       this.applyTheme(this.theme);
@@ -148,9 +162,22 @@ document.addEventListener('alpine:init', () => {
       await this.fetchMcpStatus();
       await this.fetchPortalHealth();
       setInterval(() => this.fetchPortalHealth(), 120000);
-      
+
+      if (this.activeTab === 'map') {
+        this.$nextTick(() => {
+          if (typeof this.initMap === 'function') this.initMap();
+        });
+      }
+
+      // Sync default sort direction when user switches sort_by field
+      this.$watch('filters.sort_by', (val) => {
+        const ascSorts = ['purchase_price', 'price_per_sqm', 'market_deviation'];
+        this.filters.sort_order = ascSorts.includes(val) ? 'asc' : 'desc';
+      });
+
       // Watch filters
       this.$watch('filters', () => {
+        if (this._suppressFilterWatch) return;
         this.fetchProperties();
       }, { deep: true });
 
@@ -201,7 +228,54 @@ document.addEventListener('alpine:init', () => {
       });
     },
 
+    handleAuthResponse(res) {
+      if (res && res.status === 401) {
+        const target = encodeURIComponent(window.location.pathname + window.location.search);
+        window.location.href = `/login?from=${target}`;
+        throw new Error('Sitzung abgelaufen. Weiterleitung zum Login...');
+      }
+      return res;
+    },
+
+    escapeHtml(val) {
+      if (val === null || val === undefined) return '';
+      return String(val)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    },
+
+    safeHttpUrl(url) {
+      const s = String(url || '').trim();
+      if (!s) return '#';
+      if (/^https?:\/\//i.test(s) || (s.startsWith('/') && !s.startsWith('//'))) {
+        return s.replace(/"/g, '%22');
+      }
+      return '#';
+    },
+
+    safeCopyText(text, successMsg = 'In die Zwischenablage kopiert!') {
+      if (!text) return false;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          if (successMsg) this.showToast(successMsg, 'success');
+        }).catch(() => {
+          window.prompt('Bitte manuell kopieren:', text);
+        });
+        return true;
+      }
+      window.prompt('Bitte manuell kopieren:', text);
+      return true;
+    },
+
     async fetchProperties() {
+      if (this._fetchPropsAbort) {
+        try { this._fetchPropsAbort.abort(); } catch (e) {}
+      }
+      const controller = new AbortController();
+      this._fetchPropsAbort = controller;
       this.loading = true;
       try {
         const params = new URLSearchParams();
@@ -222,21 +296,27 @@ document.addEventListener('alpine:init', () => {
         if (this.filters.foreclosure_only) params.append('foreclosure_only', 'true');
         if (this.filters.private_only) params.append('private_only', 'true');
         if (this.filters.online_only) params.append('online_only', 'true');
+        const ascSorts = ['purchase_price', 'price_per_sqm', 'market_deviation'];
+        const effectiveOrder = ascSorts.includes(this.filters.sort_by) ? 'asc' : (this.filters.sort_order || 'desc');
         params.append('sort_by', this.filters.sort_by);
-        params.append('sort_order', this.filters.sort_order);
+        params.append('sort_order', effectiveOrder);
 
-        const res = await fetch(`/api/properties?${params.toString()}`);
+        const res = this.handleAuthResponse(await fetch(`/api/properties?${params.toString()}`, { signal: controller.signal }));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.properties = data.properties || [];
 
         if (this.activeTab === 'map' && this.mapInstance) {
           this.updateMapMarkers();
         }
-        setTimeout(() => lucide.createIcons(), 50);
+        setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
       } catch (err) {
+        if (err && err.name === 'AbortError') return;
         console.error('Failed to load properties:', err);
       } finally {
-        this.loading = false;
+        if (this._fetchPropsAbort === controller) {
+          this.loading = false;
+        }
       }
     },
 
@@ -316,50 +396,6 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    openUrlImportModal() {
-      this.urlImportModalOpen = true;
-      this.importUrlInput = '';
-      this.importError = '';
-      this.$nextTick(() => {
-        if (window.lucide) window.lucide.createIcons();
-      });
-    },
-
-    async submitUrlImport() {
-      const url = (this.importUrlInput || '').trim();
-      if (!url) return;
-      this.isImportingUrl = true;
-      this.importError = '';
-      try {
-        const resp = await fetch('/api/properties/import-url', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
-        });
-        const data = await resp.json();
-        if (resp.ok) {
-          this.urlImportModalOpen = false;
-          this.importUrlInput = '';
-          this.showToast(data.message || 'Inserat erfolgreich importiert!', 'success');
-          await this.fetchProperties();
-          if (data.property_id) {
-            const importedDeal = this.properties.find(p => p.id === data.property_id);
-            if (importedDeal) {
-              this.openDetailModal(importedDeal, 'audit');
-            }
-          }
-        } else {
-          this.importError = data.detail || 'Fehler beim Importieren des Inserats.';
-          this.showToast(this.importError, 'error');
-        }
-      } catch (err) {
-        this.importError = 'Netzwerkfehler: ' + err.message;
-        this.showToast(this.importError, 'error');
-      } finally {
-        this.isImportingUrl = false;
-      }
-    },
-
     async triggerLiveScrape(targetCity = null) {
       const cityToScrape = (targetCity || this.scrapeCity || this.filters.q || 'Dortmund').trim();
       if (!cityToScrape) {
@@ -396,19 +432,23 @@ document.addEventListener('alpine:init', () => {
       this.scrapeStatusMsg = `Durchsuche Live-Portale (Kleinanzeigen, Immowelt, ImmoScout24) nach passenden Angeboten in ${cityToScrape}${yieldInfo}...`;
 
       try {
-        const res = await fetch('/api/properties/live-scrape', {
+        const res = this.handleAuthResponse(await fetch('/api/properties/live-scrape', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        });
-        const data = await res.json();
+        }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.detail || `Serverfehler (${res.status})`);
+        }
         if (data.status === 'success') {
           this.scrapeStatusMsg = data.message;
           this.showScrapeModal = false;
+          this._suppressFilterWatch = true;
           this.filters.q = cityToScrape;
           this.filters.city = '';
           this.filters.state = '';
-          if (this.pagination) this.pagination.currentPage = 1;
+          this._suppressFilterWatch = false;
           await this.fetchProperties();
           await this.fetchBoard();
           if (this.activeTab === 'map' && this.mapInstance) {
@@ -452,7 +492,8 @@ document.addEventListener('alpine:init', () => {
       return 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
     },
 
-    resetFilters() {
+    resetFilters(skipFetch = false) {
+      this._suppressFilterWatch = true;
       this.filters = {
         q: '',
         city: '',
@@ -470,7 +511,12 @@ document.addEventListener('alpine:init', () => {
         sort_by: 'gross_yield',
         sort_order: 'desc'
       };
-      this.fetchProperties();
+      this.$nextTick(() => {
+        this._suppressFilterWatch = false;
+      });
+      if (!skipFetch) {
+        this.fetchProperties();
+      }
     },
 
     applyTheme(mode) {
@@ -504,14 +550,18 @@ document.addEventListener('alpine:init', () => {
       } else {
         this.applyTheme('system');
       }
+      this.$nextTick(() => {
+        if (window.lucide) window.lucide.createIcons();
+      });
     },
 
     async deleteProperty(propertyId, event = null) {
       if (event) event.stopPropagation();
       if (!confirm(`Möchtest du Deal #${propertyId} wirklich aus der Datenbank löschen?`)) return;
       try {
-        const res = await fetch(`/api/properties/${propertyId}`, { method: 'DELETE' });
-        const data = await res.json();
+        const res = this.handleAuthResponse(await fetch(`/api/properties/${propertyId}`, { method: 'DELETE' }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Löschen fehlgeschlagen');
         if (data.status === 'success') {
           if (this.selectedProperty && this.selectedProperty.id === propertyId) {
             this.detailModalOpen = false;
@@ -521,7 +571,7 @@ document.addEventListener('alpine:init', () => {
           await this.fetchBoard();
         }
       } catch (err) {
-        alert('Fehler beim Löschen: ' + err.message);
+        this.showToast('Fehler beim Löschen: ' + err.message, 'error');
       }
     },
 
@@ -533,21 +583,26 @@ document.addEventListener('alpine:init', () => {
       }
       if (!confirm(`Möchtest du wirklich alle ${offlineCount} deaktivierten/offline Deals auf einmal aus der Datenbank löschen?`)) return;
       try {
-        const res = await fetch('/api/properties/delete-offline', { method: 'POST' });
-        const data = await res.json();
-        alert(data.message);
+        const res = this.handleAuthResponse(await fetch('/api/properties/delete-offline', { method: 'POST' }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || 'Bereinigung fehlgeschlagen');
+        this.showToast(data.message || 'Deaktivierte Deals gelöscht.', 'success');
         await this.fetchProperties();
         await this.fetchBoard();
       } catch (err) {
-        alert('Fehler beim Bereinigen: ' + err.message);
+        this.showToast('Fehler beim Bereinigen: ' + err.message, 'error');
       }
     },
 
     async fetchBoard() {
       try {
-        const res = await fetch('/api/pipeline/board');
-        this.boardStages = await res.json();
-        setTimeout(() => lucide.createIcons(), 50);
+        const res = this.handleAuthResponse(await fetch('/api/pipeline/board'));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          this.boardStages = data;
+        }
+        setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
       } catch (err) {
         console.error('Failed to load dealboard:', err);
       }
@@ -557,8 +612,9 @@ document.addEventListener('alpine:init', () => {
     async checkPropertyAvailability(property) {
       property.checking = true;
       try {
-        const res = await fetch(`/api/properties/${property.id}/check-availability`, { method: 'POST' });
-        const data = await res.json();
+        const res = this.handleAuthResponse(await fetch(`/api/properties/${property.id}/check-availability`, { method: 'POST' }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
         property.is_online = data.is_online ? 1 : 0;
         property.availability_status = data.availability_status;
         property.status_message = data.status_message;
@@ -569,9 +625,10 @@ document.addEventListener('alpine:init', () => {
         if (data.address) property.address = data.address;
       } catch (err) {
         console.error('Error verifying property status:', err);
+        this.showToast('Verfügbarkeitsprüfung fehlgeschlagen: ' + err.message, 'error');
       } finally {
         property.checking = false;
-        setTimeout(() => lucide.createIcons(), 50);
+        setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
       }
     },
 
@@ -579,12 +636,14 @@ document.addEventListener('alpine:init', () => {
     async checkAllAvailability() {
       this.checkingAll = true;
       try {
-        const res = await fetch('/api/properties/check-all-availability', { method: 'POST' });
-        const result = await res.json();
+        const res = this.handleAuthResponse(await fetch('/api/properties/check-all-availability', { method: 'POST' }));
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
         await this.fetchProperties();
-        alert(`Verfügbarkeits-Prüfung abgeschlossen:\n${result.online_count} von ${result.total_checked} Inseraten sind live erreichbar.\n${result.offline_count} Inserate wurden auf den Portalen deaktiviert oder archiviert.`);
+        this.showToast(`Live-Check: ${result.online_count ?? 0} von ${result.total_checked ?? 0} online (${result.offline_count ?? 0} offline).`, 'info');
       } catch (err) {
         console.error('Error batch-checking availability:', err);
+        this.showToast('Fehler beim Live-Check: ' + err.message, 'error');
       } finally {
         this.checkingAll = false;
       }
@@ -592,10 +651,11 @@ document.addEventListener('alpine:init', () => {
 
     async toggleFavorite(property) {
       try {
-        const res = await fetch(`/api/properties/${property.id}/toggle-favorite`, { method: 'POST' });
-        const data = await res.json();
+        const res = this.handleAuthResponse(await fetch(`/api/properties/${property.id}/toggle-favorite`, { method: 'POST' }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.is_favorite === undefined) throw new Error(data.detail || 'Favorit konnte nicht geändert werden');
         property.is_favorite = data.is_favorite;
-        setTimeout(() => lucide.createIcons(), 50);
+        setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
       } catch (err) {
         console.error('Error toggling favorite:', err);
       }
@@ -603,14 +663,25 @@ document.addEventListener('alpine:init', () => {
 
     async openDetailModal(property, view = 'audit', updateHistory = true) {
       if (!property) return;
+      const propId = Number(property.id || property);
+      if (!Number.isFinite(propId) || propId <= 0) return;
+
+      if (this._detailAbort) {
+        try { this._detailAbort.abort(); } catch (e) {}
+      }
+      const controller = new AbortController();
+      this._detailAbort = controller;
+      const reqSeq = ++this._detailReqSeq;
+
       try {
-        const propId = property.id || property;
-        const res = await fetch(`/api/properties/${propId}`);
+        const res = this.handleAuthResponse(await fetch(`/api/properties/${propId}`, { signal: controller.signal }));
         if (!res.ok) {
           console.error(`Deal #${propId} konnte nicht geladen werden`);
           return;
         }
-        this.selectedProperty = await res.json();
+        const fetchedProp = await res.json();
+        if (reqSeq !== this._detailReqSeq) return;
+        this.selectedProperty = fetchedProp;
         if (this.selectedProperty.image_analysis && Array.isArray(this.selectedProperty.image_analysis.analyzed_photos)) {
           this.selectedProperty.image_analysis.analyzed_photos.forEach(p => {
             p.tag = this.refinePhotoTag(p.tag, p.description, p.findings, p.is_blueprint);
@@ -639,6 +710,7 @@ document.addEventListener('alpine:init', () => {
           this.selectedProperty.image_analysis = this.selectedProperty.ai_analysis.image_analysis;
         }
       } catch (err) {
+        if (err && err.name === 'AbortError') return;
         console.error('Error fetching property details:', err);
       }
     },
@@ -682,9 +754,17 @@ document.addEventListener('alpine:init', () => {
 
     syncUrl(push = false) {
       try {
-        const url = new URL(window.location.origin + window.location.pathname);
+        let basePath = window.location.pathname || '/';
+        if (!this.detailModalOpen && /^\/(?:deal|property)\//i.test(basePath)) {
+          basePath = '/';
+        }
+        const url = new URL(window.location.origin + basePath);
         if (this.detailModalOpen && this.selectedProperty) {
-          url.searchParams.set('deal', this.selectedProperty.id);
+          if (/^\/(?:deal|property)\//i.test(url.pathname)) {
+            url.pathname = `/deal/${this.selectedProperty.id}`;
+          } else {
+            url.searchParams.set('deal', this.selectedProperty.id);
+          }
           if (this.modalActiveSection && this.modalActiveSection !== 'overview') {
             url.searchParams.set('view', this.modalActiveSection);
           }
@@ -737,6 +817,7 @@ document.addEventListener('alpine:init', () => {
         const dealId = params.get('deal') || params.get('id') || dealFromPath;
         const view = params.get('view') || 'audit';
         const tab = params.get('tab');
+        this.isModalFullscreen = (params.get('fullscreen') === '1' || params.get('fullscreen') === 'true');
 
         if (tab && ['feed', 'board', 'calculator', 'map', 'alerts', 'info'].includes(tab)) {
           this.activeTab = tab;
@@ -744,6 +825,7 @@ document.addEventListener('alpine:init', () => {
 
         if (dealId) {
           const numId = Number(dealId);
+          if (!Number.isFinite(numId) || numId <= 0) return;
           if (!this.selectedProperty || this.selectedProperty.id !== numId) {
             this.openDealById(numId, view, false);
           } else {
@@ -770,6 +852,7 @@ document.addEventListener('alpine:init', () => {
 
     async openDealById(dealId, view = 'audit', updateHistory = false) {
       const numId = Number(dealId);
+      if (!Number.isFinite(numId) || numId <= 0) return;
       const existing = this.properties.find(p => p.id === numId);
       if (existing) {
         await this.openDetailModal(existing, view, updateHistory);
@@ -828,11 +911,12 @@ document.addEventListener('alpine:init', () => {
         if (this.geminiApiKey && this.geminiApiKey.trim() && !this.geminiApiKey.includes('...') && !this.geminiApiKey.includes('***')) {
           headers['X-Gemini-API-Key'] = this.geminiApiKey.trim();
         }
-        const res = await fetch(`/api/properties/${property.id}/ai-audit?force_refresh=${forceRefresh}`, {
+        const res = this.handleAuthResponse(await fetch(`/api/properties/${property.id}/ai-audit?force_refresh=${forceRefresh}`, {
           method: 'POST',
           headers
-        });
-        const data = await res.json();
+        }));
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.detail || `KI-Audit fehlgeschlagen (${res.status})`);
         if (data.ai_audit) {
           property.ai_analysis = data.ai_audit;
           if (data.image_analysis) {
@@ -851,9 +935,11 @@ document.addEventListener('alpine:init', () => {
             }
             // Also refresh property description if newly extracted
             if (data.ai_audit.description_length > 0 && !this.selectedProperty.description) {
-              const fullRes = await fetch(`/api/properties/${property.id}`);
-              const fullData = await fullRes.json();
-              this.selectedProperty.description = fullData.description;
+              const fullRes = this.handleAuthResponse(await fetch(`/api/properties/${property.id}`));
+              if (fullRes.ok) {
+                const fullData = await fullRes.json();
+                this.selectedProperty.description = fullData.description;
+              }
             }
           }
           const idx = this.properties.findIndex(p => p.id === property.id);
@@ -1014,34 +1100,40 @@ document.addEventListener('alpine:init', () => {
     },
 
     copyDescription(text) {
-      if (!text) return;
-      navigator.clipboard.writeText(text);
-      alert('Vollständige Beschreibung in die Zwischenablage kopiert!');
+      this.safeCopyText(text, 'Vollständige Beschreibung in die Zwischenablage kopiert!');
     },
 
     // 1-Klick Preset-Filter für gezielte Deal-Suche
     applyPreset(type) {
-      this.resetFilters();
+      this.resetFilters(true);
+      this._suppressFilterWatch = true;
       if (type === 'top_yield') {
         this.filters.min_yield = '6.0';
         this.filters.sort_by = 'gross_yield';
+        this.filters.sort_order = 'desc';
       } else if (type === 'positive_cashflow') {
         this.filters.positive_cashflow = true;
         this.filters.sort_by = 'monthly_cashflow';
+        this.filters.sort_order = 'desc';
       } else if (type === 'private') {
         this.filters.private_only = true;
       } else if (type === 'undervalued') {
         this.filters.undervalued_only = true;
         this.filters.sort_by = 'market_deviation';
+        this.filters.sort_order = 'asc';
       } else if (type === 'online') {
         this.filters.online_only = true;
       }
+      this.$nextTick(() => {
+        this._suppressFilterWatch = false;
+      });
       this.fetchProperties();
     },
 
     // Kaufangebot / Letter of Intent (LOI) & Vorab-Unterlagen Workflow (2 Schritte)
     async changePropertyStage(propertyId, stageId) {
-      await this.moveDeal(propertyId, stageId);
+      const ok = await this.moveDeal(propertyId, stageId);
+      if (!ok) return;
       if (this.selectedProperty && this.selectedProperty.id === propertyId) {
         this.selectedProperty.pipeline_stage = stageId;
       }
@@ -1052,14 +1144,21 @@ document.addEventListener('alpine:init', () => {
     // Automatically transfer property data to calculator without prompting for Bundesland!
     async moveDeal(propertyId, targetStage) {
       try {
-        await fetch('/api/pipeline/move', {
+        const res = this.handleAuthResponse(await fetch('/api/pipeline/move', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ property_id: propertyId, target_stage: targetStage })
-        });
+        }));
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || 'Phase konnte nicht geändert werden');
+        }
         await this.fetchBoard();
+        return true;
       } catch (err) {
         console.error('Error moving deal:', err);
+        this.showToast('Fehler beim Verschieben: ' + err.message, 'error');
+        return false;
       }
     },
 
@@ -1097,7 +1196,7 @@ document.addEventListener('alpine:init', () => {
 
     async fetchMcpStatus() {
       try {
-        const res = await fetch('/mcp/status');
+        const res = this.handleAuthResponse(await fetch('/mcp/status'));
         if (res.ok) {
           const data = await res.json();
           this.mcpToken = data.token || '';
@@ -1106,7 +1205,7 @@ document.addEventListener('alpine:init', () => {
           const snippetObj = data.config_json || data.snippet || {
             mcpServers: {
               immometrica: {
-                url: 'http://127.0.0.1:8000/mcp/call',
+                url: `${window.location.origin}/mcp/call`,
                 headers: {
                   Authorization: `Bearer ${this.mcpToken}`
                 }
@@ -1124,7 +1223,7 @@ document.addEventListener('alpine:init', () => {
       if (!confirm('Möchtest Du wirklich einen neuen MCP-API-Token generieren? Der alte Token wird dadurch ungültig.')) return;
       this.mcpRegenerating = true;
       try {
-        const res = await fetch('/mcp/regenerate-token', { method: 'POST' });
+        const res = this.handleAuthResponse(await fetch('/mcp/regenerate-token', { method: 'POST' }));
         if (res.ok) {
           const data = await res.json();
           this.mcpToken = data.token || '';
@@ -1133,7 +1232,7 @@ document.addEventListener('alpine:init', () => {
           const snippetObj = data.config_json || data.snippet || {
             mcpServers: {
               immometrica: {
-                url: 'http://127.0.0.1:8000/mcp/call',
+                url: `${window.location.origin}/mcp/call`,
                 headers: {
                   Authorization: `Bearer ${this.mcpToken}`
                 }
@@ -1150,7 +1249,7 @@ document.addEventListener('alpine:init', () => {
         this.showToast('Fehler: ' + err.message, 'error');
       } finally {
         this.mcpRegenerating = false;
-        setTimeout(() => lucide.createIcons(), 50);
+        setTimeout(() => { if (window.lucide) lucide.createIcons(); }, 50);
       }
     },
 
@@ -1158,7 +1257,7 @@ document.addEventListener('alpine:init', () => {
       const snippet = this.mcpSnippet || JSON.stringify({
         "mcpServers": {
           "immometrica": {
-            "url": "http://127.0.0.1:8000/mcp/call",
+            "url": `${window.location.origin}/mcp/call`,
             "headers": {
               "Authorization": `Bearer ${this.mcpToken}`
             }
@@ -1166,9 +1265,21 @@ document.addEventListener('alpine:init', () => {
         }
       }, null, 2);
 
-      navigator.clipboard.writeText(snippet);
+      this.safeCopyText(snippet, 'MCP-Konfiguration in die Zwischenablage kopiert!');
       this.mcpCopied = true;
       setTimeout(() => { this.mcpCopied = false; }, 2500);
+    },
+
+    formatPricePerSqm(priceOrPpsqm, livingSpace = null) {
+      if (livingSpace !== null && livingSpace !== undefined) {
+        const p = Number(priceOrPpsqm);
+        const s = Number(livingSpace);
+        if (!Number.isFinite(p) || !Number.isFinite(s) || s <= 0) return '-';
+        return `${Math.round(p / s).toLocaleString('de-DE')} €/m²`;
+      }
+      const val = Number(priceOrPpsqm);
+      if (!Number.isFinite(val) || val <= 0) return '-';
+      return `${Math.round(val).toLocaleString('de-DE')} €/m²`;
     },
 
     exportCsvUrl() {

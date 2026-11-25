@@ -616,6 +616,8 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
                     if choices:
                         text_content = choices[0].get("message", {}).get("content", "")
                         parsed = _clean_and_parse_llm_json(text_content)
+                        if not isinstance(parsed, dict):
+                            raise ValueError("Unerwartetes JSON-Format von OneProvider Vision")
                         parsed["ai_provider"] = f"OneProvider {model} Vision (Live API-Key)"
                         parsed["error"] = False
                         usage = res_data.get("usage") or {}
@@ -629,11 +631,12 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
                         }
                         return parsed
                 else:
-                    logger.warning(f"OneProvider Vision API status {resp.status_code} ({model}): {resp.text[:200]}")
-                    if resp.status_code in [400, 403]:
+                    from app.network_security import sanitize_error_message
+                    logger.warning(f"OneProvider Vision API status {resp.status_code} ({model}): {sanitize_error_message(resp.text[:200])}")
+                    if resp.status_code in [400, 401, 403]:
                         try:
                             err_data = resp.json()
-                            err_msg = err_data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                            err_msg = sanitize_error_message(err_data.get("error", {}).get("message", f"HTTP {resp.status_code}"))
                             return {"error": True, "error_message": f"OneProvider API-Fehler ({resp.status_code}): {err_msg}"}
                         except Exception:
                             return {"error": True, "error_message": f"OneProvider API-Fehler ({resp.status_code}): Ungültiger API-Key oder Berechtigungsfehler"}
@@ -642,8 +645,10 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
                 logger.warning(f"Timeout calling OneProvider Vision with {model} (90s limit reached)")
                 last_err = f"API Read-Timeout bei {model} (> 90s)"
             except Exception as e:
-                logger.warning(f"Error calling OneProvider Vision with {model}: {e}")
-                last_err = str(e)
+                from app.network_security import sanitize_error_message
+                safe_err = sanitize_error_message(e)
+                logger.warning(f"Error calling OneProvider Vision with {model}: {safe_err}")
+                last_err = safe_err
 
         return {"error": True, "error_message": f"KI-Bildanalyse fehlgeschlagen: {last_err}"}
 
@@ -664,16 +669,24 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
     }
 
     # Use supported and cost-efficient Gemini models (Lite models primary, 3.8-flash fallback)
+    from app.network_security import sanitize_error_message
     models = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.8-flash"]
     last_err = "Timeout / Verbindungsfehler"
     for model in models:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
-            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=90.0)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            resp = requests.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
+                timeout=90.0,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 text_content = data["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(text_content)
+                parsed = _clean_and_parse_llm_json(text_content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("Unerwartetes JSON-Format von Gemini Vision")
                 parsed["ai_provider"] = f"Google {model} Vision (Live API-Key)"
                 parsed["error"] = False
                 usage = data.get("usageMetadata") or {}
@@ -687,11 +700,11 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
                 }
                 return parsed
             else:
-                logger.warning(f"Gemini Vision API status {resp.status_code} ({model}): {resp.text[:200]}")
-                if resp.status_code in [400, 403]:
+                logger.warning(f"Gemini Vision API status {resp.status_code} ({model}): {sanitize_error_message(resp.text[:200])}")
+                if resp.status_code in [400, 401, 403]:
                     try:
                         err_data = resp.json()
-                        err_msg = err_data.get("error", {}).get("message", f"HTTP {resp.status_code}")
+                        err_msg = sanitize_error_message(err_data.get("error", {}).get("message", f"HTTP {resp.status_code}"))
                         return {"error": True, "error_message": f"Gemini API-Fehler ({resp.status_code}): {err_msg}"}
                     except Exception:
                         return {"error": True, "error_message": f"Gemini API-Fehler ({resp.status_code}): Ungültiger API-Key oder fehlende Berechtigung"}
@@ -700,8 +713,9 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
             logger.warning(f"Timeout calling Gemini Vision with {model} (90s limit reached)")
             last_err = f"API Read-Timeout bei {model} (> 90s)"
         except Exception as e:
-            logger.warning(f"Error calling Gemini Vision with {model}: {e}")
-            last_err = str(e)
+            safe_err = sanitize_error_message(e)
+            logger.warning(f"Error calling Gemini Vision with {model}: {safe_err}")
+            last_err = safe_err
 
     return {"error": True, "error_message": f"KI-Bildanalyse fehlgeschlagen: {last_err}"}
 
@@ -844,15 +858,23 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
         "generationConfig": {"response_mime_type": "application/json", "temperature": 0.1}
     }
 
+    from app.network_security import sanitize_error_message
     models = ["gemini-flash-lite-latest", "gemini-3.5-flash-lite", "gemini-3.8-flash"]
     for model in models:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={gemini_key}"
-            resp = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=45.0)
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            resp = requests.post(
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json", "x-goog-api-key": gemini_key},
+                timeout=45.0,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 txt = data["candidates"][0]["content"]["parts"][0]["text"]
-                parsed = json.loads(txt)
+                parsed = _clean_and_parse_llm_json(txt)
+                if not isinstance(parsed, dict):
+                    continue
                 usage = data.get("usageMetadata") or {}
                 p_tok = int(usage.get("promptTokenCount") or 0)
                 c_tok = int(usage.get("candidatesTokenCount") or 0)
@@ -883,7 +905,7 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
                     aligned_pcs.append(c_item)
                 return ClassificationList(aligned_pcs, token_usage=tok_dict)
         except Exception as e:
-            logger.warning(f"Error classifying extra photos with {model}: {e}")
+            logger.warning(f"Error classifying extra photos with {model}: {sanitize_error_message(e)}")
     return ClassificationList([])
 
 def call_gemini_vision_if_available(
@@ -1099,7 +1121,9 @@ def analyze_property_images(
         b64_tuple = None
         cv_score = 7.0
         try:
-            r = requests.get(url, headers=BROWSER_HEADERS, timeout=6.0)
+            from app.network_security import validate_external_url
+            safe_url = validate_external_url(url)
+            r = requests.get(safe_url, headers=BROWSER_HEADERS, timeout=6.0)
             if r.status_code == 200 and len(r.content) > 1000:
                 cv_res = classify_photo(r.content)
                 photo_info["width"] = cv_res["width"]
@@ -1136,7 +1160,8 @@ def analyze_property_images(
     analyzed_photos = [r[1] for r in raw_results]
     pil_scores = [r[2] for r in raw_results]
     downloaded_b64_map = {r[0] + 1: r[3] for r in raw_results if r[3] is not None}
-    primary_b64 = [downloaded_b64_map[i] for i in range(1, min(len(analyzed_photos), 8) + 1) if i in downloaded_b64_map]
+    primary_indices = [i for i in range(1, min(len(analyzed_photos), 8) + 1) if i in downloaded_b64_map]
+    primary_b64 = [downloaded_b64_map[i] for i in primary_indices]
 
     # Check if ad contains real interior photos or solely architectural plans
     blueprints_count = sum(1 for p in analyzed_photos if p.get("is_blueprint", False))
@@ -1160,7 +1185,19 @@ def analyze_property_images(
             total_prompt_tokens += int(tu.get("prompt_tokens") or 0)
             total_candidates_tokens += int(tu.get("candidates_tokens") or 0)
             total_tokens += int(tu.get("total_tokens") or 0)
-            all_classifications = list(gemini_res.get("photo_classifications", []))
+            primary_classifications = list(gemini_res.get("photo_classifications", []))
+            all_classifications = []
+            for pos, pc in enumerate(primary_classifications):
+                if not isinstance(pc, dict):
+                    continue
+                pc_copy = dict(pc)
+                try:
+                    sent_idx = int(pc_copy.get("index", pos + 1))
+                except (TypeError, ValueError):
+                    sent_idx = pos + 1
+                if 1 <= sent_idx <= len(primary_indices):
+                    pc_copy["index"] = primary_indices[sent_idx - 1]
+                all_classifications.append(pc_copy)
 
             # Falls einzelne Fotos noch nicht klassifiziert wurden, gezielt in 8er-Batches nachklassifizieren
             classified_indices = {int(pc.get("index", 0)) for pc in all_classifications if isinstance(pc, dict)}
@@ -1212,8 +1249,11 @@ def analyze_property_images(
                             is_bp = True
                         analyzed_photos[idx]["tag"] = refined_tag
                         analyzed_photos[idx]["description"] = raw_desc
-                        if "quality_score" in pc:
-                            analyzed_photos[idx]["quality_score"] = round(float(pc["quality_score"]), 1)
+                        if "quality_score" in pc and pc["quality_score"] is not None:
+                            try:
+                                analyzed_photos[idx]["quality_score"] = round(float(pc["quality_score"]), 1)
+                            except (TypeError, ValueError):
+                                pass
                         analyzed_photos[idx]["is_blueprint"] = is_bp
                         if raw_findings:
                             analyzed_photos[idx]["findings"] = raw_findings
