@@ -371,99 +371,23 @@ def refine_photo_tag(tag: str, description: str = "", findings: Optional[List[st
 # 3. OPTIONALER GEMINI MULTIMODAL LLM CALL
 # ==============================================================================
 
-def get_resolved_gemini_key(api_key: Optional[str] = None) -> Optional[str]:
-    """Resolves Gemini or OneProvider API key from parameter, system settings DB, or environment."""
-    if api_key and api_key.strip() and not ("..." in api_key or "***" in api_key or len(api_key.strip()) < 15):
-        return api_key.strip()
-    try:
-        from app.database import get_system_setting
-        active_prov = get_system_setting("active_ai_provider")
-        if active_prov == "gemini":
-            k = (
-                get_system_setting("google_gemini_api_key")
-                or get_system_setting("gemini_api_key")
-                or os.getenv("GEMINI_API_KEY")
-            )
-            if k and k.strip():
-                return k.strip()
-        elif active_prov == "oneprovider":
-            k = (
-                get_system_setting("oneprovider_api_key")
-                or get_system_setting("gemini_api_key")
-                or os.getenv("ONEPROVIDER_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-            )
-            if k and k.strip():
-                return k.strip()
-        else:
-            for s_key in ["gemini_api_key", "oneprovider_api_key", "google_gemini_api_key"]:
-                db_key = get_system_setting(s_key)
-                if db_key and db_key.strip():
-                    return db_key.strip()
-    except Exception:
-        pass
-    one_key = os.getenv("ONEPROVIDER_API_KEY")
-    if one_key and one_key.strip():
-        return one_key.strip()
-    env_key = os.getenv("GEMINI_API_KEY")
-    if env_key and env_key.strip():
-        return env_key.strip()
-    return None
+from app.llm_utils import (
+    resolve_primary_llm_key as get_resolved_gemini_key,
+    clean_and_parse_llm_json as _clean_and_parse_llm_json,
+)
 
 
-def _clean_and_parse_llm_json(raw_text: str) -> Dict[str, Any]:
-    """
-    Parst JSON aus LLM-Antworten robust gegen Markdown-Codeblöcke, Whitespace,
-    trailing commas, unescapte Steuerzeichen und Token-Truncations am Textende.
-    """
-    cleaned = raw_text.strip()
-    if "```" in cleaned:
-        m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned)
-        if m:
-            cleaned = m.group(1).strip()
-        else:
-            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-            cleaned = re.sub(r'\s*```$', '', cleaned).strip()
-
-    # 1. Direkter json.loads-Versuch
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        pass
-
-    # 2. Trailing commas vor } und ] entfernen
-    cleaned_no_trailing = re.sub(r',\s*([\]}])', r'\1', cleaned)
-    try:
-        return json.loads(cleaned_no_trailing)
-    except Exception:
-        pass
-
-    # 3. Truncation Auto-Repair (falls Ausgabe am Token-Limit abgeschnitten wurde)
-    for base in [cleaned, cleaned_no_trailing]:
-        for suffix in ['"}', '"]}', '"}}', '"}]}', '}\n}', '"]}\n}', '}', '"]']:
-            try:
-                return json.loads(base + suffix)
-            except Exception:
-                pass
-
-    # 4. Äußerstes { ... } per Regex erfassen
-    m_outer = re.search(r'(\{[\s\S]*\})', cleaned)
-    if m_outer:
-        cand = m_outer.group(1).strip()
-        try:
-            return json.loads(cand)
-        except Exception:
-            cand_no_trailing = re.sub(r',\s*([\]}])', r'\1', cand)
-            try:
-                return json.loads(cand_no_trailing)
-            except Exception:
-                for suffix in ['"}', '"]}', '"}}', '}\n}']:
-                    try:
-                        return json.loads(cand_no_trailing + suffix)
-                    except Exception:
-                        pass
-
-    raise ValueError("Kein valides JSON in LLM-Antwort gefunden")
+def sanitize_image_report_tags(img_report: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Normalizes analyzed_photos tags in place for a parsed image_analysis dict."""
+    if isinstance(img_report, dict):
+        for p in (img_report.get("analyzed_photos") or []):
+            if isinstance(p, dict):
+                p["tag"] = refine_photo_tag(
+                    p.get("tag", ""),
+                    p.get("description", ""),
+                    p.get("findings", []),
+                )
+    return img_report
 
 
 def call_gemini_vision(
@@ -1945,11 +1869,16 @@ def analyze_property_images(
         f"Heizkörper & Installation: {heat_findings}"
     ]
 
-    if not has_interior_photos:
+    if not has_interior_photos and is_renovierungsbeduerftig:
         investor_summary = (
             f"Die Bildanalyse hat {len(analyzed_photos)} Grundriss- und Bauzeichnungen identifiziert (keine Innenraum-Fotos im Inserat). "
-            f"Aufgrund des im Exposé angegebenen Sanierungsbedarfs ('Renovieren!!!!') wird der Renovierungsaufwand auf ca. {total_visual_capex:,.2f} € geschätzt. "
+            f"Aufgrund des im Exposé genannten Sanierungsbedarfs wird der Renovierungsaufwand auf ca. {total_visual_capex:,.2f} € geschätzt. "
             f"Dieser Betrag sollte vollumfänglich in die Kaufpreisverhandlung eingebracht werden."
+        )
+    elif not has_interior_photos:
+        investor_summary = (
+            f"Die Bildanalyse hat {len(analyzed_photos)} Grundriss- und Bauzeichnungen identifiziert (keine Innenraum-Fotos im Inserat). "
+            f"Auf Basis der Exposé- und Baujahrsdaten wird ein CaPEx-Puffer von ca. {total_visual_capex:,.2f} € kalkuliert."
         )
     else:
         investor_summary = (
@@ -1958,8 +1887,7 @@ def analyze_property_images(
             f"{'Das Objekt kann ohne größere Vorab-Investitionen sofort neu vermietet werden.' if total_visual_capex < 3000.0 else f'Der Sanierungsbedarf von {total_visual_capex:,.2f} € sollte in den Kaufpreisverhandlungen direkt als Preisnachlass geltend gemacht werden.'}"
         )
 
-    for p in analyzed_photos:
-        p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+    sanitize_image_report_tags({"analyzed_photos": analyzed_photos})
 
     return {
         "timestamp": get_berlin_now_str(),

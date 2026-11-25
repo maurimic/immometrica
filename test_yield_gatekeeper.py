@@ -1,7 +1,12 @@
-import unittest
-import sqlite3
 import os
-from app.database import (
+import sqlite3
+import tempfile
+import unittest
+
+_TMP_DIR = tempfile.TemporaryDirectory()
+os.environ["DATABASE_PATH"] = os.path.join(_TMP_DIR.name, "test_yield_gatekeeper.db")
+
+from app.database import (  # noqa: E402
     init_db,
     save_search_profile,
     get_search_profile_by_id,
@@ -15,6 +20,13 @@ class TestYieldGatekeeper(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         init_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            _TMP_DIR.cleanup()
+        except Exception:
+            pass
 
     def test_yield_basis_crud(self):
         # 1. Create with yield_basis = 'actual'

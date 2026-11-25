@@ -45,33 +45,8 @@ def fmt_signed_de(value: Any, decimals: int = 2) -> str:
 
 def resolve_llm_keys(explicit_api_key: Optional[str] = None) -> Tuple[Optional[str], Optional[str]]:
     """Ermittelt konfigurierte Google Gemini / OneProvider / OpenAI API Keys aus Request, SQLite Settings oder Environment."""
-    if explicit_api_key and explicit_api_key.strip() and "..." not in explicit_api_key and "***" not in explicit_api_key:
-        gemini_key = explicit_api_key.strip()
-    else:
-        active_prov = get_system_setting("active_ai_provider")
-        if active_prov == "gemini":
-            gemini_key = (
-                get_system_setting("google_gemini_api_key")
-                or get_system_setting("gemini_api_key")
-                or os.getenv("GEMINI_API_KEY")
-            )
-        elif active_prov == "oneprovider":
-            gemini_key = (
-                get_system_setting("oneprovider_api_key")
-                or get_system_setting("gemini_api_key")
-                or os.getenv("ONEPROVIDER_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-            )
-        else:
-            gemini_key = (
-                get_system_setting("gemini_api_key")
-                or get_system_setting("oneprovider_api_key")
-                or get_system_setting("google_gemini_api_key")
-                or os.getenv("ONEPROVIDER_API_KEY")
-                or os.getenv("GEMINI_API_KEY")
-            )
-    if gemini_key:
-        gemini_key = gemini_key.strip() or None
+    from app.llm_utils import resolve_primary_llm_key
+    gemini_key = resolve_primary_llm_key(explicit_api_key)
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         openai_key = openai_key.strip() or None
@@ -732,60 +707,7 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
 }}"""
 
 
-def _clean_and_parse_llm_json(raw_text: str) -> Dict[str, Any]:
-    """
-    Robuster JSON-Parser für LLM-Ausgaben (Google Gemini, OpenAI, OneProvider/Claude/Qwen).
-    Bereinigt Markdown-Codeblöcke (```json ... ```), führende/nachfolgende Freitexte,
-    trailing commas und Token-Truncations am Textende.
-    """
-    cleaned = raw_text.strip()
-    if "```" in cleaned:
-        m = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', cleaned)
-        if m:
-            cleaned = m.group(1).strip()
-        else:
-            cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-            cleaned = re.sub(r'\s*```$', '', cleaned).strip()
-
-    # 1. Direkter json.loads-Versuch
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        pass
-
-    # 2. Trailing commas vor } und ] entfernen
-    cleaned_no_trailing = re.sub(r',\s*([\]}])', r'\1', cleaned)
-    try:
-        return json.loads(cleaned_no_trailing)
-    except Exception:
-        pass
-
-    # 3. Truncation Auto-Repair (falls Ausgabe am Token-Limit abgeschnitten wurde)
-    for base in [cleaned, cleaned_no_trailing]:
-        for suffix in ['"}', '"]}', '"}}', '"}]}', '}\n}', '"]}\n}', '}', '"]']:
-            try:
-                return json.loads(base + suffix)
-            except Exception:
-                pass
-
-    # 4. Äußerstes { ... } per Regex erfassen
-    m_outer = re.search(r'(\{[\s\S]*\})', cleaned)
-    if m_outer:
-        cand = m_outer.group(1).strip()
-        try:
-            return json.loads(cand)
-        except Exception:
-            cand_no_trailing = re.sub(r',\s*([\]}])', r'\1', cand)
-            try:
-                return json.loads(cand_no_trailing)
-            except Exception:
-                for suffix in ['"}', '"]}', '"}}', '}\n}']:
-                    try:
-                        return json.loads(cand_no_trailing + suffix)
-                    except Exception:
-                        pass
-
-    raise ValueError("Kein valides JSON in LLM-Antwort gefunden")
+from app.llm_utils import clean_and_parse_llm_json as _clean_and_parse_llm_json
 
 
 def call_llm_text_analysis(

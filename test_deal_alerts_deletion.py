@@ -1,22 +1,37 @@
+import os
+import tempfile
 import unittest
-from fastapi.testclient import TestClient
 
-from app.main import app
-from app.database import (
+_TMP_DIR = tempfile.TemporaryDirectory()
+os.environ["DATABASE_PATH"] = os.path.join(_TMP_DIR.name, "test_deal_alerts_deletion.db")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
+from app.database import (  # noqa: E402
+    init_db,
     record_deal_alert,
     get_deal_alerts,
     delete_deal_alert,
     clear_deal_alerts
 )
-from app.auth import hash_session_token, get_auth_config
+from app.auth import hash_session_token, get_auth_config  # noqa: E402
 
 class TestDealAlertsDeletion(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        init_db()
         cls.client = TestClient(app)
         cfg = get_auth_config()
         token = hash_session_token(cfg["username"], cfg["password"], cfg["secret"])
         cls.client.cookies.set("immo_session", token)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            _TMP_DIR.cleanup()
+        except Exception:
+            pass
 
     def setUp(self):
         from app.database import get_connection

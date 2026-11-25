@@ -15,7 +15,7 @@ from app.calculator import calculate_cashflow
 from app.valuation import evaluate_property_valuation, get_city_benchmark
 from app.availability import check_portal_url_live
 from app.ai_analyst import generate_ai_due_diligence_report, reconcile_capex_with_images, build_missing_documents_request
-from app.image_analyst import analyze_property_images, refine_photo_tag
+from app.image_analyst import analyze_property_images, refine_photo_tag, sanitize_image_report_tags
 from app.geo_resolver import resolve_city_coordinates, ensure_distinct_coord, _match_city_coord
 from app.location_analyst import check_address_is_exact, analyze_property_location_and_pois, clean_real_estate_address
 
@@ -356,9 +356,7 @@ def get_property(property_id: int):
         if prop.get("image_analysis"):
             try:
                 prop["image_analysis"] = json.loads(prop["image_analysis"])
-                if isinstance(prop["image_analysis"], dict):
-                    for p in (prop["image_analysis"].get("analyzed_photos") or []):
-                        p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+                sanitize_image_report_tags(prop["image_analysis"])
             except Exception:
                 pass
         if prop.get("gallery_images"):
@@ -633,9 +631,7 @@ def run_property_ai_audit(
             existing_ai["missing_documents"] = doc_req.get("missing_documents", [])
             existing_ai["doc_checklist"] = doc_req.get("missing_documents", [])
             existing_ai["document_request"] = doc_req
-        if img_report and isinstance(img_report, dict):
-            for p in (img_report.get("analyzed_photos") or []):
-                p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+        sanitize_image_report_tags(img_report)
         ins = existing_ai.get("insights", {})
         met = existing_ai.get("metrics", {})
         return {
@@ -986,9 +982,7 @@ def run_property_ai_audit(
         if img_report.get("total_visual_capex", 0) > 0:
             report["capex"]["visual_capex"] = img_report["total_visual_capex"]
             report["capex"]["visual_items"] = img_report["visual_capex_items"]
-        if isinstance(img_report, dict):
-            for p in (img_report.get("analyzed_photos") or []):
-                p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+        sanitize_image_report_tags(img_report)
     else:
         report["image_analysis"] = None
 
@@ -1258,9 +1252,7 @@ def run_property_image_analysis(
                 detail=img_report.get("error_message") or img_report.get("vision_error") or "Fehler bei der KI-Bildanalyse"
             )
 
-        if isinstance(img_report, dict) and "analyzed_photos" in img_report:
-            for p in img_report["analyzed_photos"]:
-                p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+        sanitize_image_report_tags(img_report)
 
         img_json = json.dumps(img_report, ensure_ascii=False)
         analyzed_urls = [p["url"] for p in img_report.get("analyzed_photos", []) if p.get("url")]
@@ -1322,9 +1314,7 @@ def get_property_image_analysis(property_id: int):
     if row[0]:
         try:
             img_data = json.loads(row[0])
-            if isinstance(img_data, dict):
-                for p in (img_data.get("analyzed_photos") or []):
-                    p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []))
+            sanitize_image_report_tags(img_data)
             return {"property_id": property_id, "image_analysis": img_data, "status": "completed"}
         except Exception:
             pass

@@ -395,6 +395,31 @@ class TestPaket2FunctionalGaps(unittest.TestCase):
         for tool in MCP_TOOLS:
             self.assertIn(tool["name"], html, f"MCP tool '{tool['name']}' missing in static/index.html")
 
+    def test_10_llm_utils_dedup_and_auth_config_cache(self):
+        from app.llm_utils import clean_and_parse_llm_json, resolve_primary_llm_key
+        from app import auth, ai_analyst, image_analyst
+
+        # Shared single source of truth across modules
+        self.assertIs(ai_analyst._clean_and_parse_llm_json, clean_and_parse_llm_json)
+        self.assertIs(image_analyst._clean_and_parse_llm_json, clean_and_parse_llm_json)
+        self.assertIs(image_analyst.get_resolved_gemini_key, resolve_primary_llm_key)
+
+        parsed = clean_and_parse_llm_json("```json\n{\"a\": 1,}\n```")
+        self.assertEqual(parsed, {"a": 1})
+
+        # sanitize_image_report_tags normalizes photo tags in place
+        rep = {"analyzed_photos": [{"tag": "🌿 Balkon", "description": "Wohnzimmer mit Balkonzugang", "findings": []}]}
+        image_analyst.sanitize_image_report_tags(rep)
+        self.assertIn("Wohnbereich", rep["analyzed_photos"][0]["tag"])
+
+        # Auth config caching reacts cleanly to env changes
+        cfg1 = auth.get_auth_config()
+        cfg2 = auth.get_auth_config()
+        self.assertEqual(cfg1, cfg2)
+        with patch.dict(os.environ, {"APP_PASSWORD": "temp-cache-invalidate-pw"}):
+            cfg3 = auth.get_auth_config()
+            self.assertEqual(cfg3["password"], "temp-cache-invalidate-pw")
+
 
 if __name__ == "__main__":
     unittest.main()

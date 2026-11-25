@@ -2,7 +2,8 @@ import os
 import hmac
 import hashlib
 import logging
-from typing import Optional, Dict, Any
+import threading
+from typing import Optional, Dict, Any, Tuple
 from fastapi import Request, Response, HTTPException, status
 from pathlib import Path
 
@@ -17,6 +18,27 @@ DEFAULT_PASSWORD = "localtest123"
 LOCAL_DIR = Path(__file__).resolve().parent.parent
 LOCAL_ENV_PATH = LOCAL_DIR / ".env"
 IMMOMETRICA_ENV_PATH = Path(r"C:\Users\User\Antigravity\Immotracker\.env")
+
+_AUTH_CACHE_LOCK = threading.RLock()
+_AUTH_CACHE_FINGERPRINT: Optional[Tuple[Any, ...]] = None
+_AUTH_CACHE_VALUE: Optional[Dict[str, Any]] = None
+
+_ENV_AUTH_KEYS = (
+    "APP_USERNAME",
+    "ADMIN_USERNAME",
+    "APP_PASSWORD",
+    "ADMIN_PASSWORD",
+    "NEXTAUTH_SECRET",
+    "SESSION_SECRET",
+    "ENV",
+)
+
+
+def _safe_mtime_ns(filepath: Path) -> Optional[int]:
+    try:
+        return filepath.stat().st_mtime_ns if filepath.exists() and filepath.is_file() else None
+    except OSError:
+        return None
 
 
 def _read_env_file(filepath: Path) -> Dict[str, str]:
@@ -42,12 +64,20 @@ def _read_env_file(filepath: Path) -> Dict[str, str]:
 
 def get_auth_config() -> Dict[str, Any]:
     """
-    Resolves APP_USERNAME, APP_PASSWORD and SESSION_SECRET with the following priority:
-    1. System environment variables (os.environ)
-    2. Local .env file in immometrica-clone/.env
-    3. Immotracker self-hosted tool .env (C:\\Users\\User\\Antigravity\\Immotracker\\.env)
-    4. Secure defaults (admin / localtest123)
+    Resolves APP_USERNAME, APP_PASSWORD and SESSION_SECRET with mtime+env caching
+    so high-frequency middleware checks avoid synchronous disk reads on every request.
     """
+    global _AUTH_CACHE_FINGERPRINT, _AUTH_CACHE_VALUE
+
+    fingerprint = (
+        tuple((k, os.environ.get(k)) for k in _ENV_AUTH_KEYS),
+        _safe_mtime_ns(LOCAL_ENV_PATH),
+        _safe_mtime_ns(IMMOMETRICA_ENV_PATH),
+    )
+    with _AUTH_CACHE_LOCK:
+        if _AUTH_CACHE_VALUE is not None and _AUTH_CACHE_FINGERPRINT == fingerprint:
+            return dict(_AUTH_CACHE_VALUE)
+
     local_env = _read_env_file(LOCAL_ENV_PATH)
     immotracker_env = _read_env_file(IMMOMETRICA_ENV_PATH)
 
@@ -102,7 +132,7 @@ def get_auth_config() -> Dict[str, Any]:
     if secret == DEFAULT_SALT and os.environ.get("ENV") == "production":
         logger.warning("SECURITY WARNING: SESSION_SECRET is using the default salt in production.")
 
-    return {
+    cfg = {
         "username": username.strip(),
         "password": password.strip(),
         "secret": secret.strip(),
@@ -110,6 +140,10 @@ def get_auth_config() -> Dict[str, Any]:
         "local_env_path": str(LOCAL_ENV_PATH),
         "immotracker_env_path": str(IMMOMETRICA_ENV_PATH) if IMMOMETRICA_ENV_PATH.exists() else None,
     }
+    with _AUTH_CACHE_LOCK:
+        _AUTH_CACHE_FINGERPRINT = fingerprint
+        _AUTH_CACHE_VALUE = cfg
+    return dict(cfg)
 
 
 def hash_session_token(username: str, password: str, secret: str = None) -> str:

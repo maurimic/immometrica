@@ -4,29 +4,43 @@ Verifies canary checks, startpage alert state management, incident recording,
 and Telegram alerting logic.
 """
 
+import os
+import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
-from fastapi.testclient import TestClient
 
-from app.main import app
-from app.auth import hash_session_token, get_auth_config
-from app.portal_health import (
+_TMP_DIR = tempfile.TemporaryDirectory()
+os.environ["DATABASE_PATH"] = os.path.join(_TMP_DIR.name, "test_canary.db")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app  # noqa: E402
+from app.auth import hash_session_token, get_auth_config  # noqa: E402
+from app.portal_health import (  # noqa: E402
     run_canary_checks,
     get_portal_health_status,
     record_portal_incident,
     dismiss_portal_alert
 )
-from app.telegram_notifier import send_system_telegram_alert
-from app.database import get_system_setting, set_system_setting
+from app.telegram_notifier import send_system_telegram_alert  # noqa: E402
+from app.database import init_db, get_system_setting, set_system_setting  # noqa: E402
 
 
 class TestPortalHealthCanary(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        init_db()
         cls.client = TestClient(app)
         cfg = get_auth_config()
         token = hash_session_token(cfg["username"], cfg["password"], cfg["secret"])
         cls.client.cookies.set("immo_session", token)
+
+    @classmethod
+    def tearDownClass(cls):
+        try:
+            _TMP_DIR.cleanup()
+        except Exception:
+            pass
 
     def setUp(self):
         # Reset alert settings before each test

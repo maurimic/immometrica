@@ -10,6 +10,10 @@ Tests:
 
 import sys
 import os
+import tempfile
+
+_TMP_DIR = tempfile.TemporaryDirectory()
+os.environ["DATABASE_PATH"] = os.path.join(_TMP_DIR.name, "test_search_agent_alerts.db")
 
 sys.path.insert(0, os.path.dirname(__file__))
 
