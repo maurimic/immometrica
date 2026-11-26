@@ -268,6 +268,16 @@ window.immoModalsModule = {
     return this.removeKey('all');
   },
 
+  isAiStagedPhoto(photo) {
+    if (!photo) return false;
+    if (photo.is_ai_generated) return true;
+    const t = String(photo.tag || '').trim().toLowerCase();
+    if (/ki-visualisierung|virtual staging|ki-generiert|ai-generated/i.test(t)) return true;
+    const d = String(photo.description || '').trim();
+    const fStr = Array.isArray(photo.findings) ? photo.findings.join(' ') : '';
+    return /\b(?:ki[-\s]?generiert\w*|ai[-\s]?generated|ai[-\s]?generiert\w*|virtual\s*staging|virtuell\w*\s*(?:staging|möblier\w*|eingerichtet\w*|eingefügt\w*|visualisier\w*|küche\w*|einrichtung\w*)|digital\s*(?:möblier\w*|eingerichtet\w*|eingefügt\w*|bearbeitet\w*|staging)|home[\s-]?staging|einrichtungsbeispiel\w*|einrichtungsvorschlag|musterfoto\w*|symbolfoto\w*|symbolbild\w*|3d[-\s]?visualisierung\w*|ki[-\s]?visualisierung\w*|visualisierung\w*|fotomontage\w*|render(?:ing|s)?|retuschiert\w*|fiktiv\w*)\b/i.test(`${d} ${fStr}`);
+  },
+
   refinePhotoTag(tag, description, findings, isBlueprint = false) {
     const t = String(tag || '').trim();
     const d = String(description || '').trim().toLowerCase();
@@ -333,6 +343,7 @@ window.immoModalsModule = {
       description: p.description || 'Keine detaillierte Beschreibung vorhanden.',
       quality_score: p.quality_score,
       is_blueprint: Boolean(p.is_blueprint),
+      is_ai_generated: this.isAiStagedPhoto(p),
       findings: Array.isArray(p.findings) ? p.findings : [],
       width: p.width,
       height: p.height

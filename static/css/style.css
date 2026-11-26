@@ -55,6 +55,7 @@ body {
   font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   color: #1e293b;
   background-color: #f8fafc;
+  overflow-x: clip;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -199,7 +200,7 @@ html.dark .maplibregl-ctrl-icon {
   padding: 0.85rem;
   box-shadow: 0 12px 25px -4px rgba(0, 0, 0, 0.2);
   font-family: 'Poppins', sans-serif;
-  max-width: 300px;
+  max-width: min(300px, calc(100vw - 32px));
 }
 
 .maplibregl-popup-close-button {
@@ -312,11 +313,14 @@ button, a, input, select {
   touch-action: manipulation;
 }
 
-/* On mobile viewports: ensure modal dialogs don't cause horizontal overflow */
-@media (max-width: 640px) {
+/* On mobile viewports: make Detail/KI-Audit modal fill the full viewport without horizontal overflow */
+@media (max-width: 639px) {
   .immo-modal-container {
     max-width: 100vw !important;
-    width: 100% !important;
+    width: 100vw !important;
+    min-height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
     margin: 0 !important;
   }
   .kanban-lane {

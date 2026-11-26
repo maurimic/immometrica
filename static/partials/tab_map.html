@@ -1,14 +1,14 @@
     <!-- TAB 4: MAP VIEW (Interactive Location Map & Split Radar) -->
     <div x-show="activeTab === 'map'" class="space-y-4">
       <!-- Header Bar with Stats & Controls -->
-      <div class="bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <div>
-          <div class="flex items-center gap-2">
+      <div class="bg-white dark:bg-slate-900 p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
             <h2 class="text-base font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-              <i data-lucide="map-pin" class="w-5 h-5 text-sky-600 dark:text-sky-400"></i>
-              Interaktive Lagekarte & Immobilien-Radar
+              <i data-lucide="map-pin" class="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0"></i>
+              <span>Interaktive Lagekarte & Immobilien-Radar</span>
             </h2>
-            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800" x-text="`${properties.filter(p => p.lat && p.lng).length} Wohnungen kartiert`">
+            <span class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-sky-100 dark:bg-sky-950 text-sky-800 dark:text-sky-300 border border-sky-200 dark:border-sky-800 shrink-0" x-text="`${properties.filter(p => p.lat && p.lng).length} Wohnungen kartiert`">
             </span>
           </div>
           <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">
@@ -40,7 +40,7 @@
         
         <!-- Left: Companion Listing Column (4 cols on desktop, compact list below map on mobile) -->
         <div class="order-2 lg:order-1 lg:col-span-4 xl:col-span-4 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-3 sm:p-4 flex flex-col h-[340px] sm:h-[440px] lg:h-[700px]">
-          <div class="flex items-center justify-between pb-3 mb-2 border-b border-slate-200 dark:border-slate-800">
+          <div class="flex flex-wrap items-center justify-between gap-1.5 pb-3 mb-2 border-b border-slate-200 dark:border-slate-800">
             <span class="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
               <i data-lucide="list" class="w-3.5 h-3.5"></i>
               Wohnungsübersicht (<span x-text="properties.length"></span>)
@@ -117,7 +117,7 @@
 
 
                 <!-- Action Button Row on Card -->
-                <div class="flex items-center gap-1.5 mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <div class="flex flex-wrap items-center gap-1.5 mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
                   <button 
                     @click.stop="flyToProperty(prop)" 
                     :class="selectedMapPropertyId === prop.id ? 'bg-sky-600 text-white font-bold' : 'bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/80 dark:hover:bg-sky-900/80 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800'"
@@ -158,14 +158,14 @@
         <div class="order-1 lg:order-2 lg:col-span-8 xl:col-span-8 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 p-2 relative flex flex-col h-[400px] sm:h-[520px] lg:h-[700px]">
           
           <!-- Map Legend Overlay -->
-          <div class="absolute top-4 left-4 z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 shadow-md flex items-center gap-3 text-[11px]">
+          <div class="absolute top-3 left-3 right-12 sm:right-auto z-10 bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-lg p-2 sm:p-2.5 shadow-md flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] sm:text-[11px] max-w-[calc(100%-3.5rem)] sm:max-w-none">
             <div class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
-              <span class="w-3 h-3 rounded-full bg-emerald-500 shadow-sm inline-block"></span>
+              <span class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-emerald-500 shadow-sm inline-block shrink-0"></span>
               <span>Positiver Cashflow</span>
             </div>
-            <div class="w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
+            <div class="hidden sm:block w-px h-3 bg-slate-200 dark:bg-slate-700"></div>
             <div class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300">
-              <span class="w-3 h-3 rounded-full bg-sky-600 shadow-sm inline-block"></span>
+              <span class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full bg-sky-600 shadow-sm inline-block shrink-0"></span>
               <span>Negativer / Neutraler Cashflow</span>
             </div>
           </div>

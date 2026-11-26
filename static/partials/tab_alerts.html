@@ -4,11 +4,11 @@
     <div x-show="activeTab === 'alerts'" x-cloak class="space-y-6">
       
       <!-- Top Action Banner -->
-      <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 text-white rounded-2xl p-6 sm:p-8 shadow-xl border border-slate-800 relative overflow-hidden">
+      <div class="bg-gradient-to-r from-slate-900 via-slate-850 to-indigo-950 text-white rounded-2xl p-4 sm:p-8 shadow-xl border border-slate-800 relative overflow-hidden">
         <div class="absolute -right-10 -bottom-10 w-72 h-72 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div class="space-y-2 max-w-3xl">
-            <div class="flex items-center gap-2">
+        <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6">
+          <div class="space-y-2 max-w-3xl min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
               <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/30">
                 <i data-lucide="radio" class="w-3.5 h-3.5 animate-pulse"></i>
                 Echtzeit-Akquise & Telegram-Push
@@ -25,7 +25,7 @@
                 </span>
               </template>
             </div>
-            <h2 class="text-2xl sm:text-3xl font-extrabold tracking-tight">Automatisierter Suchagent & Deal-Alerts</h2>
+            <h2 class="text-xl sm:text-3xl font-extrabold tracking-tight">Automatisierter Suchagent & Deal-Alerts</h2>
             <p class="text-xs sm:text-sm text-slate-300 leading-relaxed">
               Definiere beliebige Suchprofile nach Rendite, Quadratmeterpreis und Marktwert-Abschlag. Unser Hintergrund-Crawler scannt kontinuierlich neue Immobilienangebote, lässt die KI automatisch vorab auf Fallstricke (z. B. Erbbaurecht) prüfen und sendet Treffer in Sekundenschnelle auf dein Smartphone.
             </p>
@@ -53,8 +53,8 @@
               <div class="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 border border-indigo-200 dark:border-indigo-800/60">
                 <i data-lucide="cpu" class="w-5 h-5"></i>
               </div>
-              <div>
-                <h4 class="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <div class="min-w-0">
+                <h4 class="text-sm font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span>Letzter Suchlauf &amp; KI-Trichter</span>
                   <span class="text-[11px] font-medium text-slate-500 dark:text-slate-400" x-text="lastScanStats.timestamp ? `(${formatScanTimestamp(lastScanStats.timestamp)})` : ''"></span>
                 </h4>
@@ -66,31 +66,31 @@
             </div>
             
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 text-center sm:text-left">
-              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 dark:border-slate-800 min-w-0">
                 <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">Lokal aussortiert</div>
-                <div class="text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400 flex items-center justify-center sm:justify-start gap-1.5 mt-0.5">
+                <div class="text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400 flex flex-wrap items-center justify-center sm:justify-start gap-1.5 mt-0.5">
                   <span x-text="lastScanStats.filtered_stage1_2 || 0"></span>
                   <span class="text-[10px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-950/80 px-1.5 py-0.5 rounded-md">0 € Kosten</span>
                 </div>
               </div>
               
-              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 dark:border-slate-800 min-w-0">
                 <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">Gezielte KI-Prüfung</div>
-                <div class="text-sm sm:text-base font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5" :title="`${lastScanStats.text_ai_calls || 0} Exposé-Texte analysiert, ${lastScanStats.vision_ai_calls || 0} vollständige Bilderserien (Fotogalerien) geprüft`">
+                <div class="text-sm sm:text-base font-extrabold text-indigo-600 dark:text-indigo-400 mt-0.5 break-words" :title="`${lastScanStats.text_ai_calls || 0} Exposé-Texte analysiert, ${lastScanStats.vision_ai_calls || 0} vollständige Bilderserien (Fotogalerien) geprüft`">
                   <span x-text="`${lastScanStats.text_ai_calls || 0} Exposé / ${lastScanStats.vision_ai_calls || 0} Galerie`"></span>
                 </div>
               </div>
 
-              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 dark:border-slate-800 min-w-0">
                 <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">Token-Verbrauch</div>
-                <div class="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 mt-0.5">
+                <div class="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 mt-0.5 break-words">
                   <span x-text="(lastScanStats.total_tokens_used || 0).toLocaleString('de-DE')"></span>
                 </div>
               </div>
 
-              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-3 border border-slate-200/80 dark:border-slate-800">
+              <div class="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-2.5 sm:p-3 border border-slate-200/80 dark:border-slate-800 min-w-0">
                 <div class="text-[11px] font-medium text-slate-500 dark:text-slate-400">Geschätzte Kosten</div>
-                <div class="text-sm sm:text-base font-extrabold text-rose-600 dark:text-rose-400 mt-0.5">
+                <div class="text-sm sm:text-base font-extrabold text-rose-600 dark:text-rose-400 mt-0.5 break-words">
                   <span x-text="formatCostEur(lastScanStats.estimated_cost_eur)"></span>
                 </div>
               </div>
@@ -101,15 +101,15 @@
 
       <!-- GRID: 1. GESPEICHERTE MULTI-SUCHPROFILE -->
       <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <div>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div class="min-w-0">
             <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <i data-lucide="layers" class="w-5 h-5 text-sky-600 dark:text-sky-400"></i>
+              <i data-lucide="layers" class="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0"></i>
               <span>Deine aktiven Suchprofile</span>
             </h3>
             <p class="text-xs text-slate-500 dark:text-slate-400">Jedes Profil überwacht eigenständig Portale nach deinen individuellen Ankaufskriterien.</p>
           </div>
-          <button @click="openNewProfileModal()" class="text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1">
+          <button @click="openNewProfileModal()" class="self-start sm:self-auto text-xs font-semibold text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1 shrink-0">
             <i data-lucide="plus" class="w-3.5 h-3.5"></i>
             <span>Suchauftrag hinzufügen</span>
           </button>
@@ -117,19 +117,19 @@
 
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <template x-for="prof in searchProfiles" :key="prof.id">
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border shadow-sm transition-all flex flex-col justify-between"
+            <div class="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border shadow-sm transition-all flex flex-col justify-between"
                  :class="prof.is_active ? 'border-slate-200 dark:border-slate-800' : 'border-dashed border-slate-300 dark:border-slate-800 opacity-60'">
               
               <div class="space-y-3">
                 <!-- Header with Active Toggle -->
                 <div class="flex items-start justify-between gap-3">
-                  <div class="space-y-0.5">
-                    <span class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-                      <i data-lucide="map-pin" class="w-3 h-3"></i>
-                      <span x-text="prof.city"></span>
+                  <div class="space-y-1 min-w-0 flex-1">
+                    <span class="inline-flex flex-wrap items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 max-w-full">
+                      <i data-lucide="map-pin" class="w-3 h-3 shrink-0"></i>
+                      <span class="break-words" x-text="prof.city"></span>
                       <span class="text-slate-400 font-normal" x-text="`(${prof.radius_km || 25} km Radius)`"></span>
                     </span>
-                    <h4 class="font-bold text-base text-slate-900 dark:text-white" x-text="prof.name"></h4>
+                    <h4 class="font-bold text-base text-slate-900 dark:text-white break-words leading-snug" x-text="prof.name"></h4>
                   </div>
                   
                   <!-- Switch Toggle -->
@@ -208,26 +208,26 @@
       </div>
 
       <!-- SECTION 2: TELEGRAM & CRAWLER SETTINGS -->
-      <div class="bg-white dark:bg-slate-900 rounded-2xl p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-6">
-        <div class="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
-          <div>
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <i data-lucide="settings" class="w-5 h-5 text-sky-600 dark:text-sky-400"></i>
+      <div class="bg-white dark:bg-slate-900 rounded-2xl p-4 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm space-y-5 sm:space-y-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div class="min-w-0">
+            <h3 class="text-base sm:text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <i data-lucide="settings" class="w-5 h-5 text-sky-600 dark:text-sky-400 shrink-0"></i>
               <span>Telegram-Push-Bot & Scheduler Konfiguration</span>
             </h3>
             <p class="text-xs text-slate-500 dark:text-slate-400">Verknüpfe deinen persönlichen Telegram-Bot für sofortige Deals auf dein Handy.</p>
           </div>
-          <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+          <span class="self-start sm:self-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold shrink-0"
                 :class="alertSettings.telegram_configured ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800' : 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800'">
             <span class="w-2 h-2 rounded-full" :class="alertSettings.telegram_configured ? 'bg-emerald-500' : 'bg-amber-500'"></span>
             <span x-text="alertSettings.telegram_configured ? 'Telegram bereit' : 'Telegram nicht eingerichtet'"></span>
           </span>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 sm:gap-8">
           
           <!-- Column 1: Telegram Settings -->
-          <div class="space-y-4">
+          <div class="space-y-4 min-w-0">
             <h4 class="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <i data-lucide="send" class="w-4 h-4 text-sky-500"></i>
               <span>1. Telegram-Bot Zugangsdaten</span>
@@ -238,7 +238,7 @@
                 <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Telegram Bot Token:
                   <template x-if="alertSettings.telegram_masked_token">
-                    <span class="text-emerald-600 dark:text-emerald-400 font-mono text-[11px] ml-2" x-text="`(${alertSettings.telegram_masked_token})`"></span>
+                    <span class="inline-block text-emerald-600 dark:text-emerald-400 font-mono text-[11px] sm:ml-2 break-all" x-text="`(${alertSettings.telegram_masked_token})`"></span>
                   </template>
                 </label>
                 <input type="password" 
@@ -255,7 +255,7 @@
                 <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Deine persönliche Chat-ID / Kanal-ID:
                   <template x-if="alertSettings.telegram_chat_id">
-                    <span class="text-emerald-600 dark:text-emerald-400 font-mono text-[11px] ml-2" x-text="`Gespeichert: ${alertSettings.telegram_chat_id}`"></span>
+                    <span class="inline-block text-emerald-600 dark:text-emerald-400 font-mono text-[11px] sm:ml-2 break-all" x-text="`Gespeichert: ${alertSettings.telegram_chat_id}`"></span>
                   </template>
                 </label>
                 <input type="text" x-model="telegramInputChatId" placeholder="z. B. 123456789 oder -100123456789" class="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-sky-500 font-mono text-xs">
@@ -264,11 +264,11 @@
 
               <!-- Telegram Test Feedback Box -->
               <template x-if="telegramTestResult">
-                <div class="p-3 rounded-xl text-xs border"
+                <div class="p-3 rounded-xl text-xs border break-words"
                      :class="telegramTestResult.success ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-800' : 'bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 border-rose-200 dark:border-rose-800'">
                   <div class="font-bold flex items-center gap-1.5">
-                    <i data-lucide="check-circle-2" class="w-4 h-4" x-show="telegramTestResult.success"></i>
-                    <i data-lucide="alert-circle" class="w-4 h-4" x-show="!telegramTestResult.success"></i>
+                    <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0" x-show="telegramTestResult.success"></i>
+                    <i data-lucide="alert-circle" class="w-4 h-4 shrink-0" x-show="!telegramTestResult.success"></i>
                     <span x-text="telegramTestResult.success ? 'Erfolg!' : 'Fehler beim Senden'"></span>
                   </div>
                   <div class="mt-1" x-text="telegramTestResult.message || telegramTestResult.error"></div>
@@ -276,7 +276,7 @@
               </template>
 
               <!-- Buttons -->
-              <div class="flex items-center gap-3 pt-2">
+              <div class="flex flex-wrap items-center gap-2.5 sm:gap-3 pt-2">
                 <button @click="testTelegramConnection()" :disabled="telegramTesting" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-semibold text-xs bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-300 dark:border-slate-700 transition-colors cursor-pointer">
                   <i data-lucide="send" class="w-3.5 h-3.5" :class="telegramTesting ? 'animate-spin' : ''"></i>
                   <span x-text="telegramTesting ? 'Sende Test...' : 'Verbindung testen'"></span>
@@ -290,7 +290,7 @@
           </div>
 
           <!-- Column 2: Scheduler Settings -->
-          <div class="space-y-4">
+          <div class="space-y-4 min-w-0">
             <h4 class="font-bold text-sm text-slate-900 dark:text-slate-100 flex items-center gap-2">
               <i data-lucide="clock" class="w-4 h-4 text-indigo-500"></i>
               <span>2. Automatischer Hintergrund-Takt</span>
@@ -298,8 +298,8 @@
 
             <div class="space-y-4 text-xs">
               <!-- Master Toggle -->
-              <div class="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <div>
+              <div class="p-3.5 sm:p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-3">
+                <div class="min-w-0">
                   <div class="font-bold text-slate-900 dark:text-white">Hintergrund-Crawler aktivieren</div>
                   <p class="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">Scannt automatisch alle aktiven Suchprofile im Hintergrund und benachrichtigt bei neuen Deals.</p>
                 </div>
@@ -350,19 +350,19 @@
       <!-- SECTION 3: DEAL ALERTS STREAM (LIVE FEED) -->
       <div class="space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h3 class="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <i data-lucide="bell-ring" class="w-5 h-5 text-rose-500"></i>
+          <div class="min-w-0">
+            <h3 class="text-lg font-bold text-slate-900 dark:text-white flex flex-wrap items-center gap-2">
+              <i data-lucide="bell-ring" class="w-5 h-5 text-rose-500 shrink-0"></i>
               <span>Ausgelöste Deal-Alerts (Chronologischer Feed)</span>
-              <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-normal" x-text="`${alertFeed.length} Treffer`"></span>
+              <span class="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-normal shrink-0" x-text="`${alertFeed.length} Treffer`"></span>
             </h3>
             <p class="text-xs text-slate-500 dark:text-slate-400">Übersicht aller Deals, die deine Filterkriterien erfüllt haben, inklusive KI-Vorabcheck.</p>
           </div>
 
           <!-- Profile Filter Selector & Clear Feed Button -->
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-slate-500 dark:text-slate-400">Filter:</span>
-            <select x-model="alertFilterProfileId" class="text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-sky-500">
+          <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">Filter:</span>
+            <select x-model="alertFilterProfileId" class="flex-1 sm:flex-none min-w-0 max-w-full text-xs px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-sky-500">
               <option value="">Alle Profile anzeigen</option>
               <template x-for="p in searchProfiles" :key="p.id">
                 <option :value="p.id" x-text="p.name"></option>
@@ -370,7 +370,7 @@
             </select>
             <template x-if="alertFeed.length > 0">
               <button @click="clearAllDealAlerts()"
-                      class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer"
+                      class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 dark:hover:bg-rose-900/40 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer shrink-0"
                       :title="alertFilterProfileId ? 'Alle Alerts für dieses Profil löschen' : 'Den gesamten Alert-Feed leeren'">
                 <i data-lucide="trash-2" class="w-3.5 h-3.5 text-rose-500"></i>
                 <span x-text="alertFilterProfileId ? 'Profil-Alerts löschen' : 'Alle Alerts löschen'"></span>
@@ -381,7 +381,7 @@
 
         <!-- Empty State -->
         <template x-if="alertFeed.length === 0">
-          <div class="bg-white dark:bg-slate-900 rounded-2xl p-12 text-center border border-slate-200 dark:border-slate-800 space-y-3">
+          <div class="bg-white dark:bg-slate-900 rounded-2xl p-8 sm:p-12 text-center border border-slate-200 dark:border-slate-800 space-y-3">
             <div class="w-14 h-14 mx-auto rounded-full bg-rose-50 dark:bg-rose-950/60 flex items-center justify-center text-rose-500">
               <i data-lucide="inbox" class="w-7 h-7"></i>
             </div>
@@ -401,20 +401,20 @@
         <!-- Feed List -->
         <div class="space-y-3">
           <template x-for="alt in alertFeed.filter(a => !alertFilterProfileId || String(a.profile_id) === String(alertFilterProfileId))" :key="alt.id">
-            <div class="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-sky-300 dark:hover:border-sky-700 transition-all space-y-3">
+            <div class="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border border-slate-200 dark:border-slate-800 shadow-xs hover:border-sky-300 dark:hover:border-sky-700 transition-all space-y-3">
               
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 flex items-center gap-1">
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                  <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 dark:bg-rose-950 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 flex items-center gap-1 shrink-0">
                     <i data-lucide="zap" class="w-3 h-3 text-rose-500"></i>
                     <span>Deal Alert</span>
                   </span>
-                  <span class="text-xs font-semibold text-slate-900 dark:text-white" x-text="alt.profile_name || 'Suchprofil'"></span>
+                  <span class="text-xs font-semibold text-slate-900 dark:text-white break-words min-w-0" x-text="alt.profile_name || 'Suchprofil'"></span>
                   <span class="text-xs text-slate-400">•</span>
                   <span class="text-xs text-slate-500 dark:text-slate-400" x-text="formatAlertTimestamp(alt.created_at)"></span>
                 </div>
 
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 shrink-0">
                   <template x-if="alt.sent_to_telegram">
                     <span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-semibold" title="Push-Alert erfolgreich versendet">
                       <i data-lucide="send" class="w-3 h-3"></i>
@@ -431,10 +431,10 @@
 
               <!-- Content Row -->
               <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                <div class="space-y-1.5 max-w-3xl">
-                  <div class="flex items-center gap-2">
-                    <span class="text-xs font-bold px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300" x-text="alt.city"></span>
-                    <h4 class="font-bold text-sm text-slate-900 dark:text-white hover:text-sky-600 transition-colors cursor-pointer" @click="openDealFromAlert(alt)" title="Interne Due-Diligence & KI-Bewertung öffnen" x-text="alt.title"></h4>
+                <div class="space-y-1.5 max-w-3xl min-w-0">
+                  <div class="flex flex-wrap items-start gap-2 min-w-0">
+                    <span class="text-xs font-bold px-2 py-0.5 rounded bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 shrink-0" x-text="alt.city"></span>
+                    <h4 class="font-bold text-sm text-slate-900 dark:text-white hover:text-sky-600 transition-colors cursor-pointer break-words flex-[1_1_200px] min-w-0 leading-snug" @click="openDealFromAlert(alt)" title="Interne Due-Diligence & KI-Bewertung öffnen" x-text="alt.title"></h4>
                   </div>
 
                   <!-- Key Financial Metrics Chips -->
@@ -461,7 +461,7 @@
                 </div>
 
                 <!-- Action Buttons -->
-                <div class="flex items-center gap-2 shrink-0">
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
                   <button @click="openDealFromAlert(alt)" title="Interne Due-Diligence & KI-Bewertung öffnen" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-sky-700 dark:text-sky-300 bg-sky-50 dark:bg-sky-950/60 hover:bg-sky-100 dark:hover:bg-sky-900/40 rounded-lg border border-sky-200 dark:border-sky-800 transition-colors cursor-pointer shadow-2xs">
                     <i data-lucide="shield-check" class="w-3.5 h-3.5 text-sky-600 dark:text-sky-400"></i>
                     <span>Analyse öffnen</span>
@@ -486,9 +486,9 @@
                     KI
                   </span>
                 </div>
-                <div class="space-y-0.5">
+                <div class="space-y-0.5 min-w-0 flex-1">
                   <div class="font-bold text-[11px] uppercase tracking-wider text-slate-500 dark:text-slate-400">Automatische KI-Vorabprüfung & Risikocheck</div>
-                  <p class="leading-relaxed font-medium" x-text="alt.ai_verdict"></p>
+                  <p class="leading-relaxed font-medium break-words" x-text="alt.ai_verdict"></p>
                 </div>
               </div>
 

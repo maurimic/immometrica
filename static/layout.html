@@ -71,20 +71,20 @@
            :class="portalAlert.level === 'critical'
              ? 'bg-rose-50 dark:bg-rose-950/70 border-rose-300 dark:border-rose-800 text-rose-950 dark:text-rose-100'
              : 'bg-amber-50 dark:bg-amber-950/70 border-amber-300 dark:border-amber-800 text-amber-950 dark:text-amber-100'">
-        <div class="flex items-start gap-3">
+        <div class="flex items-start gap-3 min-w-0 flex-1">
           <div class="p-2 rounded-lg shrink-0 mt-0.5"
                :class="portalAlert.level === 'critical' ? 'bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300' : 'bg-amber-100 dark:bg-amber-900/60 text-amber-700 dark:text-amber-300'">
             <i data-lucide="alert-triangle" class="w-5 h-5"></i>
           </div>
-          <div>
-            <div class="flex items-center gap-2">
-              <h4 class="text-sm font-bold tracking-tight" x-text="portalAlert.title || '⚠️ Portal-Warnung: Scraper eingeschränkt'"></h4>
-              <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded tracking-wider"
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <h4 class="text-sm font-bold tracking-tight break-words" x-text="portalAlert.title || '⚠️ Portal-Warnung: Scraper eingeschränkt'"></h4>
+              <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded tracking-wider shrink-0"
                     :class="portalAlert.level === 'critical' ? 'bg-rose-200 dark:bg-rose-900 text-rose-800 dark:text-rose-200' : 'bg-amber-200 dark:bg-amber-900 text-amber-800 dark:text-amber-200'"
                     x-text="portalAlert.level === 'critical' ? 'Ausfall' : 'Warnung'"></span>
             </div>
-            <p class="text-xs mt-1 text-slate-700 dark:text-slate-300 font-medium leading-relaxed" x-text="portalAlert.message"></p>
-            <div class="mt-1 flex items-center gap-3 text-[11px] text-slate-500 dark:text-slate-400">
+            <p class="text-xs mt-1 text-slate-700 dark:text-slate-300 font-medium leading-relaxed break-words" x-text="portalAlert.message"></p>
+            <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
               <span class="flex items-center gap-1">
                 <i data-lucide="bell" class="w-3 h-3 text-sky-600"></i>
                 <span>Push-Benachrichtigung an Telegram gesendet</span>

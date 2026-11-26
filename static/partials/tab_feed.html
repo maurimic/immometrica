@@ -16,16 +16,16 @@
                 <input type="text" x-model.debounce.300ms="filters.q" @keyup.enter="fetchProperties()" placeholder="z.B. Dortmund, Berlin, Saarlouis, Hamm, 59065..." autocomplete="off" name="deal_search_query" class="w-full pl-8 pr-2.5 py-2 sm:py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium">
                 <i data-lucide="search" class="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 sm:top-2"></i>
               </div>
-              <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
-                <button @click="fetchProperties()" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
+              <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                <button @click="fetchProperties()" class="flex-1 sm:flex-none min-w-[90px] px-3 py-2 sm:py-1.5 bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1 transition-colors whitespace-nowrap cursor-pointer" title="In deiner lokalen Datenbank filtern">
                   <i data-lucide="filter" class="w-3.5 h-3.5"></i>
                   <span>Filter</span>
                 </button>
-                <button @click="triggerLiveScrape(filters.q)" :disabled="isScraping" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Neue Live-Deals über Portale (Kleinanzeigen, ImmoScout24, Immowelt) suchen & importieren">
+                <button @click="triggerLiveScrape(filters.q)" :disabled="isScraping" class="flex-1 sm:flex-none min-w-[115px] px-3 py-2 sm:py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Neue Live-Deals über Portale (Kleinanzeigen, ImmoScout24, Immowelt) suchen & importieren">
                   <i data-lucide="globe" class="w-3.5 h-3.5" :class="isScraping ? 'animate-spin' : ''"></i>
                   <span x-text="isScraping ? 'Suche...' : 'Deals suchen'"></span>
                 </button>
-                <button @click="openUrlImportModal()" class="flex-1 sm:flex-none px-3 py-2 sm:py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Exposé-Link direkt importieren">
+                <button @click="openUrlImportModal()" class="flex-1 sm:flex-none min-w-[105px] px-3 py-2 sm:py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-700 hover:to-indigo-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center justify-center gap-1.5 transition-all whitespace-nowrap cursor-pointer" title="Exposé-Link direkt importieren">
                   <i data-lucide="link" class="w-3.5 h-3.5"></i>
                   <span>Link import</span>
                 </button>
@@ -62,10 +62,10 @@
           </div>
 
           <!-- Min Rendite & Rendite-Basis -->
-          <div>
-            <div class="flex items-center justify-between mb-1">
+          <div class="col-span-2 sm:col-span-1">
+            <div class="flex flex-wrap items-center justify-between gap-1 mb-1">
               <label class="block text-xs font-semibold text-slate-600 dark:text-slate-300">Min. Rendite (%)</label>
-              <select x-model="filters.yield_basis" @change="fetchProperties()" class="text-[10px] font-semibold py-0.5 px-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:ring-1 focus:ring-sky-500 cursor-pointer" title="Rendite-Basis für Filterung">
+              <select x-model="filters.yield_basis" @change="fetchProperties()" class="max-w-full text-[10px] font-semibold py-0.5 px-1 rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 focus:ring-1 focus:ring-sky-500 cursor-pointer" title="Rendite-Basis für Filterung">
                 <option value="any">Ist oder Mietspiegel (Soll)</option>
                 <option value="actual">Nur Ist-Miete</option>
                 <option value="potential">Nur Mietspiegel (Soll)</option>
@@ -111,17 +111,17 @@
           </div>
 
           <!-- Reset & Sort Buttons -->
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
             
-            <button @click="resetFilters()" title="Alle Filter zurücksetzen" class="px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors">
+            <button @click="resetFilters()" title="Alle Filter zurücksetzen" class="px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:text-slate-800 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors shrink-0">
               <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 inline"></i>
               <span>Filter zurücksetzen</span>
             </button>
 
             <!-- Sort options -->
-            <div class="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-200 dark:border-slate-700">
-              <span class="text-xs text-slate-500 dark:text-slate-400">Sortieren:</span>
-              <select x-model="filters.sort_by" class="text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 py-1 px-2">
+            <div class="flex flex-wrap items-center gap-1.5 sm:ml-2 sm:pl-2 sm:border-l border-slate-200 dark:border-slate-700 min-w-0 flex-[1_1_200px] sm:flex-none">
+              <span class="text-xs text-slate-500 dark:text-slate-400 shrink-0">Sortieren:</span>
+              <select x-model="filters.sort_by" class="text-xs rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 py-1 px-2 max-w-full min-w-0 flex-1 sm:flex-none">
                 <option value="gross_yield">Höchste Rendite (Ist)</option>
                 <option value="potential_yield">Höchste Mietspiegel-Rendite (Soll)</option>
                 <option value="monthly_cashflow">Bester Cashflow</option>
@@ -224,14 +224,14 @@
                 </div>
 
                 <!-- Overlay: Bottom Price & Discount -->
-                <div class="absolute bottom-2.5 inset-x-2.5 flex items-end justify-between pointer-events-none">
+                <div class="absolute bottom-2.5 inset-x-2.5 flex flex-wrap items-end justify-between gap-2 pointer-events-none">
                   <div class="bg-slate-900/80 backdrop-blur-sm px-2.5 py-1 rounded-xl text-white shadow-md pointer-events-auto">
                     <div class="text-base font-extrabold" x-text="formatCurrency(prop.purchase_price)"></div>
                     <div class="text-[10px] text-slate-300 font-medium" x-text="formatPricePerSqm(prop.purchase_price, prop.living_space)"></div>
                   </div>
 
                   <template x-if="prop.market_deviation_percent < -0.1">
-                    <span class="px-2 py-1 rounded-xl text-[11px] font-bold bg-rose-600 text-white shadow-md pointer-events-auto flex items-center gap-1">
+                    <span class="px-2 py-1 rounded-xl text-[11px] font-bold bg-rose-600 text-white shadow-md pointer-events-auto flex items-center gap-1 shrink-0">
                       <span>🔥</span>
                       <span x-text="`${formatNumber(prop.market_deviation_percent, 1)}% Marktwert`"></span>
                     </span>
@@ -242,15 +242,15 @@
               <!-- Card Content -->
               <div class="p-3.5 space-y-3">
                 <!-- Title & Location -->
-                <div>
+                <div class="min-w-0">
                   <a :href="'?deal=' + prop.id + '&view=audit'" @click.prevent="openDetailModal(prop, 'audit')" 
-                     class="font-bold text-sm text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug" 
+                     class="font-bold text-sm text-slate-900 dark:text-white hover:text-sky-600 dark:hover:text-sky-400 line-clamp-2 leading-snug break-words" 
                      x-text="prop.title"></a>
                   
-                  <div class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  <div class="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1 min-w-0">
                     <i data-lucide="map-pin" class="w-3.5 h-3.5 text-slate-400 shrink-0"></i>
-                    <span class="truncate" x-text="formatPropertyAddress(prop)"></span>
-                    <span class="text-slate-300 dark:text-slate-600">•</span>
+                    <span class="truncate flex-1 min-w-0" x-text="formatPropertyAddress(prop)"></span>
+                    <span class="text-slate-300 dark:text-slate-600 shrink-0">•</span>
                     <span class="shrink-0" x-text="formatDaysOnline(prop.days_online)"></span>
                   </div>
                 </div>
@@ -258,34 +258,34 @@
                 <!-- 2x2 Key Metric Grid -->
                 <div class="grid grid-cols-2 gap-2 text-xs">
                   <!-- Bruttorendite -->
-                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 min-w-0">
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Bruttorendite</span>
-                    <div class="text-sm font-bold"
+                    <div class="text-sm font-bold break-words"
                          :class="prop.gross_yield >= 6.0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-800 dark:text-slate-200'"
                          x-text="formatPercent(prop.gross_yield, 2)"></div>
-                    <span class="text-[9px] text-slate-400" x-text="prop.is_rented ? 'Ist-Miete' : 'Soll-Mietspiegel'"></span>
+                    <span class="text-[9px] text-slate-400 block truncate" x-text="prop.is_rented ? 'Ist-Miete' : 'Soll-Mietspiegel'"></span>
                   </div>
 
                   <!-- Cashflow -->
-                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 min-w-0">
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Monatl. Cashflow</span>
-                    <div class="text-sm font-bold"
+                    <div class="text-sm font-bold break-words"
                          :class="prop.monthly_cashflow >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
                          x-text="formatCashflow(prop.monthly_cashflow)"></div>
-                    <span class="text-[9px] text-slate-400">Netto nach Kredit</span>
+                    <span class="text-[9px] text-slate-400 block truncate">Netto nach Kredit</span>
                   </div>
 
                   <!-- Fläche & Zimmer -->
-                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 min-w-0">
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Fläche &amp; Zimmer</span>
-                    <div class="text-sm font-bold text-slate-800 dark:text-slate-200">
+                    <div class="text-sm font-bold text-slate-800 dark:text-slate-200 leading-tight flex flex-wrap items-baseline gap-x-1">
                       <span x-text="`${formatNumber(prop.living_space, 1)} m²`"></span>
-                      <span class="text-xs font-normal text-slate-400 ml-1" x-text="`• ${prop.rooms} Zi.`"></span>
+                      <span class="text-xs font-normal text-slate-400" x-text="`• ${prop.rooms} Zi.`"></span>
                     </div>
                   </div>
 
                   <!-- Sprengnetter Marktwert -->
-                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800">
+                  <div class="p-2 rounded-xl bg-slate-50 dark:bg-slate-800/70 border border-slate-100 dark:border-slate-800 min-w-0">
                     <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 block mb-0.5">Marktwert</span>
                     <div class="text-sm font-bold text-sky-700 dark:text-sky-400 truncate" x-text="formatCurrency(prop.market_value)"></div>
                   </div>
@@ -373,7 +373,7 @@
                 <th class="py-3 px-3.5 min-w-[100px]">Bruttorendite</th>
                 <th class="py-3 px-3.5 min-w-[120px]">Monatl. Cashflow</th>
                 <th class="py-3 px-3.5 min-w-[170px]">KI-Audit & Risiken</th>
-                <th class="py-3 px-4 min-w-[210px] text-right sticky right-0 bg-slate-50 dark:bg-slate-800 z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)]">Aktionen</th>
+                <th class="py-3 px-4 min-w-[160px] sm:min-w-[210px] text-right sm:sticky sm:right-0 bg-slate-50 dark:bg-slate-800 z-10 sm:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:sm:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)]">Aktionen</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 bg-white dark:bg-slate-900">
@@ -560,8 +560,8 @@
                     </template>
                   </td>
 
-                  <!-- Actions (Sticky Right) -->
-                  <td class="py-3 px-4 text-right sticky right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors z-10 shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)] whitespace-nowrap">
+                  <!-- Actions (Sticky Right on >= sm) -->
+                  <td class="py-3 px-4 text-right sm:sticky sm:right-0 bg-white dark:bg-slate-900 group-hover:bg-slate-50 dark:group-hover:bg-slate-800 transition-colors z-10 sm:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.06)] dark:sm:shadow-[-4px_0_6px_-2px_rgba(0,0,0,0.4)] whitespace-nowrap">
                     <div class="flex items-center justify-end gap-1.5">
                       <a :href="prop.portal_url" target="_blank" title="Direkt zum Original-Angebot aufrufen" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border border-emerald-300 dark:border-emerald-800 rounded-lg shadow-2xs transition-colors">
                         <i data-lucide="external-link" class="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400"></i>

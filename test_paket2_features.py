@@ -420,6 +420,123 @@ class TestPaket2FunctionalGaps(unittest.TestCase):
             cfg3 = auth.get_auth_config()
             self.assertEqual(cfg3["password"], "temp-cache-invalidate-pw")
 
+    def test_11_ai_generated_kitchen_photo_excluded_and_ebk_capex_preserved(self):
+        import io
+        from PIL import Image
+        from app import image_analyst
+        from app.ai_analyst import reconcile_capex_with_images
+
+        buf = io.BytesIO()
+        Image.new("RGB", (800, 600), color="lightgray").save(buf, format="JPEG")
+        fake_jpeg_bytes = buf.getvalue()
+
+        class _FakeImgResp:
+            status_code = 200
+            content = fake_jpeg_bytes
+
+        # User scenario: Photo #1 is empty kitchen without EBK, Photo #2 is identical room with AI-generated EBK.
+        # Even if LLM puts 0 EUR / "EBK vorhanden" due to Photo #2, backend must exclude AI photo #2
+        # and keep the 4.500 EUR kitchen CapEx through both Vision & AI Audit reconciliation!
+        fake_gem_dict = {
+            "ai_provider": "OneProvider claude-haiku-5-5 Vision",
+            "overall_visual_score": 6.8,
+            "condition_rating": "GEPFLEGT",
+            "condition_label": "🟡 Gepflegt mit fehlender EBK",
+            "has_interior_photos": True,
+            "photo_classifications": [
+                {
+                    "index": 1,
+                    "tag": "🍳 Küche / EBK",
+                    "description": "Leere Küche mit Fliesenspiegel und Wasseranschlüssen, keine Einbauküche vorhanden.",
+                    "findings": ["Leerer Raum", "Keine Einbauküche"],
+                    "quality_score": 6.5,
+                    "is_blueprint": False,
+                    "is_ai_generated": False,
+                },
+                {
+                    "index": 2,
+                    "tag": "🍳 Küche / EBK",
+                    "description": "Dasselbe Küchenfoto mit einer KI-generierten modernen Einbauküche (Virtual Staging / Einrichtungsbeispiel).",
+                    "findings": ["KI-generierte Visualisierung einer Einbauküche"],
+                    "quality_score": 8.5,
+                    "is_blueprint": False,
+                    "is_ai_generated": True,
+                },
+            ],
+            "categories": {
+                "kitchen": {"score": 8.0, "status": "Einbauküche vorhanden", "findings": "Moderne Küche sichtbar", "cost": 0.0},
+                "bathroom": {"score": 7.5, "status": "Gepflegt", "findings": "Gefliestes Bad", "cost": 0.0},
+            },
+            "visual_capex_items": [
+                {
+                    "category": "Küche",
+                    "title": "Einbauküche vorhanden & funktionstüchtig",
+                    "urgency": "Kein Handlungsbedarf",
+                    "cost": 0.0,
+                    "source_type": "FOTO_BELEG",
+                    "photo_indices": [2],
+                    "evidence_source": "Foto #2",
+                    "description": "Einbauküche sichtbar.",
+                }
+            ],
+            "detected_findings": ["Küche ist bereits eingebaut."],
+            "investor_summary": "Eine Einbauküche ist vorhanden, keine Investitionskosten für die Küche nötig.",
+            "token_usage": {"prompt_tokens": 10, "candidates_tokens": 10, "total_tokens": 20},
+        }
+        cv_interior = {
+            "width": 800,
+            "height": 600,
+            "visual_quality_score": 6.5,
+            "is_blueprint": False,
+            "tag": "🛋️ Wohnbereich / Zimmer",
+            "description": "Innenraum",
+        }
+
+        with patch("app.network_security.validate_external_url", side_effect=lambda u: u), \
+             patch("app.image_analyst.requests.get", return_value=_FakeImgResp()), \
+             patch.object(image_analyst, "should_run_vision_ai", return_value=(True, "Test")), \
+             patch.object(image_analyst, "classify_photo", return_value=cv_interior), \
+             patch.object(image_analyst, "get_resolved_gemini_key", return_value="dummy-key"), \
+             patch.object(image_analyst, "call_gemini_vision", return_value=fake_gem_dict):
+            img_res = image_analyst.analyze_property_images(
+                {"id": 910, "living_space": 60.0, "year_built": 1995, "description": "Helle 2-Zimmer-Wohnung in guter Lage."},
+                image_urls=["https://example.com/empty_kitchen.jpg", "https://example.com/ai_kitchen.jpg"],
+                full_description="Helle 2-Zimmer-Wohnung in guter Lage.",
+                api_key="dummy-key",
+            )
+
+        self.assertEqual(img_res["ai_generated_photos_count"], 1)
+        # Keep descriptive room tag for orientation in UI, while excluding via is_ai_generated=True
+        self.assertEqual(img_res["analyzed_photos"][1]["tag"], "🍳 Küche / EBK")
+        self.assertTrue(img_res["analyzed_photos"][1]["is_ai_generated"])
+        self.assertFalse(img_res["analyzed_photos"][0]["is_ai_generated"])
+        self.assertGreaterEqual(img_res["categories"]["kitchen"]["cost"], 4500.0)
+        self.assertGreaterEqual(img_res["total_visual_capex"], 4500.0)
+        self.assertNotIn("Keine Einbauküche nötig", img_res["investor_summary"])
+        # AI photo index #2 must never appear in any CapEx photo_indices
+        for item in img_res["visual_capex_items"]:
+            self.assertNotIn(2, item.get("photo_indices") or [])
+
+        # Reconcile with text AI audit -> missing EBK CapEx MUST survive into overall total_capex!
+        base_audit = {
+            "insights": {"year_built_extracted": 1995, "has_ebk": False, "needs_renovation": False},
+            "metrics": {"purchase_price": 150000.0, "ancillary_costs": 15000.0, "market_value": 160000.0, "market_value_per_sqm": 2667.0},
+            "capex": {"items": [], "total_capex": 0.0},
+        }
+        prop = {"id": 910, "purchase_price": 150000.0, "living_space": 60.0, "year_built": 1995}
+        reconciled = reconcile_capex_with_images(base_audit, prop, img_res)
+        capex_titles = " | ".join(i["title"] for i in reconciled["capex"]["items"])
+        self.assertIn("Einbauküche", capex_titles)
+        ebk_items = [i for i in reconciled["capex"]["items"] if "einbauküche" in i["title"].lower()]
+        self.assertTrue(any(i["amount"] >= 4500.0 for i in ebk_items))
+        self.assertGreaterEqual(reconciled["capex"]["total_capex"], 4500.0)
+
+        html = Path("static/index.html").read_text(encoding="utf-8")
+        self.assertIn("KI-Staging", html)
+        self.assertIn("KI-Visualisierung (nicht bewertet)", html)
+        modals_js = Path("static/js/modules/modals.js").read_text(encoding="utf-8")
+        self.assertIn("isAiStagedPhoto", modals_js)
+
 
 if __name__ == "__main__":
     unittest.main()

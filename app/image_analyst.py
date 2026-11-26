@@ -212,7 +212,75 @@ def inspect_image_with_pil(img_bytes: bytes) -> Dict[str, Any]:
     return classify_photo(img_bytes)
 
 
-def refine_photo_tag(tag: str, description: str = "", findings: Optional[List[str]] = None, is_blueprint: bool = False) -> str:
+_AI_STAGING_REGEX = re.compile(
+    r"\b(?:"
+    r"ki[-\s]?generiert\w*|"
+    r"ai[-\s]?generated|"
+    r"ai[-\s]?generiert\w*|"
+    r"virtual\s*staging|"
+    r"virtuell\w*\s*(?:staging|m[öo]blier\w*|eingerichtet\w*|eingef[üu]gt\w*|visualisier\w*|k[üu]che\w*|einrichtung\w*)|"
+    r"digital\s*(?:m[öo]blier\w*|eingerichtet\w*|eingef[üu]gt\w*|bearbeitet\w*|staging)|"
+    r"home[\s-]?staging|"
+    r"einrichtungsbeispiel\w*|"
+    r"einrichtungsvorschlag|"
+    r"musterfoto\w*|"
+    r"symbolfoto\w*|"
+    r"symbolbild\w*|"
+    r"3d[-\s]?visualisierung\w*|"
+    r"ki[-\s]?visualisierung\w*|"
+    r"visualisierung\w*|"
+    r"fotomontage\w*|"
+    r"render(?:ing|s)?|"
+    r"retuschiert\w*|"
+    r"k[üu]nstlich\w*\s+(?:eingef[üu]gt|generiert|erstellt)|"
+    r"fiktiv\w*"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_EMPTY_KITCHEN_REGEX = re.compile(
+    r"\b(?:"
+    r"keine\s+(?:einbauk[üu]che|ebk|k[üu]chenzeile|k[üu]chenm[öo]bel)|"
+    r"ohne\s+(?:einbauk[üu]che|ebk|k[üu]chenzeile|m[öo]bel)|"
+    r"leerstehend\w*\s+k[üu]che|"
+    r"leere\s+k[üu]che|"
+    r"k[üu]che\s+(?:ist\s+|wirkt\s+|komplett\s+|v[öo]llig\s+)?leer|"
+    r"unm[öo]bliert\w*\s+k[üu]che|"
+    r"nur\s+(?:k[üu]chen)?anschl[üu]sse|"
+    r"k[üu]chenanschl[üu]sse\s+(?:vorhanden|sichtbar)|"
+    r"kein\s+(?:herd|backofen|kochfeld|sp[üu]le)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+_REAL_EBK_REGEX = re.compile(
+    r"\b(?:vorhandene\s+einbauk[üu]che|einbauk[üu]che|k[üu]chenzeile|schrankzeile|kochfeld|backofen|herd)\b",
+    re.IGNORECASE,
+)
+
+
+def is_ai_generated_photo(
+    tag: str = "",
+    description: str = "",
+    findings: Optional[List[str]] = None,
+    explicit_flag: bool = False,
+) -> bool:
+    """Detects whether a listing image is an AI visualization / virtual staging."""
+    if explicit_flag:
+        return True
+    t = str(tag or "").strip().lower()
+    if any(k in t for k in ("ki-visualisierung", "virtual staging", "ki-generiert", "ai-generated")):
+        return True
+    combined = f"{description or ''} {' '.join(findings or [])}"
+    return bool(_AI_STAGING_REGEX.search(combined))
+
+
+def refine_photo_tag(
+    tag: str,
+    description: str = "",
+    findings: Optional[List[str]] = None,
+    is_blueprint: bool = False,
+) -> str:
     """
     Präzise, semantische Klassifizierung der Raum-Überschrift (Tag) anhand des echten Motiv-Subjekts.
     Verhindert zuverlässig Fehlzuordnungen wie:
@@ -222,6 +290,8 @@ def refine_photo_tag(tag: str, description: str = "", findings: Optional[List[st
     - Wohnzimmer mit Balkontür als 'Balkon'
     - Straßenansichten mit Balkonen an der Fassade als 'Balkon'
     - Reale Balkone als 'Wohnbereich / Zimmer'
+    Hinweis: KI-generierte Bilder behalten ihren Raum-Tag zur Orientierung in der Galerie,
+    werden aber über is_ai_generated=True strikt von Bewertung & CaPEx ausgeschlossen.
     """
     d = (str(description or "")).strip().lower()
     t = (str(tag or "")).strip()
@@ -378,14 +448,22 @@ from app.llm_utils import (
 
 
 def sanitize_image_report_tags(img_report: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Normalizes analyzed_photos tags in place for a parsed image_analysis dict."""
+    """Normalizes analyzed_photos tags & AI-staging flags in place for a parsed image_analysis dict."""
     if isinstance(img_report, dict):
         for p in (img_report.get("analyzed_photos") or []):
             if isinstance(p, dict):
+                is_ai = is_ai_generated_photo(
+                    p.get("tag", ""),
+                    p.get("description", ""),
+                    p.get("findings", []),
+                    explicit_flag=bool(p.get("is_ai_generated", False)),
+                )
+                p["is_ai_generated"] = is_ai
                 p["tag"] = refine_photo_tag(
                     p.get("tag", ""),
                     p.get("description", ""),
                     p.get("findings", []),
+                    is_blueprint=bool(p.get("is_blueprint", False)),
                 )
     return img_report
 
@@ -414,6 +492,10 @@ Objektbeschreibung des Verkäufers:
 \"\"\"{full_description[:2000]}\"\"\"
 
 WICHTIGE PRÜFKRITERIEN:
+0. KI-GENERIERTE BILDER / VIRTUAL STAGING STRIKT AUSSCHLIESSEN (EXTREM WICHTIG!):
+   - Prüfe bei jedem Foto kritisch, ob es sich um eine KI-generierte Visualisierung, Virtual Staging, digitale Möblierung, ein fiktives Einrichtungsbeispiel oder ein Vorher-/Nachher-Bild handelt (oft daran erkennbar, dass derselbe leere Raum auf einem anderen Foto leer ist und hier plötzlich virtuell mit Küche/Möbeln dargestellt wird, oder an Hinweisen wie "Virtual Staging", "Visualisierung", "Einrichtungsbeispiel", "KI-generiert").
+   - Setze bei solchen Bildern zwingend `"is_ai_generated": true` (der Raum-`tag` wie z. B. `"🍳 Küche / EBK"` oder `"🛋️ Wohnbereich / Wohnzimmer"` darf zur besseren Orientierung beibehalten werden, das Bild gilt aber durch `is_ai_generated: true` nicht als realer Zustand).
+   - Solche KI-/Staging-Bilder zeigen NICHT den realen Ist-Zustand! Sie dürfen NIEMALS für Zustandsnoten (`categories`, `overall_visual_score`) oder als Nachweis für vorhandene Einbauten (wie eine Einbauküche) herangezogen werden. Wenn das echte Foto der Küche leer ist und nur das KI-Bild eine Einbauküche zeigt, gilt die EBK als NICHT vorhanden (volle Kosten für neue EBK ansetzen!).
 1. Prüfe zuerst, ob es sich um echte Innenraumfotos oder um Bauzeichnungen / Grundrisse / Pläne handelt.
 2. Wenn nur Bauzeichnungen/Pläne vorliegen: Gib in 'notice' an, dass keine Innenraumfotos vorliegen, und leite den Zustand/CaPEx aus der Objektbeschreibung ab (z.B. wenn Verkäufer 'Renovieren!!!!' oder Sanierungsstau angibt).
 3. Untersuche den visuellen IST-Zustand folgender 6 Bauteile auf den Fotos:
@@ -448,11 +530,12 @@ WICHTIG: Erkenne genau, was auf jedem Foto zu sehen ist, und wähle die präzise
 - 🚗 Garage / Tiefgarage (Garagenstellplatz, Duplex, Tiefgarage)
 - 📐 Bauzeichnung / Grundriss (Architekturplan, schematische Raumaufteilung)
 - 🗺️ Lageplan / Umgebungskarte (Stadtplanausschnitt)
+- 🤖 KI-Visualisierung (Virtual Staging) (KI-generierte Möbel/Küchen, fiktive Einrichtungsbeispiele, digitale Visualisierungen)
 
 Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
 {{
   "has_interior_photos": true/false,
-  "notice": "Hinweistext falls nur Baupläne oder Besonderheiten, sonst null",
+  "notice": "Hinweistext falls nur Baupläne, KI-Visualisierungen oder Besonderheiten, sonst null",
   "overall_visual_score": Zahl von 1.0 bis 10.0,
   "condition_rating": "SEHR_GEPFLEGT" / "GEPFLEGT" / "MODERNISIERUNGSBEDARF" / "RENOVIERUNGSBEDUERFTIG",
   "condition_label": "Prägnante 1-Zeilen Zustandsbewertung mit Ampel-Emoji",
@@ -463,6 +546,7 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON nach diesem Schema:
       "description": "Prägnante, genaue Beschreibung von Foto 1...",
       "quality_score": 8.0,
       "is_blueprint": false,
+      "is_ai_generated": false,
       "findings": ["Merkmal 1", "Merkmal 2"]
     }}
   ],
@@ -686,6 +770,7 @@ Erkenne präzise:
 - 📦 Keller / Abstellraum
 - 🚗 Garage / Tiefgarage
 - 📐 Bauzeichnung / Grundriss (Grundrissplan, Bauzeichnung, schematische Raumaufteilung)
+- 🤖 KI-Visualisierung (Virtual Staging) (KI-generierte Möbel, virtuelle Küche/Visualisierung, Einrichtungsbeispiel – zwingend is_ai_generated: true setzen!)
 
 Antworte AUSSCHLIESSLICH mit gültigem JSON:
 {{
@@ -696,6 +781,7 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
       "description": "Gut lesbare 2-3 Sätze Erklärung...",
       "quality_score": 7.5,
       "is_blueprint": false,
+      "is_ai_generated": false,
       "findings": ["Merkmal 1", "Merkmal 2"]
     }}
   ]
@@ -1040,6 +1126,7 @@ def analyze_property_images(
             "description": "Foto aus Exposé-Galerie",
             "quality_score": 7.5,
             "is_blueprint": False,
+            "is_ai_generated": False,
             "findings": []
         }
         b64_tuple = None
@@ -1167,7 +1254,13 @@ def analyze_property_images(
                         raw_desc = pc.get("description") or analyzed_photos[idx].get("description") or ""
                         raw_findings = pc.get("findings") or analyzed_photos[idx].get("findings") or []
                         is_bp = bool(pc.get("is_blueprint", analyzed_photos[idx].get("is_blueprint", False)))
-                        
+                        is_ai = is_ai_generated_photo(
+                            raw_tag,
+                            raw_desc,
+                            raw_findings,
+                            explicit_flag=bool(pc.get("is_ai_generated", analyzed_photos[idx].get("is_ai_generated", False))),
+                        )
+
                         refined_tag = refine_photo_tag(raw_tag, raw_desc, raw_findings, is_blueprint=is_bp)
                         if refined_tag == "📐 Bauzeichnung / Grundriss":
                             is_bp = True
@@ -1179,45 +1272,76 @@ def analyze_property_images(
                             except (TypeError, ValueError):
                                 pass
                         analyzed_photos[idx]["is_blueprint"] = is_bp
+                        analyzed_photos[idx]["is_ai_generated"] = is_ai
                         if raw_findings:
                             analyzed_photos[idx]["findings"] = raw_findings
                 except Exception:
                     pass
 
-            # Final tag refinement across all photos
+            # Final tag & flag refinement across all photos
             for p in analyzed_photos:
-                p["tag"] = refine_photo_tag(p.get("tag", ""), p.get("description", ""), p.get("findings", []), is_blueprint=bool(p.get("is_blueprint", False)))
+                is_ai = is_ai_generated_photo(
+                    p.get("tag", ""),
+                    p.get("description", ""),
+                    p.get("findings", []),
+                    explicit_flag=bool(p.get("is_ai_generated", False)),
+                )
+                p["is_ai_generated"] = is_ai
+                p["tag"] = refine_photo_tag(
+                    p.get("tag", ""),
+                    p.get("description", ""),
+                    p.get("findings", []),
+                    is_blueprint=bool(p.get("is_blueprint", False)),
+                )
                 if p["tag"] == "📐 Bauzeichnung / Grundriss":
                     p["is_blueprint"] = True
 
+            ai_photo_indices = {p["index"] for p in analyzed_photos if p.get("is_ai_generated")}
+            real_photos = [p for p in analyzed_photos if not p.get("is_blueprint") and not p.get("is_ai_generated")]
+            has_interior_photos = bool(real_photos)
+
             gem_categories = gemini_res.get("categories", {})
             raw_capex_items = gemini_res.get("visual_capex_items", [])
-            has_interior_real = bool(gemini_res.get("has_interior_photos", has_interior_photos))
+            has_interior_real = bool(gemini_res.get("has_interior_photos", has_interior_photos)) and has_interior_photos
             gem_capex_items = []
             max_p = len(analyzed_photos)
 
-            # Check presence of key rooms across ALL analyzed photos (not just the initial batch)
+            # Check presence of real (non-blueprint, non-AI-staged) rooms across ALL analyzed photos
             kitchen_photos = [
-                p["index"] for p in analyzed_photos
-                if not p.get("is_blueprint") and (
-                    p.get("tag") == "🍳 Küche / EBK" or
-                    any(t in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower() for t in ["küche", "ebk", "einbauküche", "küchenzeile"])
+                p["index"] for p in real_photos
+                if (
+                    p.get("tag") == "🍳 Küche / EBK"
+                    or any(t in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower() for t in ["küche", "ebk", "einbauküche", "küchenzeile"])
                 )
             ]
             has_existing_ebk = False
+            has_empty_real_kitchen = False
             for kp in kitchen_photos:
-                matching_p = next((p for p in analyzed_photos if p.get("index") == kp), None)
+                matching_p = next((p for p in real_photos if p.get("index") == kp), None)
                 if matching_p:
                     p_text = (str(matching_p.get("description", "")) + " " + " ".join(matching_p.get("findings") or [])).lower()
-                    if any(w in p_text for w in ["vorhandene einbauküche", "einbauküche", "küchenzeile", "schrankzeile", "herd", "backofen", "kochfeld", "ceran", "spüle"]):
+                    if _EMPTY_KITCHEN_REGEX.search(p_text):
+                        has_empty_real_kitchen = True
+                    elif _REAL_EBK_REGEX.search(p_text):
                         has_existing_ebk = True
-                        break
+
+            # Empty real kitchen photo beats ambiguous mentions if no real installed EBK was seen
+            if has_empty_real_kitchen and not has_existing_ebk:
+                has_existing_ebk = False
+
+            ai_kitchen_photos = [
+                p["index"] for p in analyzed_photos
+                if p.get("is_ai_generated") and any(
+                    w in (str(p.get("description", "")) + " " + " ".join(p.get("findings") or [])).lower()
+                    for w in ["küche", "ebk", "einbauküche", "küchenzeile", "kochfeld", "herd"]
+                )
+            ]
 
             bath_photos = [
-                p["index"] for p in analyzed_photos
-                if not p.get("is_blueprint") and (
-                    p.get("tag") == "🛁 Badezimmer & Sanitär" or
-                    any(t in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower() for t in ["bad", "badezimmer", "sanitär", "wanne", "dusche"])
+                p["index"] for p in real_photos
+                if (
+                    p.get("tag") == "🛁 Badezimmer & Sanitär"
+                    or any(t in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower() for t in ["bad", "badezimmer", "sanitär", "wanne", "dusche"])
                 )
             ]
 
@@ -1234,43 +1358,45 @@ def analyze_property_images(
                 for p in (it.get("photo_indices") or []):
                     try:
                         pi = int(p)
-                        if 1 <= pi <= max_p and pi not in p_idxs:
+                        if 1 <= pi <= max_p and pi not in ai_photo_indices and pi not in p_idxs:
                             p_idxs.append(pi)
                     except (ValueError, TypeError):
                         pass
 
-                # Infer matching photo numbers across ALL analyzed photos (1 to max_p):
-                # Critical fix: If Gemini initially guessed BAUJAHR_MUTMASSUNG because it only saw the first 8 photos,
-                # but a subsequent photo (e.g. photo #10/11) depicts the bathroom/kitchen/heating,
-                # we must link the real photo and upgrade from BAUJAHR_MUTMASSUNG to FOTO_BELEG!
+                # Infer matching photo numbers strictly across REAL (non-blueprint, non-AI-generated) photos:
                 if has_interior_real:
                     found_photos: List[int] = []
                     if any(k in combined_l for k in ["bad", "sanitär", "wc", "dusche", "wanne"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["bad", "wc", "sanitär", "dusche", "wanne"])]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["bad", "wc", "sanitär", "dusche", "wanne"])]
                     elif any(k in combined_l for k in ["küche", "ebk"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["küche", "ebk"])]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["küche", "ebk"])]
                     elif any(k in combined_l for k in ["flurfliesen", "flur", "diele"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["flur", "diele", "eingang"])]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("tag", "") + " " + p.get("description", "")).lower() for t in ["flur", "diele", "eingang"])]
                     elif any(k in combined_l for k in ["fenster", "verglasung"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for t in ["fenster", "verglasung", "rollladen"])]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for t in ["fenster", "verglasung", "rollladen"])]
                     elif any(k in combined_l for k in ["boden", "laminat", "parkett", "maler", "wand", "tapete", "decke", "holzdecke"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("tag", "")).lower() for t in ["wohn", "schlaf", "zimmer", "flur", "kinder"])][:3]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("tag", "")).lower() for t in ["wohn", "schlaf", "zimmer", "flur", "kinder"])][:3]
                     elif any(k in combined_l for k in ["sicherung", "elektrik", "unterverteilung", "schalter", "heizkörper", "rippenheizkörper"]):
-                        found_photos = [p["index"] for p in analyzed_photos if not p.get("is_blueprint") and any(t in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for t in ["sicherung", "elektrik", "schalter", "heizkörper", "rippen"])]
+                        found_photos = [p["index"] for p in real_photos if any(t in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for t in ["sicherung", "elektrik", "schalter", "heizkörper", "rippen"])]
 
                     if found_photos:
-                        p_idxs = found_photos
+                        p_idxs = [i for i in found_photos if i not in ai_photo_indices]
 
                 # Specific Gewerk Reconciliation:
-                # 1. KÜCHE: Only reset blind "keine EBK sichtbar" guesses if an EBK actually appears on the photos;
-                # do NOT erase legitimate renovation/replacement costs when the kitchen is visibly worn or obsolete.
+                # 1. KÜCHE: Only confirm EBK if a REAL (non-AI-staged) kitchen photo shows an installed EBK!
                 if any(k in combined_l for k in ["küche", "ebk"]):
                     cur_k_cost = float(it.get("cost") or 0.0)
                     is_blind_k_guess = any(
                         m in combined_l
                         for m in ["nicht fotografiert", "keinem der", "nicht auf fotos", "keine einbauküche", "fehlt", "ohne besichtigungsbeleg"]
                     )
-                    if has_existing_ebk and (cur_k_cost <= 0 or is_blind_k_guess):
+                    if not has_existing_ebk and (has_empty_real_kitchen or ai_kitchen_photos):
+                        # Drop bogus 0-EUR "EBK vorhanden" item if LLM was fooled by AI-generated kitchen photo
+                        if cur_k_cost <= 0 or any(w in combined_l for w in ["vorhanden", "funktionstüchtig", "gepflegte einbauküche"]):
+                            continue
+                        if kitchen_photos:
+                            p_idxs = kitchen_photos
+                    elif has_existing_ebk and (cur_k_cost <= 0 or is_blind_k_guess):
                         it["cost"] = 0.0
                         it["urgency"] = "Kein Handlungsbedarf"
                         it["title"] = "Einbauküche vorhanden & funktionstüchtig"
@@ -1336,12 +1462,55 @@ def analyze_property_images(
                 it["evidence_source"] = ev_src
                 gem_capex_items.append(it)
 
-            # Reconcile categories for kitchen & bath based on all analyzed photos
-            if kitchen_photos:
-                k_cat = gem_categories.setdefault("kitchen", {})
-                k_findings_l = str(k_cat.get("findings", "")).lower()
-                k_status_l = str(k_cat.get("status", "")).lower()
-                if has_existing_ebk and (
+            # Reconcile categories for kitchen & bath based ONLY on REAL (non-AI-staged) photos
+            k_cat = gem_categories.setdefault("kitchen", {})
+            k_findings_l = str(k_cat.get("findings", "")).lower()
+            k_status_l = str(k_cat.get("status", "")).lower()
+            k_item_exists = any(
+                any(w in (str(it.get("title", "")) + " " + str(it.get("category", ""))).lower() for w in ["küche", "ebk"])
+                and float(it.get("cost") or 0.0) > 0
+                for it in gem_capex_items
+            )
+            desc_mentions_ebk = any(
+                k in desc_lower for k in ["einbauküche", "ebk", "küchenzeile", "inkl. küche"]
+            ) and not any(neg in desc_lower for neg in ["keine einbauküche", "ohne einbauküche", "keine ebk", "ohne ebk"])
+
+            if not has_existing_ebk and (has_empty_real_kitchen or ai_kitchen_photos) and not desc_mentions_ebk:
+                # Kitchen is missing/empty in real photos (even if an AI-generated visualization showed an EBK!)
+                ebk_cost = max(float(k_cat.get("cost") or 0.0), BENCHMARK_COSTS["kitchen_new"])
+                k_cat["score"] = min(float(k_cat.get("score") or 5.0), 5.0)
+                k_cat["cost"] = ebk_cost
+                ai_refs = ", ".join(f"#{i}" for i in ai_kitchen_photos)
+                real_k_refs = ", ".join(f"#{i}" for i in kitchen_photos)
+                if ai_kitchen_photos and real_k_refs:
+                    k_cat["status"] = "Keine EBK (KI-Visualisierung ignoriert)"
+                    k_cat["findings"] = (
+                        f"Echtes Foto ({real_k_refs}) zeigt eine leere Küche ohne Einbauküche; "
+                        f"KI-Visualisierung ({ai_refs}) wurde von der Bewertung ausgeschlossen."
+                    )
+                    ev_k = f"📸 Reales Foto {real_k_refs}: Keine Einbauküche vorhanden (KI-Visualisierung auf Foto {ai_refs} ignoriert)."
+                elif ai_kitchen_photos:
+                    k_cat["status"] = "Keine EBK (nur KI-Visualisierung)"
+                    k_cat["findings"] = f"Foto {ai_refs} ist eine KI-Visualisierung / Virtual Staging und zählt nicht als vorhandene Einbauküche."
+                    ev_k = f"⚠️ KI-Visualisierung auf Foto {ai_refs} ausgeschlossen: Im realen Ist-Zustand keine Einbauküche belegt."
+                else:
+                    k_cat["status"] = "Keine Einbauküche vorhanden"
+                    k_cat["findings"] = f"Auf Foto {real_k_refs} ist ein leerer Küchenraum ohne Einbauküche dokumentiert."
+                    ev_k = f"📸 Sichtbar auf Foto {real_k_refs}: Küche ohne Einbauküche – Neuanschaffung einkalkuliert."
+
+                if not k_item_exists:
+                    gem_capex_items.append({
+                        "title": "Einbauküche (EBK) Neuanschaffung",
+                        "category": "Küche & EBK",
+                        "urgency": "HOCH",
+                        "cost": ebk_cost,
+                        "source_type": "FOTO_BELEG" if kitchen_photos else "BAUJAHR_MUTMASSUNG",
+                        "photo_indices": list(kitchen_photos),
+                        "evidence_source": ev_k,
+                        "description": "Im Ist-Zustand ist keine Einbauküche vorhanden (KI-Visualisierungen/Virtual Staging unberücksichtigt).",
+                    })
+            elif kitchen_photos and has_existing_ebk:
+                if (
                     "nicht fotografiert" in k_findings_l
                     or "keinem" in k_findings_l
                     or "nicht auf fotos" in k_findings_l
@@ -1367,7 +1536,7 @@ def analyze_property_images(
             # Ensure ALL 6 standard categories exist in gem_categories (Flooring, Windows, Heating/Electrics, Walls):
             if "flooring" not in gem_categories or not isinstance(gem_categories["flooring"], dict) or not gem_categories["flooring"].get("status"):
                 floor_mentions = [
-                    p["description"] for p in analyzed_photos
+                    p["description"] for p in real_photos
                     if any(w in (p.get("description", "") + " " + p.get("tag", "")).lower() for w in ["boden", "fliesen", "laminat", "parkett", "dielen", "teppich", "holzboden"])
                 ]
                 f_desc = floor_mentions[0][:140] if floor_mentions else "Solide Bodenbeläge in den Wohnbereichen sichtbar."
@@ -1380,7 +1549,7 @@ def analyze_property_images(
 
             if "windows" not in gem_categories or not isinstance(gem_categories["windows"], dict) or not gem_categories["windows"].get("status"):
                 win_mentions = [
-                    p["description"] for p in analyzed_photos
+                    p["description"] for p in real_photos
                     if any(w in (p.get("description", "") + " " + p.get("tag", "")).lower() for w in ["fenster", "rollladen", "verglasung", "fensterfront", "dachfenster"])
                 ]
                 w_desc = win_mentions[0][:140] if win_mentions else "Fenster wirken dem Baujahr entsprechend intakt."
@@ -1393,7 +1562,7 @@ def analyze_property_images(
 
             if "heating_electrics" not in gem_categories or not isinstance(gem_categories["heating_electrics"], dict) or not gem_categories["heating_electrics"].get("status"):
                 heat_mentions = [
-                    p["description"] for p in analyzed_photos
+                    p["description"] for p in real_photos
                     if any(w in (p.get("description", "") + " " + p.get("tag", "")).lower() for w in ["heizung", "heizkörper", "kamin", "kaminofen", "infrarot", "sicherung", "elektrik"])
                 ]
                 h_desc = heat_mentions[0][:140] if heat_mentions else "Heizungs- und Elektroinstallationen laut Exposé."
@@ -1416,40 +1585,54 @@ def analyze_property_images(
             clean_findings = []
             for f in (gemini_res.get("detected_findings") or []):
                 f_l = str(f).lower()
-                if ("küche fehlen" in f_l or "bad und küche fehlen" in f_l or "bad und küche" in f_l) and (kitchen_photos or bath_photos):
-                    if kitchen_photos and bath_photos:
+                if ("küche fehlen" in f_l or "bad und küche fehlen" in f_l or "bad und küche" in f_l) and (has_existing_ebk or bath_photos):
+                    if has_existing_ebk and bath_photos:
                         clean_findings.append(f"Küche und Badezimmer sind im Bildmaterial dokumentiert (Küche Foto #{', #'.join(str(i) for i in kitchen_photos)}, Bad Foto #{', #'.join(str(i) for i in bath_photos)}).")
-                    elif kitchen_photos:
+                    elif has_existing_ebk:
                         clean_findings.append(f"Einbauküche auf Foto #{', #'.join(str(i) for i in kitchen_photos)} belegt – keine Neuanschaffung nötig.")
                     elif bath_photos:
                         clean_findings.append(f"Badezimmer auf Foto #{', #'.join(str(i) for i in bath_photos)} dokumentiert.")
-                elif "küche" in f_l and ("fehlt" in f_l or "nicht" in f_l or "kein" in f_l) and kitchen_photos:
+                elif "küche" in f_l and ("fehlt" in f_l or "nicht" in f_l or "kein" in f_l) and has_existing_ebk:
                     continue
                 elif "bad" in f_l and ("fehlt" in f_l or "nicht" in f_l or "kein" in f_l) and bath_photos:
                     continue
                 else:
                     clean_findings.append(f)
 
+            if ai_photo_indices:
+                ai_refs_str = ", ".join(f"#{i}" for i in sorted(ai_photo_indices))
+                ai_warn_finding = f"🤖 KI-Filter: Foto {ai_refs_str} wurde als KI-Visualisierung / Virtual Staging erkannt und nicht in Bewertung/CaPEx einbezogen."
+                if ai_warn_finding not in clean_findings:
+                    clean_findings.insert(0, ai_warn_finding)
+
             # Sanitize notice
             gem_notice = gemini_res.get("notice")
             if not gem_notice and not has_interior_photos:
-                gem_notice = f"Hinweis: Das Inserat enthält ausschließlich {len(analyzed_photos)} Bauzeichnungen/Grundrisse und keine Innenraum-Fotos."
-            elif gem_notice and (kitchen_photos or bath_photos):
+                gem_notice = f"Hinweis: Das Inserat enthält keine echten Innenraum-Fotos ({len(analyzed_photos)} Pläne/Visualisierungen)."
+            elif gem_notice and (has_existing_ebk or bath_photos):
                 notice_l = gem_notice.lower()
                 if any(w in notice_l for w in ["nicht fotografiert", "fehlen", "keinem", "nicht abgebildet", "ungeprüft"]):
-                    if ("küche" in notice_l and kitchen_photos) or ("bad" in notice_l and bath_photos):
-                        k_str = f"Küche (Foto #{', #'.join(str(i) for i in kitchen_photos)})" if kitchen_photos else ""
+                    if ("küche" in notice_l and has_existing_ebk) or ("bad" in notice_l and bath_photos):
+                        k_str = f"Küche (Foto #{', #'.join(str(i) for i in kitchen_photos)})" if has_existing_ebk else ""
                         b_str = f"Bad (Foto #{', #'.join(str(i) for i in bath_photos)})" if bath_photos else ""
                         rooms_str = " und ".join(s for s in [k_str, b_str] if s)
-                        gem_notice = f"Es liegen echte Innenraumfotos ({len(analyzed_photos)} Fotos) inklusive {rooms_str} vor."
+                        gem_notice = f"Es liegen echte Innenraumfotos ({len(real_photos)} reale Fotos) inklusive {rooms_str} vor."
+
+            if ai_photo_indices:
+                ai_refs_str = ", ".join(f"#{i}" for i in sorted(ai_photo_indices))
+                ai_note = f"⚠️ Hinweis: Foto {ai_refs_str} ist eine KI-Visualisierung (Virtual Staging) und wurde von der Objektbewertung ausgeschlossen."
+                if not gem_notice:
+                    gem_notice = ai_note
+                elif ai_refs_str not in gem_notice and "virtual staging" not in gem_notice.lower() and "ki-visualisierung" not in gem_notice.lower():
+                    gem_notice = f"{gem_notice} {ai_note}".strip()
 
             total_capex = round(sum(float(item.get("cost") or 0.0) for item in gem_capex_items), 2)
 
             # Sanitize investor summary
             inv_sum = gemini_res.get("investor_summary", "")
-            if inv_sum and (kitchen_photos or bath_photos):
+            if inv_sum and (has_existing_ebk or bath_photos):
                 inv_l = inv_sum.lower()
-                if ("küche" in inv_l and kitchen_photos) or ("bad" in inv_l and bath_photos):
+                if ("küche" in inv_l and has_existing_ebk) or ("bad" in inv_l and bath_photos):
                     if any(w in inv_l for w in ["fehlen", "fehlt", "nicht fotografiert", "nicht dokumentiert", "ungeprüft", "ebk-austausch", "keinem foto", "keinem der"]):
                         inv_sum = re.sub(
                             r"(?i)[^.!?]*(?:fehlen|fehlt|nicht fotografiert|nicht dokumentiert|ungeprüft|ebk-austausch)[^.!?]*(?:bad|küche|ebk)[^.!?]*[.!?]",
@@ -1461,13 +1644,17 @@ def analyze_property_images(
                             "",
                             inv_sum
                         ).strip()
-                        k_claim = f"Eine Einbauküche ist auf Foto #{', #'.join(str(i) for i in kitchen_photos)} belegt (keine EBK-Neuanschaffung nötig)." if kitchen_photos else ""
+                        k_claim = f"Eine Einbauküche ist auf Foto #{', #'.join(str(i) for i in kitchen_photos)} belegt (keine EBK-Neuanschaffung nötig)." if has_existing_ebk else ""
                         b_claim = f"Das Badezimmer ist auf Foto #{', #'.join(str(i) for i in bath_photos)} dokumentiert." if bath_photos else ""
                         claims = " ".join(c for c in [k_claim, b_claim] if c)
                         inv_sum = f"{inv_sum} {claims}".strip()
                         def _fmt_de(v):
                             return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                         inv_sum = re.sub(r"(?i)\(bki-sicherheitspauschale gesamt ca\. [\d\.]+\s*€\)", f"(BKI-Kalkulation ca. {_fmt_de(total_capex)} €)", inv_sum)
+            if not has_existing_ebk and (has_empty_real_kitchen or ai_kitchen_photos):
+                inv_sum = re.sub(r"(?i)[^.!?]*(?:keine\s+ebk-?neuanschaffung|einbauküche\s+(?:ist\s+)?vorhanden|keine\s+investitionskosten\s+für\s+die\s+küche)[^.!?]*[.!?]", "", inv_sum).strip()
+                if "küche" not in inv_sum.lower() and "ebk" not in inv_sum.lower():
+                    inv_sum = f"{inv_sum} Hinweis: Im realen Ist-Zustand ist keine Einbauküche vorhanden (KI-Visualisierungen ausgeschlossen).".strip()
             if "keinem der 8 fotos" in inv_sum.lower() or "keinem der fotos" in inv_sum.lower():
                 inv_sum = re.sub(r"(?i)auf keinem der \d+ fotos", f"auf den {len(analyzed_photos)} Fotos", inv_sum)
 
@@ -1481,8 +1668,9 @@ def analyze_property_images(
                     "total_tokens": total_tokens
                 },
                 "photos_analyzed_count": len(analyzed_photos),
-                "has_interior_photos": gemini_res.get("has_interior_photos", has_interior_photos),
+                "has_interior_photos": has_interior_real,
                 "blueprints_count": blueprints_count,
+                "ai_generated_photos_count": len(ai_photo_indices),
                 "notice": gem_notice,
                 "overall_visual_score": round(float(gemini_res.get("overall_visual_score", 7.0)), 1),
                 "condition_rating": gemini_res.get("condition_rating", "GEPFLEGT"),
@@ -1653,10 +1841,16 @@ def analyze_property_images(
             bad_findings = "Gepflegtes Standard-Badezimmer, Wanne/Dusche intakt, kein akuter Sanierungsstau."
             bad_cost = 0.0
 
-        # Category 2: Kitchen
+        # Category 2: Kitchen (Strictly ignore AI-generated visualizations and negated empty-kitchen descriptions!)
         has_photo_ebk = any(
-            p.get("tag") == "🍳 Küche / EBK" or any(k in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower() for k in ["küche", "ebk", "einbauküche", "küchenzeile"])
-            for p in analyzed_photos if not p.get("is_blueprint")
+            not p.get("is_blueprint")
+            and not p.get("is_ai_generated")
+            and not _EMPTY_KITCHEN_REGEX.search(str(p.get("description", "")) + " " + " ".join(p.get("findings") or []))
+            and (
+                p.get("tag") == "🍳 Küche / EBK"
+                or bool(_REAL_EBK_REGEX.search(str(p.get("description", "")) + " " + " ".join(p.get("findings") or [])))
+            )
+            for p in analyzed_photos
         )
         if has_ebk or has_photo_ebk:
             if is_kernsaniert or "moderne einbauküche" in desc_lower or "hochwertige küche" in desc_lower:
@@ -1774,7 +1968,9 @@ def analyze_property_images(
             )
         matched = [
             p["index"] for p in analyzed_photos
-            if not p.get("is_blueprint") and any(k in (p.get("tag", "") + " " + p.get("description", "")).lower() for k in trade_kw)
+            if not p.get("is_blueprint")
+            and not p.get("is_ai_generated")
+            and any(k in (p.get("tag", "") + " " + p.get("description", "")).lower() for k in trade_kw)
         ]
         if matched:
             refs = ", ".join(f"#{i}" for i in matched[:3])

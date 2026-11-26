@@ -1130,12 +1130,16 @@ def _find_visual_evidence(
                 break
 
     cat_obj = vis_cats.get(cat_key) if cat_key else None
+    ai_indices = {int(p.get("index")) for p in analyzed_photos if p.get("is_ai_generated") and p.get("index")}
     photo_indices: List[int] = []
     if matched_item and matched_item.get("photo_indices"):
-        photo_indices = [int(p) for p in matched_item["photo_indices"] if str(p).isdigit()]
+        photo_indices = [
+            int(p) for p in matched_item["photo_indices"]
+            if str(p).isdigit() and int(p) not in ai_indices
+        ]
     elif has_interior and photo_tag_keywords:
         for p in analyzed_photos:
-            if p.get("is_blueprint"):
+            if p.get("is_blueprint") or p.get("is_ai_generated"):
                 continue
             ptxt = f"{p.get('tag', '')} {p.get('description', '')} {' '.join(p.get('findings') or [])}".lower()
             if any(tk in ptxt for tk in photo_tag_keywords):
@@ -1295,7 +1299,7 @@ def estimate_capex_and_hidden_costs(
     vis_elec_item = vis_elec.get("matched_item")
     vis_elec_photos = [
         p["index"] for p in ((image_analysis or {}).get("analyzed_photos") or [])
-        if not p.get("is_blueprint") and any(k in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for k in ["sicherungskasten", "unterverteilung", "schaltschrank", "kippschalter"])
+        if not p.get("is_blueprint") and not p.get("is_ai_generated") and any(k in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for k in ["sicherungskasten", "unterverteilung", "schaltschrank", "kippschalter"])
     ]
     vis_elec_modern = (
         has_interior_vis
@@ -1460,18 +1464,36 @@ def estimate_capex_and_hidden_costs(
             if not vt or vamt <= 0:
                 continue
             v_l = vt.lower()
-            # If kitchen is already present on photos or category shows EBK, DO NOT charge for buying a new kitchen!
+            # Only suppress missing-EBK CapEx if a REAL (non-blueprint, non-AI-staged) kitchen photo
+            # confirms an actually installed EBK (NOT an empty kitchen room or AI virtual staging)!
             if any(k in v_l for k in ["küche", "ebk", "einbauküche"]):
+                from app.image_analyst import _EMPTY_KITCHEN_REGEX, _REAL_EBK_REGEX
                 k_cat = (image_analysis.get("categories") or {}).get("kitchen") or {}
                 k_status = str(k_cat.get("status") or "").lower()
-                k_photos = [
-                    p.get("index") for p in (image_analysis.get("analyzed_photos") or [])
-                    if not p.get("is_blueprint") and (
-                        p.get("tag") == "🍳 Küche / EBK" or
-                        "küche" in (str(p.get("tag", "")) + " " + str(p.get("description", ""))).lower()
-                    )
-                ]
-                if (k_photos or "vorhanden" in k_status or "gepflegt" in k_status or "intakt" in k_status) and any(w in v_l for w in ["beschaffen", "neuanschaffung", "kauf", "einbauküche beschaffen"]):
+                k_findings = str(k_cat.get("findings") or "").lower()
+                k_cat_cost = float(k_cat.get("cost") or 0.0)
+
+                real_ebk_photos = []
+                empty_k_found = False
+                for p in (image_analysis.get("analyzed_photos") or []):
+                    if p.get("is_blueprint") or p.get("is_ai_generated"):
+                        continue
+                    ptxt = f"{p.get('tag', '')} {p.get('description', '')} {' '.join(p.get('findings') or [])}".lower()
+                    if "küche" in ptxt or "ebk" in ptxt or "einbauküche" in ptxt:
+                        if _EMPTY_KITCHEN_REGEX.search(ptxt):
+                            empty_k_found = True
+                        elif _REAL_EBK_REGEX.search(ptxt):
+                            real_ebk_photos.append(p.get("index"))
+
+                cat_confirms_ebk = (
+                    k_cat_cost <= 0
+                    and ("vorhanden" in k_status or "gepflegt" in k_status or "intakt" in k_status)
+                    and "keine" not in k_status
+                    and "ki-visualisierung" not in k_status
+                    and "keine" not in k_findings
+                )
+                has_verified_real_ebk = bool(real_ebk_photos) or (cat_confirms_ebk and not empty_k_found)
+                if has_verified_real_ebk and any(w in v_l for w in ["beschaffen", "neuanschaffung", "kauf", "einbauküche beschaffen"]):
                     continue
 
             is_holzdecke = "holz" in v_l and "decke" in v_l
@@ -1483,7 +1505,8 @@ def estimate_capex_and_hidden_costs(
                 ]
             )
             if not already_covered:
-                p_idx = [int(p) for p in (vi.get("photo_indices") or []) if str(p).isdigit()]
+                ai_indices = {int(p.get("index")) for p in (image_analysis.get("analyzed_photos") or []) if p.get("is_ai_generated") and p.get("index")}
+                p_idx = [int(p) for p in (vi.get("photo_indices") or []) if str(p).isdigit() and int(p) not in ai_indices]
                 items.append({
                     "title": vt,
                     "amount": round(vamt, 2),
