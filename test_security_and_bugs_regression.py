@@ -3,11 +3,13 @@ Comprehensive regression test suite for Security & Acute Bug fixes (Point 1).
 Uses an isolated temporary SQLite database so production data is untouched.
 """
 
+import asyncio
 import json
 import os
 import tempfile
 import threading
 import unittest
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 # Isolate database BEFORE importing app modules
@@ -24,13 +26,14 @@ from fastapi.testclient import TestClient
 from app.ai_analyst import extract_listing_insights, generate_ai_due_diligence_report, estimate_capex_and_hidden_costs
 from app.auth import get_auth_config, hash_session_token
 from app.availability import check_portal_url_live
-from app.database import DB_PATH, get_active_mcp_token, get_connection, init_db, set_system_setting
+from app.database import DB_PATH, get_active_mcp_token, get_connection, get_search_profile_by_id, get_system_setting, init_db, set_system_setting
+from app.datetime_utils import get_berlin_now, get_berlin_now_str
 from app.geo_resolver import resolve_location_and_tax
 from app.image_analyst import analyze_property_images
 from app.main import app, assemble_index_html
 from app.network_security import sanitize_error_message, validate_external_url
 from app.portal_health import run_canary_checks
-from app.scheduler import crawler_scan_guard, is_crawler_busy
+from app.scheduler import crawler_scan_guard, is_crawler_busy, run_scheduler_tick
 from app.scrapers.immowelt import fetch_immowelt_expose
 from app.scrapers.kleinanzeigen import scrape_kleinanzeigen_deals
 from app.scrapers.immoscout import search_immoscout_deals
@@ -433,6 +436,123 @@ class TestPoint1SecurityAndBugs(unittest.TestCase):
             self.assertIn("[x-cloak]", css_f.read())
         self.assertIn("formatPricePerSqm(prop.purchase_price, prop.living_space)", html_out)
         self.assertIn("formatDateTimeDE(portalHealth.last_checked_at)", html_out)
+
+    def test_13_scheduler_tick_executes_profile_across_threads(self):
+        """
+        Regression test for the 9f7a657 cross-thread RLock self-deadlock bug:
+        run_scheduler_tick() runs in the asyncio loop thread and offloads
+        execute_all_active_profiles() via asyncio.to_thread() to a worker thread.
+        It must NOT self-reject on crawler_scan_guard and must update crawler_last_run
+        and active profiles' last_run_at.
+        """
+        from app.search_agent import execute_all_active_profiles
+
+        seven_hours_ago = (get_berlin_now().replace(tzinfo=None) - timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S")
+        now_recent = get_berlin_now_str()
+
+        # Ensure an active profile exists and starts with stale last_run_at
+        conn = get_connection()
+        conn.execute(
+            "UPDATE search_profiles SET is_active = 1, last_run_at = ? WHERE id = 1",
+            (seven_hours_ago,),
+        )
+        conn.commit()
+        conn.close()
+
+        set_system_setting("crawler_active", "1")
+        set_system_setting("crawler_interval_minutes", "360")
+        set_system_setting("crawler_last_run", seven_hours_ago)
+        set_system_setting("portal_health_last_check", now_recent)
+
+        with patch("app.search_agent.scrape_multi_portal_deals", return_value=[]):
+            tick_res = asyncio.run(
+                run_scheduler_tick(
+                    crawler_runner=execute_all_active_profiles,
+                    canary_runner=lambda: None,
+                )
+            )
+
+        self.assertTrue(tick_res["ran_crawler"])
+        self.assertFalse(is_crawler_busy())
+        updated_last_run = get_system_setting("crawler_last_run")
+        self.assertIsNotNone(updated_last_run)
+        self.assertNotEqual(updated_last_run, seven_hours_ago)
+        prof1 = get_search_profile_by_id(1)
+        self.assertIsNotNone(prof1["last_run_at"])
+        self.assertNotEqual(prof1["last_run_at"], seven_hours_ago)
+
+        # While another thread holds the crawler lock, scheduler tick must skip cleanly
+        set_system_setting("crawler_last_run", seven_hours_ago)
+        holder_acquired = threading.Event()
+        release_holder = threading.Event()
+
+        def hold_lock():
+            with crawler_scan_guard(blocking=False) as acq:
+                if acq:
+                    holder_acquired.set()
+                    release_holder.wait(timeout=5.0)
+
+        t = threading.Thread(target=hold_lock)
+        t.start()
+        holder_acquired.wait(timeout=2.0)
+        try:
+            skipped_res = asyncio.run(
+                run_scheduler_tick(
+                    crawler_runner=execute_all_active_profiles,
+                    canary_runner=lambda: None,
+                )
+            )
+            self.assertFalse(skipped_res["ran_crawler"])
+            self.assertEqual(get_system_setting("crawler_last_run"), seven_hours_ago)
+        finally:
+            release_holder.set()
+            t.join(timeout=2.0)
+            set_system_setting("crawler_active", "0")
+
+    def test_14_alert_settings_response_and_mcp_single_profile_guard(self):
+        # POST /api/alerts/settings returns authoritative interval and active state
+        r = self.authed.post(
+            "/api/alerts/settings",
+            json={"crawler_active": True, "crawler_interval_minutes": 360, "telegram_chat_id": "98765"},
+        )
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["success"])
+        self.assertTrue(body["crawler_active"])
+        self.assertEqual(body["crawler_interval_minutes"], 360)
+
+        # Verify UI template & JS carry coalesced save logic and cache busting
+        html_out = assemble_index_html()
+        self.assertIn("saveAlertSettingsForm({ silent: true })", html_out)
+        self.assertIn("alerts.js?v=2.5", html_out)
+
+        # Verify MCP single-profile run respects cross-thread crawler_scan_guard
+        mcp_token = get_active_mcp_token()["token"]
+        holder_acquired = threading.Event()
+        release_holder = threading.Event()
+
+        def hold_lock():
+            with crawler_scan_guard(blocking=False) as acq:
+                if acq:
+                    holder_acquired.set()
+                    release_holder.wait(timeout=5.0)
+
+        t = threading.Thread(target=hold_lock)
+        t.start()
+        holder_acquired.wait(timeout=2.0)
+        try:
+            mcp_res = self.unauth.post(
+                "/mcp/call",
+                headers={"Authorization": f"Bearer {mcp_token}"},
+                json={"name": "run_search_profiles", "arguments": {"profile_id": 1}},
+            )
+            self.assertEqual(mcp_res.status_code, 200)
+            self.assertFalse(mcp_res.json()["result"]["success"])
+            self.assertIn("bereits im Hintergrund", mcp_res.json()["result"]["error"])
+        finally:
+            release_holder.set()
+            t.join(timeout=2.0)
+            self.authed.post("/api/alerts/settings", json={"crawler_active": False, "crawler_interval_minutes": 60})
 
 
 if __name__ == "__main__":

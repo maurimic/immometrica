@@ -20,6 +20,11 @@ window.immoAlertsModule = {
   telegramTesting: false,
   telegramTestResult: null,
   savingAlertSettings: false,
+  crawlerSettingsStatus: '',
+  _alertSettingsSavePromise: null,
+  _alertSettingsPendingSave: false,
+  _alertSettingsShowPopup: false,
+  _crawlerStatusTimer: null,
   scanningProfiles: false,
   runningProfileId: null,
   lastScanStats: null,
@@ -58,6 +63,10 @@ window.immoAlertsModule = {
       if (profRes && profRes.success) this.searchProfiles = profRes.profiles || [];
       if (feedRes && feedRes.success) this.alertFeed = feedRes.alerts || [];
       if (settRes && settRes.crawler_interval_minutes !== undefined) {
+        if (this.savingAlertSettings || this._alertSettingsPendingSave) {
+          settRes.crawler_active = Boolean(this.alertSettings.crawler_active);
+          settRes.crawler_interval_minutes = Number(this.alertSettings.crawler_interval_minutes) || settRes.crawler_interval_minutes;
+        }
         this.alertSettings = settRes;
         this.telegramInputChatId = String(settRes.telegram_chat_id || '').trim();
         if (settRes.crawler_last_stats) {
@@ -254,38 +263,130 @@ window.immoAlertsModule = {
     }
   },
 
-  async saveAlertSettingsForm() {
-    this.savingAlertSettings = true;
-    try {
-      const cleanChatId = String(this.telegramInputChatId || '').trim();
-      const payload = {
-        telegram_chat_id: cleanChatId,
-        crawler_interval_minutes: Number(this.alertSettings.crawler_interval_minutes),
-        crawler_active: Boolean(this.alertSettings.crawler_active)
-      };
-      if (this.telegramInputToken && this.telegramInputToken.trim()) {
-        payload.telegram_bot_token = this.telegramInputToken.trim();
-      }
-      const res = this.handleAuthResponse(await fetch('/api/alerts/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      }));
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.success) {
-        this.telegramInputToken = '';
-        this.alertSettings.telegram_chat_id = cleanChatId;
-        this.telegramInputChatId = cleanChatId;
-        await this.loadAlertsData();
-        alert(`✅ Einstellungen gespeichert!\nChat-ID: ${cleanChatId || '(keine angegeben)'}`);
-      } else {
-        alert('Fehler: ' + (data.detail || `Konnte Einstellungen nicht speichern (${res.status}).`));
-      }
-    } catch (e) {
-      alert('Fehler beim Speichern: ' + e.message);
-    } finally {
-      this.savingAlertSettings = false;
+  async saveAlertSettingsForm(options = {}) {
+    const silent = Boolean(options && options.silent);
+    if (!silent) {
+      this._alertSettingsShowPopup = true;
     }
+    this._alertSettingsPendingSave = true;
+
+    if (this._alertSettingsSavePromise) {
+      return await this._alertSettingsSavePromise;
+    }
+
+    this._alertSettingsSavePromise = (async () => {
+      this.savingAlertSettings = true;
+      this.crawlerSettingsStatus = 'saving';
+      if (this._crawlerStatusTimer) {
+        clearTimeout(this._crawlerStatusTimer);
+        this._crawlerStatusTimer = null;
+      }
+
+      let lastSuccessData = null;
+      let lastChatId = '';
+      let hadError = null;
+
+      try {
+        while (true) {
+          while (this._alertSettingsPendingSave) {
+            this._alertSettingsPendingSave = false;
+            hadError = null;
+
+            const cleanChatId = String(this.telegramInputChatId || '').trim();
+            const tokenSnapshot = (this.telegramInputToken && this.telegramInputToken.trim())
+              ? this.telegramInputToken.trim()
+              : '';
+            const payload = {
+              telegram_chat_id: cleanChatId,
+              crawler_interval_minutes: Number(this.alertSettings.crawler_interval_minutes) || 60,
+              crawler_active: Boolean(this.alertSettings.crawler_active)
+            };
+            if (tokenSnapshot) {
+              payload.telegram_bot_token = tokenSnapshot;
+            }
+
+            const res = this.handleAuthResponse(await fetch('/api/alerts/settings', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            }));
+            const data = await res.json().catch(() => ({}));
+
+            if (res.ok && data.success) {
+              if (tokenSnapshot && this.telegramInputToken.trim() === tokenSnapshot) {
+                this.telegramInputToken = '';
+              }
+              lastSuccessData = data;
+              lastChatId = cleanChatId;
+            } else {
+              lastSuccessData = null;
+              hadError = data.detail || `Konnte Einstellungen nicht speichern (${res.status}).`;
+              if (!this._alertSettingsPendingSave) {
+                this.crawlerSettingsStatus = 'error';
+                alert('Fehler: ' + hadError);
+              }
+            }
+          }
+
+          if (lastSuccessData && !hadError) {
+            this.alertSettings.telegram_chat_id = lastChatId;
+            this.telegramInputChatId = lastChatId;
+            if (lastSuccessData.crawler_interval_minutes !== undefined) {
+              this.alertSettings.crawler_interval_minutes = Number(lastSuccessData.crawler_interval_minutes);
+            }
+            if (lastSuccessData.crawler_active !== undefined) {
+              this.alertSettings.crawler_active = Boolean(lastSuccessData.crawler_active);
+            }
+            if (lastSuccessData.telegram_configured !== undefined) {
+              this.alertSettings.telegram_configured = Boolean(lastSuccessData.telegram_configured);
+            }
+            this.savingAlertSettings = false;
+            await this.loadAlertsData();
+            lastSuccessData = null;
+
+            if (!this._alertSettingsPendingSave) {
+              const showPopup = this._alertSettingsShowPopup;
+              this._alertSettingsShowPopup = false;
+              this.crawlerSettingsStatus = 'saved';
+              this._crawlerStatusTimer = setTimeout(() => {
+                if (this.crawlerSettingsStatus === 'saved') {
+                  this.crawlerSettingsStatus = '';
+                }
+              }, 2500);
+
+              if (showPopup) {
+                alert(`✅ Einstellungen gespeichert!\nChat-ID: ${lastChatId || '(keine angegeben)'}`);
+              }
+            }
+          } else if (hadError) {
+            this.savingAlertSettings = false;
+            this._alertSettingsShowPopup = false;
+            await this.loadAlertsData();
+            hadError = null;
+          }
+
+          if (!this._alertSettingsPendingSave) {
+            break;
+          }
+          this.savingAlertSettings = true;
+          this.crawlerSettingsStatus = 'saving';
+        }
+      } catch (e) {
+        this._alertSettingsPendingSave = false;
+        this._alertSettingsShowPopup = false;
+        this.crawlerSettingsStatus = 'error';
+        alert('Fehler beim Speichern: ' + e.message);
+        await this.loadAlertsData();
+      } finally {
+        this.savingAlertSettings = false;
+        this._alertSettingsSavePromise = null;
+        if (this.crawlerSettingsStatus === 'saving') {
+          this.crawlerSettingsStatus = '';
+        }
+      }
+    })();
+
+    return await this._alertSettingsSavePromise;
   },
 
   async testTelegramConnection() {

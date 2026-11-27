@@ -45,6 +45,79 @@ def crawler_scan_guard(blocking: bool = False):
         _crawler_lock.release()
 
 
+async def run_scheduler_tick(crawler_runner=None, canary_runner=None) -> dict:
+    """
+    Executes a single scheduler check for the periodic crawler and 6h portal canary.
+    Separated from _crawler_loop for deterministic testing.
+    """
+    ran_crawler = False
+    ran_canary = False
+
+    # Check if crawler is activated by user
+    active_setting = get_system_setting("crawler_active", "0")
+    is_active = active_setting in ("1", "true", "True")
+
+    if is_active and not _is_running_scan:
+        interval_str = get_system_setting("crawler_interval_minutes", "60")
+        try:
+            interval_min = max(5, int(interval_str))
+        except ValueError:
+            interval_min = 60
+
+        last_run_str = get_system_setting("crawler_last_run")
+        should_run = False
+
+        if not last_run_str:
+            should_run = True
+        else:
+            try:
+                last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
+                elapsed_seconds = (get_berlin_now().replace(tzinfo=None) - last_run_dt).total_seconds()
+                if elapsed_seconds >= (interval_min * 60):
+                    should_run = True
+            except Exception:
+                should_run = True
+
+        if should_run and not is_crawler_busy():
+            logger.info(f"Triggering scheduled crawler scan (Interval: {interval_min} min)...")
+            try:
+                if crawler_runner is None:
+                    from app.search_agent import execute_all_active_profiles
+                    crawler_runner = execute_all_active_profiles
+                # Do NOT acquire crawler_scan_guard on the asyncio event loop thread before to_thread():
+                # _crawler_lock is a thread-affine threading.RLock, so holding it on the loop thread
+                # would cause execute_all_active_profiles() in the worker thread to self-reject.
+                await asyncio.to_thread(crawler_runner)
+                ran_crawler = True
+            except Exception as e:
+                logger.error(f"Error during scheduled crawler run: {e}")
+
+    # Periodic Portal Health / Canary Check (every 6 hours or upon initial start)
+    last_canary_str = get_system_setting("portal_health_last_check")
+    should_run_canary = False
+    if not last_canary_str:
+        should_run_canary = True
+    else:
+        try:
+            last_canary_dt = datetime.strptime(last_canary_str, "%Y-%m-%d %H:%M:%S")
+            if (get_berlin_now().replace(tzinfo=None) - last_canary_dt).total_seconds() >= (6 * 3600):
+                should_run_canary = True
+        except Exception:
+            should_run_canary = True
+
+    if should_run_canary:
+        try:
+            if canary_runner is None:
+                from app.portal_health import run_canary_checks
+                canary_runner = run_canary_checks
+            await asyncio.to_thread(canary_runner)
+            ran_canary = True
+        except Exception as e:
+            logger.error(f"Error during background portal canary check: {e}")
+
+    return {"ran_crawler": ran_crawler, "ran_canary": ran_canary}
+
+
 async def _crawler_loop():
     """
     Periodic loop checking interval and triggering active search profiles.
@@ -53,62 +126,7 @@ async def _crawler_loop():
 
     while True:
         try:
-            # Check if crawler is activated by user
-            active_setting = get_system_setting("crawler_active", "0")
-            is_active = active_setting in ("1", "true", "True")
-
-            if is_active and not _is_running_scan:
-                interval_str = get_system_setting("crawler_interval_minutes", "60")
-                try:
-                    interval_min = max(5, int(interval_str))
-                except ValueError:
-                    interval_min = 60
-
-                last_run_str = get_system_setting("crawler_last_run")
-                should_run = False
-
-                if not last_run_str:
-                    should_run = True
-                else:
-                    try:
-                        last_run_dt = datetime.strptime(last_run_str, "%Y-%m-%d %H:%M:%S")
-                        elapsed_seconds = (get_berlin_now().replace(tzinfo=None) - last_run_dt).total_seconds()
-                        if elapsed_seconds >= (interval_min * 60):
-                            should_run = True
-                    except Exception:
-                        should_run = True
-
-                if should_run:
-                    with crawler_scan_guard(blocking=False) as acquired:
-                        if acquired:
-                            logger.info(f"Triggering scheduled crawler scan (Interval: {interval_min} min)...")
-                            try:
-                                from app.search_agent import execute_all_active_profiles
-                                # Run blocking scraping & AI pre-check in separate thread
-                                await asyncio.to_thread(execute_all_active_profiles)
-                            except Exception as e:
-                                logger.error(f"Error during scheduled crawler run: {e}")
-
-            # Periodic Portal Health / Canary Check (every 6 hours or upon initial start)
-            last_canary_str = get_system_setting("portal_health_last_check")
-            should_run_canary = False
-            if not last_canary_str:
-                should_run_canary = True
-            else:
-                try:
-                    last_canary_dt = datetime.strptime(last_canary_str, "%Y-%m-%d %H:%M:%S")
-                    if (get_berlin_now().replace(tzinfo=None) - last_canary_dt).total_seconds() >= (6 * 3600):
-                        should_run_canary = True
-                except Exception:
-                    should_run_canary = True
-
-            if should_run_canary:
-                try:
-                    from app.portal_health import run_canary_checks
-                    await asyncio.to_thread(run_canary_checks)
-                except Exception as e:
-                    logger.error(f"Error during background portal canary check: {e}")
-
+            await run_scheduler_tick()
         except asyncio.CancelledError:
             logger.info("Crawler scheduler loop cancelled.")
             break

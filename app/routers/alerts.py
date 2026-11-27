@@ -308,12 +308,16 @@ def save_alert_settings(payload: Dict[str, Any] = Body(...)):
 
     tg_chat_id = get_system_setting("telegram_chat_id", "")
     tg_token = get_system_setting("telegram_bot_token", "")
+    interval = get_system_setting("crawler_interval_minutes", "60")
+    active_str = get_system_setting("crawler_active", "0")
 
     return {
         "success": True,
         "message": "Suchagent- & Alert-Einstellungen erfolgreich gespeichert.",
         "telegram_chat_id": tg_chat_id,
-        "telegram_configured": bool(tg_token and tg_chat_id)
+        "telegram_configured": bool(tg_token and tg_chat_id),
+        "crawler_interval_minutes": int(interval) if interval and interval.isdigit() else 60,
+        "crawler_active": active_str in ("1", "true", "True")
     }
 
 

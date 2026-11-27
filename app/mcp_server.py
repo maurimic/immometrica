@@ -418,9 +418,13 @@ def call_tool(payload: Dict[str, Any] = Body(...)):
 
     elif tool_name == "run_search_profiles":
         from app.search_agent import execute_search_profile, execute_all_active_profiles
+        from app.scheduler import crawler_scan_guard
         pid = args.get("profile_id")
         if pid:
-            res = execute_search_profile(int(pid), force=True)
+            with crawler_scan_guard(blocking=False) as acquired:
+                if not acquired:
+                    return {"result": {"success": False, "error": "Crawler läuft bereits im Hintergrund."}}
+                res = execute_search_profile(int(pid), force=True)
             return {"result": res}
         else:
             results = execute_all_active_profiles()

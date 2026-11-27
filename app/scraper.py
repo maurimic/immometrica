@@ -181,16 +181,19 @@ def scrape_multi_portal_deals(
 
     # Fallback to Kleinanzeigen alone if other portals were empty
     if not all_raw_deals:
-        raw_k = scrape_kleinanzeigen_deals(
-            city=city,
-            query=query,
-            max_results=raw_fetch_count,
-            exclude_urls=exclude_set,
-            postal_code=postal_code,
-            radius_km=radius_km,
-            property_type=property_type
-        )
-        all_raw_deals = [d for d in raw_k if _matches_criteria(d)]
+        try:
+            raw_k = scrape_kleinanzeigen_deals(
+                city=city,
+                query=query,
+                max_results=raw_fetch_count,
+                exclude_urls=exclude_set,
+                postal_code=postal_code,
+                radius_km=radius_km,
+                property_type=property_type
+            )
+            all_raw_deals = [d for d in raw_k if _matches_criteria(d)]
+        except Exception as exc:
+            logger.error(f"Fallback portal 'kleinanzeigen' generated an exception: {exc}")
 
     # Cross-Portal Deal Fusion is deactivated: every portal listing remains strictly independent
     fused_deals = fuse_deals(all_raw_deals)
