@@ -1081,12 +1081,18 @@ document.addEventListener('alpine:init', () => {
             } else if (this.selectedProperty.ai_analysis) {
               this.selectedProperty.ai_analysis.image_analysis = data.image_analysis;
             }
+            if (data.property_updates) {
+              Object.assign(this.selectedProperty, data.property_updates);
+            }
           }
           const idx = this.properties.findIndex(p => p.id === propertyId);
           if (idx !== -1) {
             this.properties[idx].image_analysis = data.image_analysis;
             if (data.ai_audit) {
               this.properties[idx].ai_analysis = data.ai_audit;
+            }
+            if (data.property_updates) {
+              Object.assign(this.properties[idx], data.property_updates);
             }
           }
           if (this.isOneProvider) {
@@ -1404,7 +1410,13 @@ document.addEventListener('alpine:init', () => {
 
     isHouseOrPlot(prop) {
       if (!prop) return false;
+      if (prop.ai_analysis?.metrics?.is_mfh || prop.ai_analysis?.insights?.is_mfh) {
+        return true;
+      }
       const pType = String(prop.property_type || '').toLowerCase();
+      if (pType.includes('mehrfamilienhaus') || pType.includes('mfh')) {
+        return true;
+      }
       const bType = String(prop.building_type || '').toLowerCase();
       const combined = `${pType} ${bType}`;
       if (combined.includes('wohnung') || combined.includes('paket') || combined.includes('maisonette') || combined.includes('penthouse') || combined.includes('etw')) {

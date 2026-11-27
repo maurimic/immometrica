@@ -138,12 +138,294 @@ def estimate_energy_class_from_year_built(year_built: Optional[int]) -> str:
         return "H (Geschätzt nach Baujahr)"
 
 
+_ANNUAL_CONTEXT_RE = re.compile(
+    r"(?:\bper\s*anno\b|\bper\s*annum\b|\bp\.?\s*a\.?(?!\w)|\bpro\s*jahr\b|\bj[äa]hrlich(?:e[nrs]?)?|\bjahres(?:netto)?kaltmiete\b|\bjahresmiete\b|\bjnkm\b|\bjkm\b)",
+    re.IGNORECASE,
+)
+_GLOBAL_ANNUAL_DOC_RE = re.compile(
+    r"(?:(?:alle|sämtliche)\s+(?:miet)?angaben[^\n\r]{0,40}(?:per\s*anno|per\s*annum|p\.?\s*a\.?|pro\s*jahr|j[äa]hrlich)"
+    r"|(?:miet)?angaben\s+verstehen\s+sich\s+(?:per\s*anno|per\s*annum|p\.?\s*a\.?|pro\s*jahr|j[äa]hrlich)"
+    r"|mieteinnahmen\s+(?:per\s*anno|per\s*annum|p\.?\s*a\.?|pro\s*jahr|j[äa]hrlich))",
+    re.IGNORECASE,
+)
+_MONTHLY_CONTEXT_RE = re.compile(
+    r"(?:\bmonatlich\b|\bpro\s*monat\b|\bp\.?\s*m\.?(?!\w)|\bim\s*monat\b|/m\b|\bmtl\.?(?!\w))",
+    re.IGNORECASE,
+)
+_VACANT_UNIT_RE = re.compile(
+    r"\b(?:leer|leerstand|leerstehend\w*|unvermietet|nicht\s*vermietet|mieterwechsel|bezugsfrei|sofort\s*frei|frei\s*stehend)\b",
+    re.IGNORECASE,
+)
+
+
+def _should_treat_rent_as_annual(
+    amount: float,
+    sqm: float,
+    local_ctx: str,
+    is_global_annual: bool,
+) -> bool:
+    """Bestimmt sicher, ob eine Mietangabe als Jahresbetrag (÷ 12) interpretiert werden muss."""
+    if not amount or amount <= 0:
+        return False
+    has_monthly = bool(_MONTHLY_CONTEXT_RE.search(local_ctx or ""))
+    has_annual = bool(_ANNUAL_CONTEXT_RE.search(local_ctx or ""))
+    if has_annual and not has_monthly:
+        return True
+    if is_global_annual and not has_monthly:
+        return True
+    # Plausibilitäts-Wächter: > 30 €/m² bei gleichzeitig realistischer Monatsmiete nach ÷ 12 (3,0–25,0 €/m²)
+    if sqm and sqm > 0 and (amount / sqm) > 30.0:
+        monthly_sqm = (amount / 12.0) / sqm
+        if 3.0 <= monthly_sqm <= 25.0 and not has_monthly:
+            return True
+    return False
+
+
+def _clean_unit_label(raw_line: str) -> str:
+    """Extrahiert eine kompakte, lesbare Einheitsbezeichnung aus einer MFH-Zeile."""
+    txt = re.sub(r"^\s*[-*•▪▸]+\s*", "", raw_line).strip()
+    m_prefix = re.split(
+        r"\s+(?:mit\s+ca\.|ca\.|\d+(?:[.,]\d+)?\s*(?:m²|m2|qm)|\d+(?:\.\d{3})*(?:,\d{1,2})?\s*(?:€|euro|eur))|\s*[:(–\-]\s*",
+        txt,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )
+    label = (m_prefix[0] if m_prefix else txt).strip(" ,.;:-")
+    # Entferne Jahreszahlen/Zusatzworte wie "2026" oder "Nettokaltmiete"
+    label = re.sub(r"\b(?:19\d{2}|20\d{2})\b", "", label).strip(" ,.;:-")
+    label = re.sub(r"\b(?:netto)?kaltmiete\b", "", label, flags=re.IGNORECASE).strip(" ,.;:-")
+    if re.search(r"\bDG\b", raw_line) and "dg" not in label.lower() and "dach" not in label.lower():
+        label = f"{label} (DG)".strip()
+    if len(label) > 42:
+        label = label[:39].rstrip() + "..."
+    return label or "Wohneinheit"
+
+
+def _extract_unit_euro_amount(line: str) -> Optional[Tuple[float, str]]:
+    """Extrahiert gezielt die (Kalt-)Miete aus einer Einheiten-Zeile, ohne m² oder Jahreszahlen zu treffen."""
+    # Bevorzuge Angabe direkt nach Kaltmiete / Nettokaltmiete / Ist-Miete / Sollmiete
+    explicit_km = re.search(
+        r"(?:nettokaltmiete|ist-?kaltmiete|kaltmiete|soll-?miete|ist-?miete|km)\s*[:=]?\s*(?:ca\.?\s*)?(?:[^\d\n\r€]{0,20})?(\d+(?:\.\d{3})*(?:,\d{1,2}|,-)?)\s*(?:€|(?:euro|eur)\b)",
+        line,
+        re.IGNORECASE,
+    )
+    if explicit_km:
+        val = _clean_german_number(explicit_km.group(1))
+        if val and 80.0 <= val <= 200000.0:
+            return val, explicit_km.group(0).strip()
+
+    # Alle Euro-Beträge in der Zeile (ohne €/m²) prüfen
+    for m in re.finditer(r"(?<!/)(\d+(?:\.\d{3})*(?:,\d{1,2}|,-)?)\s*(?:€|(?:euro|eur)\b)(?!\s*/\s*(?:m²|m2|qm))", line, re.IGNORECASE):
+        before_ctx = line[max(0, m.start() - 25):m.start()].lower()
+        if any(skip in before_ctx for skip in ["warmmiete", "nebenkosten", "betriebskosten", "kaution", "hausgeld"]):
+            continue
+        val = _clean_german_number(m.group(1))
+        if val and 80.0 <= val <= 200000.0:
+            return val, m.group(0).strip()
+    return None
+
+
+def _extract_units_deterministic(
+    raw_text: str,
+    is_global_annual: bool,
+    prop_sqm: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Erkennt einzeln aufgeschlüsselte Wohneinheiten im Exposé-Text (z. B. MFH oder Wohnungspakete),
+    rechnet per-Anno-Angaben sauber auf Monatswerte um und trennt Ist-Miete (vermietet) von
+    Exposé-Soll-Miete (inkl. leerstehender Einheiten).
+    """
+    if not raw_text:
+        return {"units": [], "ist_monthly_sum": 0.0, "target_monthly_sum": 0.0, "has_partial_vacancy": False}
+
+    raw_lines = [ln.strip() for ln in re.split(r"\r?\n", raw_text) if ln.strip()]
+    folded_lines: List[str] = []
+    unit_start_re = re.compile(
+        r"^(?:[-*•▪▸]\s*)?(?:"
+        r"(?:wohnung|whg\.?|einheit|etw|appartment|apartment)\b"
+        r"|we\s*\d+\b"
+        r"|(?:eg|hg|ug|dg|hp|sou?t\.?|parterre|\d+\.\s*og|obergeschoss|erdgeschoss|dachgeschoss)\s+(?:links|rechts|mitte|vorne|hinten|ca\.|mit|:|-|\d|\()"
+        r")",
+        re.IGNORECASE,
+    )
+    continuation_re = re.compile(
+        r"^(?:\([^)]{2,90}\)|(?:derzeit\s+)?leer\b|leerstand\b|mieterwechsel\b|soll-?miete\b|nettokaltmiete\b)",
+        re.IGNORECASE,
+    )
+    for ln in raw_lines:
+        if folded_lines and unit_start_re.match(folded_lines[-1]) and not unit_start_re.match(ln) and continuation_re.match(ln):
+            folded_lines[-1] = f"{folded_lines[-1]} {ln}"
+        else:
+            folded_lines.append(ln)
+
+    units: List[Dict[str, Any]] = []
+    for ln in folded_lines:
+        if not unit_start_re.match(ln):
+            continue
+        ln_low = ln.lower()
+        # Überspringe reine Summen-/Kopfzeilen ("Wohneinheiten gesamt: ...")
+        if any(s in ln_low for s in ["gesamt", "insgesamt", "summe", "verteilen sich"]):
+            continue
+
+        sqm_match = re.search(r"(\d+(?:[.,]\d+)?)\s*(?:m²|m2|qm)\b", ln, re.IGNORECASE)
+        u_sqm = _clean_german_number(sqm_match.group(1)) if sqm_match else None
+        if u_sqm is not None and not (8.0 <= u_sqm <= 500.0):
+            u_sqm = None
+
+        euro_res = _extract_unit_euro_amount(ln)
+        is_vacant_u = bool(_VACANT_UNIT_RE.search(ln_low))
+
+        # Reine Notizzeilen ohne Fläche UND ohne Euro-Betrag/Leerstands-Hinweis (z.B. "Wohnung EG rechts 1995 renoviert") überspringen
+        if euro_res is None and (u_sqm is None or not is_vacant_u):
+            continue
+
+        label = _clean_unit_label(ln)
+        if euro_res is not None:
+            raw_amt, raw_txt = euro_res
+            est_sqm = u_sqm or (prop_sqm / 4.0 if prop_sqm > 80.0 else prop_sqm)
+            is_annual_u = _should_treat_rent_as_annual(raw_amt, est_sqm or 0.0, ln_low, is_global_annual)
+            monthly_val = round(raw_amt / 12.0, 2) if is_annual_u else round(raw_amt, 2)
+            raw_period = "annual" if is_annual_u else "monthly"
+            if is_vacant_u:
+                units.append({
+                    "label": label,
+                    "sqm": round(u_sqm, 2) if u_sqm else None,
+                    "is_rented": False,
+                    "cold_rent_monthly": 0.0,
+                    "target_rent_monthly": monthly_val,
+                    "raw_rent_text": f"{raw_txt} ({'p.a.' if is_annual_u else 'mtl.'}, Leerstand)",
+                    "raw_period": raw_period,
+                    "notes": "Leerstand / Soll-Angabe im Exposé",
+                })
+            else:
+                units.append({
+                    "label": label,
+                    "sqm": round(u_sqm, 2) if u_sqm else None,
+                    "is_rented": True,
+                    "cold_rent_monthly": monthly_val,
+                    "target_rent_monthly": monthly_val,
+                    "raw_rent_text": f"{raw_txt} ({'p.a.' if is_annual_u else 'mtl.'})",
+                    "raw_period": raw_period,
+                    "notes": None,
+                })
+        elif is_vacant_u and u_sqm:
+            units.append({
+                "label": label,
+                "sqm": round(u_sqm, 2),
+                "is_rented": False,
+                "cold_rent_monthly": 0.0,
+                "target_rent_monthly": None,
+                "raw_rent_text": "Leerstand",
+                "raw_period": "unknown",
+                "notes": "Derzeit leerstehend",
+            })
+
+    ist_sum = round(sum(float(u.get("cold_rent_monthly") or 0.0) for u in units if u.get("is_rented")), 2)
+    soll_sum = round(
+        sum(
+            float(u.get("target_rent_monthly") if u.get("target_rent_monthly") is not None else (u.get("cold_rent_monthly") or 0.0))
+            for u in units
+        ),
+        2,
+    )
+    has_partial_vacancy = any(not u.get("is_rented") for u in units) and any(u.get("is_rented") for u in units)
+    return {
+        "units": units,
+        "ist_monthly_sum": ist_sum,
+        "target_monthly_sum": soll_sum,
+        "has_partial_vacancy": has_partial_vacancy,
+    }
+
+
+def _normalize_units_list(
+    raw_units: Any,
+    is_global_annual: bool,
+    prop_sqm: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """Bereinigt und validiert vom LLM oder Parser gelieferte Wohneinheiten."""
+    if not isinstance(raw_units, list):
+        return []
+    cleaned: List[Dict[str, Any]] = []
+    for idx, u in enumerate(raw_units, start=1):
+        if not isinstance(u, dict):
+            continue
+        label = str(u.get("label") or f"Einheit {idx}").strip()
+        u_sqm = None
+        if u.get("sqm") is not None:
+            try:
+                sq_val = float(u["sqm"])
+                if sq_val > 0:
+                    u_sqm = round(sq_val, 2)
+            except (ValueError, TypeError):
+                pass
+        is_rented_u = bool(u.get("is_rented", True))
+        raw_txt = str(u.get("raw_rent_text") or "")
+        cold_m = 0.0
+        if u.get("cold_rent_monthly") is not None:
+            try:
+                cold_m = float(u["cold_rent_monthly"])
+            except (ValueError, TypeError):
+                cold_m = 0.0
+        target_m = None
+        if u.get("target_rent_monthly") is not None:
+            try:
+                t_val = float(u["target_rent_monthly"])
+                if t_val > 0:
+                    target_m = t_val
+            except (ValueError, TypeError):
+                pass
+
+        # Sanity-Check falls LLM Jahresbetrag pro Einheit nicht durch 12 geteilt hat
+        est_sqm = u_sqm or (prop_sqm / max(1, len(raw_units)) if prop_sqm > 0 else 0.0)
+        if cold_m > 0 and _should_treat_rent_as_annual(cold_m, est_sqm, f"{raw_txt} {u.get('notes') or ''}", is_global_annual):
+            # Nur teilen, wenn keine explizite Monatsangabe vorliegt und cold_m noch nicht /12 gerechnet wurde
+            if est_sqm > 0 and (cold_m / est_sqm) > 30.0:
+                cold_m = round(cold_m / 12.0, 2)
+        if target_m is not None and target_m > 0 and est_sqm > 0 and (target_m / est_sqm) > 30.0:
+            if _should_treat_rent_as_annual(target_m, est_sqm, f"{raw_txt} {u.get('notes') or ''}", is_global_annual):
+                target_m = round(target_m / 12.0, 2)
+
+        if not is_rented_u:
+            if target_m is None and cold_m > 0:
+                target_m = round(cold_m, 2)
+            cold_m = 0.0
+        elif target_m is None and cold_m > 0:
+            target_m = round(cold_m, 2)
+
+        cleaned.append({
+            "label": label,
+            "sqm": u_sqm,
+            "is_rented": is_rented_u,
+            "cold_rent_monthly": round(cold_m, 2),
+            "target_rent_monthly": round(target_m, 2) if target_m is not None else None,
+            "raw_rent_text": raw_txt or None,
+            "notes": u.get("notes"),
+        })
+    return cleaned
+
+
+def _build_package_breakdown_text(units: List[Dict[str, Any]]) -> Optional[str]:
+    if not units:
+        return None
+    parts = []
+    for u in units:
+        sqm_part = f"{fmt_de(u['sqm'], 0)} m²" if u.get("sqm") else "k.A."
+        if u.get("is_rented"):
+            rent_part = f"{fmt_de(u.get('cold_rent_monthly', 0))} €/M"
+        elif u.get("target_rent_monthly"):
+            rent_part = f"Leerstand (Soll: {fmt_de(u['target_rent_monthly'])} €/M)"
+        else:
+            rent_part = "Leerstand"
+        parts.append(f"{u.get('label', 'WE')} ({sqm_part}, {rent_part})")
+    return " · ".join(parts)
+
+
 def extract_listing_insights(text: str, details: Dict[str, Any], property_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Semantische Fallback-Analyse der vollständigen Beschreibung und Portal-Attribute
     (falls kein LLM API-Key aktiv ist oder als Validierungsbasis).
-    Unterstützt Paket-Deals (Summe mehrerer Wohnungen), deutsches Zahlenformat inkl. Cent-Beträge,
-    Negationen (z.B. 'keine Makleranfragen') und strikt Euro-geprüftes Hausgeld.
+    Unterstützt Paket-Deals, Mehrfamilienhäuser mit Einzelwohnungen (inkl. per Anno / p.a. & Teilleerstand),
+    deutsches Zahlenformat inkl. Cent-Beträge, Negationen (z.B. 'keine Makleranfragen') und strikt Euro-geprüftes Hausgeld.
     """
     raw_text = text or ""
     text_lower = raw_text.lower()
@@ -220,48 +502,105 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
             is_private = bool(property_data.get("is_private", 0))
 
     # --------------------------------------------------------------------------
-    # B. REALE KALTMIEtE (Inkl. Gesamt-Summen bei Paket-Deals)
+    # B. REALE KALTMIEtE (Inkl. Gesamt-Summen, per-Anno-Umrechnung & MFH-Einzelwohnungen)
     # --------------------------------------------------------------------------
     extracted_rent = None
+    target_expose_monthly_rent = None
     rent_source = "BENCHMARK_ESTIMATE"
     stated_yield = None
+    unit_sum_discrepancy = None
     num_pat = r"(\d+(?:\.\d{3})*(?:,\d{1,2}|,-)?|\d+[\.,-]*)"
+    prop_sqm = float(property_data.get("living_space") or 0.0)
+    prop_type_lower = str(property_data.get("property_type") or "").lower()
 
     is_package_deal = any(k in combined_text for k in [
         "wohnungspaket", "immobilienpaket", "zwei wohnungen", "2 wohnungen",
         "mehrere wohneinheiten", "zwei wohneinheiten", "2 vermietete wohneinheiten"
     ])
+    is_global_annual = bool(_GLOBAL_ANNUAL_DOC_RE.search(combined_text))
 
-    # 0. Priority: Explicit package / total cold rent patterns
-    total_rent_patterns = [
-        (rf'(?:monatliche\s+)?kaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_COLD"),
-        (rf'gesamt(?:e|en)?\s+(?:aktuelle\s+)?(?:monatliche\s+)?(?:kalt)?miete(?:innahmen)?[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
-        (rf'insgesamt\s+belaufen\s+sich\s+die\s+aktuellen\s+mieteinnahmen\s+auf[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
-        (rf'(?:aktuelle\s+)?mieteinnahmen\s+(?:gesamt|insgesamt)[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
+    # 0. Priority: Explizite Gesamtsummen (zuerst Jahres-Summen inkl. "per Anno", dann Monats-Summen)
+    stated_total_annual: Optional[float] = None
+    stated_total_monthly: Optional[float] = None
+    stated_total_src: Optional[str] = None
+
+    total_annual_pats = [
+        rf'jahresnettokaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
+        rf'jahreskaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
+        rf'gesamt(?:e|en)?\s+jahres(?:netto)?kaltmiete[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
+        rf'mieteinnahmen\s+(?:per\s*anno|per\s*annum|p\.?\s*a\.?|pro\s*jahr|j[äa]hrlich)[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)',
+        rf'(?:per\s*anno|per\s*annum|p\.?\s*a\.?|j[äa]hrlich)[^\d\n\r]{{0,20}}gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
     ]
-    for pat, src_tag in total_rent_patterns:
+    for pat in total_annual_pats:
         m = re.search(pat, combined_text)
         if m:
-            val = _clean_german_number(m.group(1))
-            if val and 120.0 <= val <= 50000.0:
-                extracted_rent = val
-                rent_source = src_tag
+            val_a = _clean_german_number(m.group(1))
+            if val_a and 1500.0 <= val_a <= 1000000.0:
+                stated_total_annual = val_a
+                stated_total_monthly = round(val_a / 12.0, 2)
+                stated_total_src = "EXPOSE_STATED_ANNUAL"
                 break
 
-    if not extracted_rent:
-        total_annual_pats = [
-            rf'jahresnettokaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
-            rf'jahreskaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
-            rf'gesamt(?:e|en)?\s+jahres(?:netto)?kaltmiete[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)',
+    if not stated_total_monthly:
+        total_rent_patterns = [
+            (rf'(?:monatliche\s+)?kaltmiete\s+gesamt[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_COLD"),
+            (rf'gesamt(?:e|en)?\s+(?:aktuelle\s+)?(?:monatliche\s+)?(?:kalt)?miete(?:innahmen)?[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
+            (rf'insgesamt\s+belaufen\s+sich\s+die\s+aktuellen\s+mieteinnahmen\s+auf[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
+            (rf'(?:aktuelle\s+)?mieteinnahmen\s+(?:gesamt|insgesamt)[^\d\n\r]{{0,15}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
         ]
-        for pat in total_annual_pats:
+        for pat, src_tag in total_rent_patterns:
             m = re.search(pat, combined_text)
             if m:
-                val_a = _clean_german_number(m.group(1))
-                if val_a and 1500.0 <= val_a <= 500000.0:
-                    extracted_rent = round(val_a / 12.0, 2)
-                    rent_source = "EXPOSE_STATED_ANNUAL"
+                val = _clean_german_number(m.group(1))
+                ctx_slice = combined_text[max(0, m.start() - 40):min(len(combined_text), m.end() + 40)]
+                is_ann_total = _should_treat_rent_as_annual(val or 0.0, prop_sqm, ctx_slice, is_global_annual)
+                if val and is_ann_total and 1500.0 <= val <= 1000000.0:
+                    stated_total_annual = val
+                    stated_total_monthly = round(val / 12.0, 2)
+                    stated_total_src = "EXPOSE_STATED_ANNUAL"
                     break
+                elif val and 120.0 <= val <= 50000.0:
+                    stated_total_monthly = round(val, 2)
+                    stated_total_src = src_tag
+                    break
+
+    # 0b. Einzelwohnungs-Aufschlüsselung (MFH / Paket-Deals)
+    units_res = _extract_units_deterministic(raw_text, is_global_annual=is_global_annual, prop_sqm=prop_sqm)
+    extracted_units: List[Dict[str, Any]] = units_res["units"]
+    has_partial_vacancy: bool = bool(units_res["has_partial_vacancy"])
+
+    if len(extracted_units) >= 2:
+        ist_sum = units_res["ist_monthly_sum"]
+        soll_sum = units_res["target_monthly_sum"]
+        if has_partial_vacancy and ist_sum > 0:
+            extracted_rent = ist_sum
+            target_expose_monthly_rent = round(stated_total_monthly or soll_sum, 2) if (stated_total_monthly or soll_sum) > ist_sum else None
+            rent_source = "EXPOSE_STATED_UNITS"
+        elif ist_sum > 0:
+            # Alle Einheiten vermietet: Nimm explizite Exposé-Gesamtsumme falls konsistent, sonst Einzelsumme
+            if stated_total_monthly and abs(stated_total_monthly - ist_sum) / max(ist_sum, 1.0) <= 0.15:
+                extracted_rent = stated_total_monthly
+                rent_source = stated_total_src or "EXPOSE_STATED_UNITS"
+            else:
+                extracted_rent = ist_sum
+                rent_source = "EXPOSE_STATED_UNITS"
+            if stated_total_monthly and stated_total_monthly > extracted_rent:
+                target_expose_monthly_rent = stated_total_monthly
+        elif stated_total_monthly:
+            extracted_rent = stated_total_monthly
+            rent_source = stated_total_src or "EXPOSE_STATED_RENT"
+
+        if stated_total_annual and soll_sum > 0:
+            units_annual = round(soll_sum * 12.0, 2)
+            if abs(units_annual - stated_total_annual) >= 15.0:
+                unit_sum_discrepancy = {
+                    "stated_annual": round(stated_total_annual, 2),
+                    "units_sum_annual": units_annual,
+                    "difference_annual": round(units_annual - stated_total_annual, 2),
+                }
+    elif stated_total_monthly:
+        extracted_rent = stated_total_monthly
+        rent_source = stated_total_src or "EXPOSE_STATED_RENT"
 
     # 1. Warmmiete mit Nebenkosten-Aufschlüsselung
     if not extracted_rent:
@@ -284,7 +623,7 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
                         rent_source = "EXPOSE_STATED_COLD"
                         break
 
-    # 2. Direkte Kaltmieten-Patterns (mit Fix für ",00 €" Cent-Nachkommastellen)
+    # 2. Direkte Kaltmieten-Patterns (mit per-Anno- & Plausibilitäts-Prüfung!)
     if not extracted_rent:
         rent_patterns = [
             (rf'{num_pat}\s*(?:€|euro)\s*kalt(?:\s*miet)?', "EXPOSE_STATED_COLD"),
@@ -302,23 +641,29 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
             match = re.search(pat, combined_text)
             if match:
                 val = _clean_german_number(match.group(1))
-                if val and 120.0 <= val <= 20000.0:
-                    extracted_rent = val
+                ctx_slice = combined_text[max(0, match.start() - 50):min(len(combined_text), match.end() + 50)]
+                is_ann = _should_treat_rent_as_annual(val or 0.0, prop_sqm, ctx_slice, is_global_annual)
+                if val and is_ann and 1500.0 <= val <= 500000.0:
+                    extracted_rent = round(val / 12.0, 2)
+                    rent_source = "EXPOSE_STATED_ANNUAL"
+                    break
+                elif val and 120.0 <= val <= 20000.0:
+                    extracted_rent = round(val, 2)
                     rent_source = src_tag
                     break
 
-    # 3. Check for annual cold rent (Jahreskaltmiete)
+    # 3. Check for annual cold rent (Jahreskaltmiete / per Anno)
     if not extracted_rent:
         annual_patterns = [
             rf'jahreskaltmiete[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)',
             rf'jahresnettokaltmiete[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)',
-            rf'mieteinnahmen\s*(?:p\.a\.|pro\s*jahr|jährlich)[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)'
+            rf'mieteinnahmen\s*(?:per\s*anno|per\s*annum|p\.?\s*a\.?|pro\s*jahr|j[äa]hrlich)[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)'
         ]
         for pat in annual_patterns:
             a_match = re.search(pat, combined_text)
             if a_match:
                 val_annual = _clean_german_number(a_match.group(1))
-                if val_annual and 1500.0 <= val_annual <= 300000.0:
+                if val_annual and 1500.0 <= val_annual <= 500000.0:
                     extracted_rent = round(val_annual / 12.0, 2)
                     rent_source = "EXPOSE_STATED_ANNUAL"
                     break
@@ -358,16 +703,19 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         except ValueError:
             pass
 
-    # Vermietungsstatus (Wortgrenzen vermeiden Treffer auf 'unvermietet' / Jahreszahlen 'seit 2024 unvermietet')
+    # Vermietungsstatus (inkl. Teilleerstand bei MFH!)
     is_rented = False
     has_rented_phrase = bool(
         re.search(r"\b(?:vermietete\w*|ist\s+vermietet|ungekündigt\s+vermietet|langjährig\s+vermietet|solide\s+vermietet|fest\s+vermietet)\b", combined_text)
         or re.search(r"\bseit\s+(?:\d{1,2}\s+jahren|\d{4})\s+(?:fest\s+|solide\s+|durchgehend\s+)?vermietet\b", combined_text)
         or (re.search(r"\bvermietet\b", title_lower) and "unvermietet" not in title_lower and "nicht vermietet" not in title_lower)
     )
-    has_vacant_phrase = bool(re.search(r"\b(?:unvermietet|bezugsfrei|leerstand|leerstehend|sofort\s+frei|frei\s+werdend|nicht\s+vermietet)\b", combined_text))
+    has_vacant_phrase = bool(re.search(r"\b(?:unvermietet|bezugsfrei|leerstand|leerstehend|sofort\s+frei|frei\s+werdend|nicht\s+vermietet|derzeit\s+leer)\b", combined_text))
+    has_rented_units = len(extracted_units) >= 2 and any(u.get("is_rented") for u in extracted_units)
 
-    if has_rented_phrase and not has_vacant_phrase:
+    if has_partial_vacancy or has_rented_units:
+        is_rented = True
+    elif has_rented_phrase and not has_vacant_phrase:
         is_rented = True
     elif re.search(r"\bvermietet\b", combined_text) and not has_vacant_phrase:
         is_rented = True
@@ -376,7 +724,7 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
     elif property_data.get("is_rented", 0) == 1 and not has_vacant_phrase:
         is_rented = True
 
-    is_vacant = has_vacant_phrase
+    is_vacant = has_vacant_phrase and not has_partial_vacancy and not has_rented_units
     if (extracted_rent is not None or has_rented_phrase) and re.search(r"\bvermietet\b", combined_text) and not has_vacant_phrase:
         is_vacant = False
         is_rented = True
@@ -552,10 +900,28 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
     is_erbbaurecht = "erbbaurecht" in combined_text or "erbbauzins" in combined_text
     is_denkmalschutz = "denkmalschutz" in combined_text or "denkmalgeschützt" in combined_text
 
+    inferred_unit_count = (
+        len(extracted_units)
+        if len(extracted_units) >= 2
+        else (
+            units_count
+            if (units_count and units_count >= 2 and ("mehrfamilienhaus" in prop_type_lower or "mfh" in combined_text or is_package_deal))
+            else (2 if ("zwei wohnungen" in combined_text or "2 wohnungen" in combined_text or "2 vermietete wohneinheiten" in combined_text) else 1)
+        )
+    )
+    is_mfh = ("mehrfamilienhaus" in prop_type_lower) or ("mfh" in combined_text) or (inferred_unit_count >= 3 and not is_package_deal)
+    breakdown_text = _build_package_breakdown_text(extracted_units) if len(extracted_units) >= 2 else None
+
     return {
         "is_package_deal": is_package_deal,
-        "unit_count_in_offer": 2 if ("zwei wohnungen" in combined_text or "2 wohnungen" in combined_text or "2 vermietete wohneinheiten" in combined_text) else 1,
-        "package_breakdown": None,
+        "is_mfh": is_mfh,
+        "unit_count_in_offer": inferred_unit_count,
+        "package_breakdown": breakdown_text,
+        "units": extracted_units,
+        "target_expose_monthly_rent": target_expose_monthly_rent,
+        "has_partial_vacancy": has_partial_vacancy,
+        "is_global_annual_rent": is_global_annual,
+        "unit_sum_discrepancy": unit_sum_discrepancy,
         "stated_purchase_price_in_text": stated_purchase_price_in_text,
         "is_private": is_private,
         "commission_free": commission_free,
@@ -575,8 +941,8 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         "reserve_amount": reserve_amount,
         "missing_protocols": missing_protocols,
         "special_assessment": special_assessment,
-        "units_count": units_count or 12,
-        "hausgeld": hausgeld if hausgeld is not None else 250.0,
+        "units_count": units_count or (inferred_unit_count if inferred_unit_count > 1 else 12),
+        "hausgeld": hausgeld if hausgeld is not None else (None if is_mfh else 250.0),
         "has_explicit_hausgeld": (hausgeld is not None),
         "hausgeld_non_recoverable": round(hausgeld * 0.35, 2) if hausgeld is not None else None,
         "is_kernsaniert": is_kernsaniert,
@@ -621,18 +987,23 @@ Vollständige Original-Beschreibung des Exposés:
 \"\"\"{full_description[:7000]}\"\"\"
 
 STRENGE REGELN FÜR DIE EXTRAKTION:
-1. PAKET-DEALS / MEHRERE WOHNEINHEITEN:
-   - Wenn mehrere Wohnungen als Paket verkauft werden (z.B. Wohnung 1 + Wohnung 2), MUSST du zwingend:
-     * `is_package_deal: true`, `unit_count_in_offer`: Anzahl der verkauften Wohnungen.
-     * `current_cold_rent_monthly`: Die SUMME aller monatlichen Ist-Kaltmieten aller Einheiten (z.B. 350 + 680 = 1030.0)! Nimm NIEMALS nur die Miete der ersten Einheit!
-     * `hausgeld_monthly_total`: Die SUMME aller monatlichen Hausgelder aller Einheiten (z.B. 500 + 700 = 1200.0)! Verwechsle NIEMALS Flächenangaben wie "70 m²" mit dem Hausgeld in Euro!
+1. MEHRFAMILIENHÄUSER (MFH), PAKET-DEALS & EINZELWOHNUNGEN:
+   - Wenn mehrere Wohnungen angegeben sind (Mehrfamilienhaus ODER ETW-Wohnungspaket):
+     * Bei ETW-Paket: `is_package_deal: true`; bei Mehrfamilienhaus (MFH): `is_package_deal: false`. In BEIDEN Fällen: `unit_count_in_offer` = exakte Anzahl aller Wohneinheiten!
+     * Fülle das Array `units` zwingend für JEDE genannte Wohneinheit (Bezeichnung/Etage, m², `is_rented`, monatliche `cold_rent_monthly` und monatliche `target_rent_monthly`).
+     * JAHRESMIETE vs. MONATSMIETE (`per Anno` / `p.a.` / `jährlich`): Prüfe GENAU, ob Einzelmieten oder Gesamtmieten pro Jahr (`per Anno`, `p.a.`, `pro Jahr`, „Alle Mietangaben verstehen sich per Anno“) oder pro Monat angegeben sind! Rechne JEDE Jahresangabe strikt durch 12 in Monatsbeträge (`cold_rent_monthly`, `target_rent_monthly`, `current_cold_rent_monthly`, `target_cold_rent_monthly`) um! Verwechsle NIEMALS eine Jahresmiete (z.B. 7.860,00 € p.a. = 655 €/M) mit einer Monatsmiete!
+     * TEILLEERSTAND: Steht bei einer Einheit „derzeit leer“, „Leerstand“, „Mieterwechsel“ oder „unvermietet“, setze für diese Einheit `is_rented: false`, `cold_rent_monthly: 0.0` und trage eine ggf. genannte Sollmiete nur in `target_rent_monthly` ein.
+     * `current_cold_rent_monthly`: Die SUMME der monatlichen Ist-Kaltmieten aller AKTUELL VERMIETETEN Einheiten! Nimm NIEMALS nur eine einzelne Einheit und rechne KEINE leerstehende Einheit ein!
+     * `target_cold_rent_monthly`: Die monatliche Gesamtsollmiete bei Vollvermietung aller Einheiten laut Exposé (also Ist-Mieten + Sollmieten leerstehender Einheiten bzw. angegebene Gesamtkaltmiete ÷ 12).
+     * `hausgeld_monthly_total`: Nur bei WEG/ETW-Paketen die SUMME aller monatlichen Hausgelder (bei MFH ohne WEG `null`). Verwechsle NIEMALS Flächenangaben wie "70 m²" mit Euro!
 2. PRIVATVERKAUF & MAKLERPROVISION (NEGATIONEN BEACHTEN):
    - Steht "keine Makleranfragen", "Makler Anfragen nicht erwünscht", "Privatverkauf", "von privat", "ohne Makler" oder "provisionsfrei", setze `is_private: true`, `commission_free: true`, `commission_percent: 0.0`.
    - Steht eine Käuferprovision (z.B. 3,57% oder 4,76%) oder vermittelt ein Makler ohne Provisionsfreiheit, übernimm diesen Prozentsatz und setze `commission_free: false`.
 3. VERMIETUNGSSTATUS & IST-MIETE:
-   - `is_rented: true` und `rent_is_verified_in_text: true`: NUR wenn aus dem Text klar hervorgeht, dass die Immobilie AKTUELL VERMIETET ist UND eine konkrete aktuelle Miete (Kaltmiete, Warmmiete minus Nebenkosten, Jahresnettokaltmiete / 12 oder explizit bezifferte Bruttorendite %) im Exposé steht.
+   - `is_rented: true` und `rent_is_verified_in_text: true`: Wenn die Immobilie (oder mindestens ein Teil eines MFH/Pakets) AKTUELL VERMIETET ist UND konkrete Mieten beziffert sind.
+   - Bei Teilleerstand in einem MFH/Paket (z. B. 4 von 5 Einheiten vermietet, 1 leer): setze `is_rented: true`, `has_partial_vacancy: true` und `is_vacant: false`! Setze `is_vacant: true` NUR bei 100% Leerstand!
    - Wenn "vermietet", aber KEINE Miete beziffert ist: `is_rented: true`, `rent_is_verified_in_text: false`, `current_cold_rent_monthly: null`.
-   - Wenn unvermietet / bezugsfrei / leer / "für Eigennutzer" / nur theoretische Mietperspektive: `is_rented: false`, `is_vacant: true`, `rent_is_verified_in_text: false`, `current_cold_rent_monthly: null`.
+   - Wenn vollständig unvermietet / bezugsfrei / leer / "für Eigennutzer" / nur theoretische Mietperspektive: `is_rented: false`, `is_vacant: true`, `has_partial_vacancy: false`, `rent_is_verified_in_text: false`, `current_cold_rent_monthly: null`.
    - `stated_gross_yield`: Gib eine Prozentzahl NUR an, wenn wörtlich eine Bruttorendite in % im Inseratstext steht (z.B. "6,56 % Bruttorendite"). Berechne sie NICHT selbst in diesem Feld (sonst `null`).
 4. GRUNDSTÜCKSFLÄCHE (`land_area`):
    - Gib NUR dann eine Zahl > 0 an, wenn es sich um ein Haus / Mehrfamilienhaus / Grundstück handelt UND eine konkrete Grundstücksfläche in m² im Inserat steht.
@@ -659,6 +1030,9 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
   "is_package_deal": false,
   "unit_count_in_offer": 1,
   "package_breakdown": "Kurze Einheitenzusammenfassung oder null",
+  "units": [
+    {{"label": "EG links", "sqm": 50.0, "is_rented": true, "cold_rent_monthly": 450.0, "target_rent_monthly": 450.0, "raw_rent_text": "450 €/M", "notes": null}}
+  ],
   "corrected_city": "Hauptstadt oder null",
   "district": "Stadtteil oder null",
   "corrected_address": "Straße Hausnummer, PLZ Stadt oder null",
@@ -673,8 +1047,11 @@ Antworte AUSSCHLIESSLICH mit gültigem JSON:
   "commission_percent": 3.57,
   "is_rented": false,
   "is_vacant": false,
+  "has_partial_vacancy": false,
   "rent_is_verified_in_text": false,
+  "rent_period_stated": "monthly | annual | mixed | unknown",
   "current_cold_rent_monthly": null,
+  "target_cold_rent_monthly": null,
   "annual_cold_rent": null,
   "stated_gross_yield": null,
   "hausgeld_monthly_total": null,
@@ -877,20 +1254,41 @@ async def call_llm_if_available(
 
 def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any], property_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Kombiniert semantische LLM-Ergebnisse mit deterministischen Sicherheitsregeln.
+    Kombiniert semantische LLM-Ergebnisse mit deterministischen Sicherheitsregeln
+    (inkl. MFH-Einheitenaufschlüsselung, Teilleerstand & per-Anno-Plausibilitätsprüfung).
     """
     merged = dict(base_insights)
+    prop_sqm = float(property_data.get("living_space") or llm.get("total_living_space") or 0.0)
+    is_global_annual = bool(base_insights.get("is_global_annual_rent")) or str(llm.get("rent_period_stated") or "").lower() == "annual"
 
-    # Package deal info
+    # Package / MFH multi-unit info
     if "is_package_deal" in llm:
         merged["is_package_deal"] = bool(llm["is_package_deal"])
+
+    llm_units = _normalize_units_list(llm.get("units"), is_global_annual=is_global_annual, prop_sqm=prop_sqm)
+    if len(llm_units) >= 2:
+        merged["units"] = llm_units
+    elif base_insights.get("units") and len(base_insights["units"]) >= 2:
+        merged["units"] = base_insights["units"]
+
+    final_units = merged.get("units") or []
     if llm.get("unit_count_in_offer"):
         try:
-            merged["unit_count_in_offer"] = max(1, int(llm["unit_count_in_offer"]))
+            merged["unit_count_in_offer"] = max(len(final_units) or 1, int(llm["unit_count_in_offer"]))
         except (ValueError, TypeError):
             pass
+    elif len(final_units) >= 2:
+        merged["unit_count_in_offer"] = len(final_units)
+
+    if len(final_units) >= 2 and not merged.get("is_package_deal"):
+        merged["is_mfh"] = True
+    elif llm.get("corrected_property_type") and "mehrfamilienhaus" in str(llm["corrected_property_type"]).lower():
+        merged["is_mfh"] = True
+
     if llm.get("package_breakdown"):
         merged["package_breakdown"] = str(llm["package_breakdown"])
+    elif len(final_units) >= 2:
+        merged["package_breakdown"] = _build_package_breakdown_text(final_units)
 
     # Commission / Private status (protect explicit broker negation safety!)
     if base_insights.get("broker_negation_matched"):
@@ -910,11 +1308,13 @@ def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any],
             except (ValueError, TypeError):
                 pass
 
-    # Rent & Tenancy Status
+    # Rent & Tenancy Status (inkl. Ist-Miete vs. Exposé-Soll-Miete & Teilleerstand)
     llm_rented = bool(llm.get("is_rented", False))
     llm_vacant = bool(llm.get("is_vacant", False))
+    llm_partial_vac = bool(llm.get("has_partial_vacancy", False))
     llm_verified = bool(llm.get("rent_is_verified_in_text", False))
     llm_rent = llm.get("current_cold_rent_monthly")
+    llm_target_rent = llm.get("target_cold_rent_monthly")
     llm_annual = llm.get("annual_cold_rent")
     llm_yield = llm.get("stated_gross_yield")
 
@@ -922,17 +1322,76 @@ def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any],
     if llm_rent is not None:
         try:
             r_val = float(llm_rent)
-            if 100.0 <= r_val <= 50000.0:
+            if 100.0 <= r_val <= 100000.0:
+                if _should_treat_rent_as_annual(r_val, prop_sqm, str(llm.get("rent_period_stated") or ""), is_global_annual):
+                    if prop_sqm > 0 and (r_val / prop_sqm) > 30.0:
+                        r_val = r_val / 12.0
                 parsed_rent = round(r_val, 2)
         except (ValueError, TypeError):
             pass
-    if not parsed_rent and llm_annual is not None:
+
+    unit_ist_sum = round(sum(float(u.get("cold_rent_monthly") or 0.0) for u in final_units if u.get("is_rented")), 2) if final_units else 0.0
+    unit_soll_sum = round(
+        sum(
+            float(u.get("target_rent_monthly") if u.get("target_rent_monthly") is not None else (u.get("cold_rent_monthly") or 0.0))
+            for u in final_units
+        ),
+        2,
+    ) if final_units else 0.0
+
+    has_partial_vac = (
+        llm_partial_vac
+        or (len(final_units) >= 2 and any(not u.get("is_rented") for u in final_units) and any(u.get("is_rented") for u in final_units))
+        or (llm_rented and llm_vacant and (parsed_rent is not None or unit_ist_sum > 0))
+        or bool(base_insights.get("has_partial_vacancy"))
+    )
+    merged["has_partial_vacancy"] = has_partial_vac
+
+    annual_monthly = None
+    if llm_annual is not None:
         try:
             a_val = float(llm_annual)
-            if 1200.0 <= a_val <= 600000.0:
-                parsed_rent = round(a_val / 12.0, 2)
+            if 1200.0 <= a_val <= 1200000.0:
+                annual_monthly = round(a_val / 12.0, 2)
         except (ValueError, TypeError):
             pass
+
+    if not parsed_rent and unit_ist_sum > 0:
+        parsed_rent = unit_ist_sum
+    elif not parsed_rent and annual_monthly is not None:
+        parsed_rent = annual_monthly
+
+    # Exposé-Soll-Miete bei Vollvermietung ermitteln (besonders wichtig bei MFH mit Teilleerstand!)
+    parsed_target_rent = None
+    if llm_target_rent is not None:
+        try:
+            t_val = float(llm_target_rent)
+            if 100.0 <= t_val <= 100000.0:
+                if prop_sqm > 0 and (t_val / prop_sqm) > 30.0 and _should_treat_rent_as_annual(t_val, prop_sqm, str(llm.get("rent_period_stated") or ""), is_global_annual):
+                    t_val = t_val / 12.0
+                parsed_target_rent = round(t_val, 2)
+        except (ValueError, TypeError):
+            pass
+
+    # Korrektur falls LLM bei Teilleerstand versehentlich die Vollvermietungs-/Jahres-Soll-Miete als Ist-Miete eingetragen hat
+    if has_partial_vac and unit_ist_sum > 0 and parsed_rent and parsed_rent > (unit_ist_sum * 1.15):
+        if parsed_target_rent is None:
+            parsed_target_rent = parsed_rent
+        parsed_rent = unit_ist_sum
+    elif len(final_units) >= 2 and unit_ist_sum > 0 and parsed_rent and abs(parsed_rent - unit_ist_sum) / max(unit_ist_sum, 1.0) > 0.25:
+        base_rent = base_insights.get("extracted_rent")
+        if base_rent and abs(float(base_rent) - unit_ist_sum) / max(unit_ist_sum, 1.0) <= 0.05:
+            parsed_rent = unit_ist_sum
+
+    if not parsed_target_rent and annual_monthly and parsed_rent and annual_monthly > (parsed_rent * 1.02):
+        parsed_target_rent = annual_monthly
+    if not parsed_target_rent and base_insights.get("target_expose_monthly_rent"):
+        parsed_target_rent = base_insights["target_expose_monthly_rent"]
+    if not parsed_target_rent and unit_soll_sum > (parsed_rent or 0.0):
+        parsed_target_rent = unit_soll_sum
+
+    if parsed_target_rent and parsed_rent and parsed_target_rent > parsed_rent:
+        merged["target_expose_monthly_rent"] = round(parsed_target_rent, 2)
 
     if llm_yield is not None:
         try:
@@ -942,12 +1401,12 @@ def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any],
         except (ValueError, TypeError):
             pass
 
-    if llm_rented and llm_verified and parsed_rent:
+    if (llm_rented or has_partial_vac) and (llm_verified or len(final_units) >= 2) and parsed_rent:
         merged["is_rented"] = True
         merged["is_vacant"] = False
         merged["extracted_rent"] = parsed_rent
-        merged["rent_source"] = "EXPOSE_STATED_COLD"
-    elif llm_rented and not llm_verified:
+        merged["rent_source"] = "EXPOSE_STATED_UNITS" if len(final_units) >= 2 else "EXPOSE_STATED_COLD"
+    elif (llm_rented or has_partial_vac) and not llm_verified:
         if merged.get("stated_yield") and float(property_data.get("purchase_price", 0)) > 0:
             price = float(property_data["purchase_price"])
             merged["extracted_rent"] = round((price * (merged["stated_yield"] / 100.0)) / 12.0, 2)
@@ -957,9 +1416,9 @@ def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any],
         else:
             merged["is_rented"] = True
             merged["is_vacant"] = False
-            merged["extracted_rent"] = None
-            merged["rent_source"] = "BENCHMARK_ESTIMATE"
-    elif not llm_rented or llm_vacant:
+            merged["extracted_rent"] = parsed_rent if parsed_rent else None
+            merged["rent_source"] = "EXPOSE_STATED_COLD" if parsed_rent else "BENCHMARK_ESTIMATE"
+    elif (not llm_rented and not has_partial_vac) or (llm_vacant and not llm_rented and not parsed_rent):
         merged["is_rented"] = False
         merged["is_vacant"] = True
         merged["extracted_rent"] = None
@@ -1338,7 +1797,7 @@ def estimate_capex_and_hidden_costs(
         })
 
     # 5. Bad & Sanitär (Mit Bildanalyse abgleichen!)
-    unit_mult = max(1, int(insights.get("unit_count_in_offer", 1) or 1)) if insights.get("is_package_deal") else 1
+    unit_mult = max(1, int(insights.get("unit_count_in_offer", 1) or 1)) if (insights.get("is_package_deal") or insights.get("is_mfh")) else 1
     vis_bad = _find_visual_evidence(
         image_analysis, ["bad", "sanitär", "wc", "dusche", "wanne"], "bathroom", ["bad", "wc", "sanitär", "dusche", "wanne"]
     )
@@ -1652,6 +2111,37 @@ def detect_hidden_problems_and_risks(insights: Dict[str, Any], property_data: Di
             "action": "Aktuellen Mietvertrag, letzte Mieterhöhung und Mieteingänge der letzten 6 Monate zwingend vor Besichtigung anfordern."
         })
 
+    # 0c. Teilleerstand & Abweichungen in MFH-/Einheitenlisten (Fallback-Schutz falls ohne LLM)
+    llm_rh_titles = " ".join(str(rh.get("title", "")).lower() for rh in insights.get("llm_risk_highlights", []) if isinstance(rh, dict))
+    if insights.get("has_partial_vacancy") and "leerstand" not in llm_rh_titles:
+        u_list = insights.get("units") or []
+        vac_units = [u for u in u_list if not u.get("is_rented")]
+        vac_names = ", ".join(str(u.get("label")) for u in vac_units) if vac_units else "mind. 1 Wohneinheit"
+        risks.append({
+            "title": f"Teilleerstand ({vac_names} derzeit unvermietet)",
+            "severity": "MEDIUM",
+            "category": "Vermietung",
+            "badge": "🟡 Teilleerstand",
+            "description": f"Nicht alle Einheiten sind aktuell vermietet ({vac_names}). In die Ist-Rendite fließen nur die tatsächlich vermieteten Wohnungen ein.",
+            "impact": "Geringerer aktueller Cashflow bis zur erfolgreichen Neuvermietung, zugleich direktes Mieterhöhungspotenzial bei Erst-/Neuvermietung.",
+            "action": "Zustand der leerstehenden Einheit(en), Vermietbarkeit und regionale Zielmiete vor Ort prüfen."
+        })
+    disc_info = insights.get("unit_sum_discrepancy")
+    if isinstance(disc_info, dict) and "abweichung" not in llm_rh_titles:
+        risks.append({
+            "title": "Rechnerische Abweichung Gesamtmiete vs. Summe der Einzelmieten",
+            "severity": "MEDIUM",
+            "category": "Unterlagen",
+            "badge": "ℹ️ Datenabweichung",
+            "description": (
+                f"Die Einzelmieten der Einheiten summieren sich auf {fmt_de(disc_info['units_sum_annual'])} € p.a., "
+                f"während im Exposé gesamt {fmt_de(disc_info['stated_annual'])} € p.a. genannt werden "
+                f"(Differenz: {fmt_signed_de(disc_info['difference_annual'])} € p.a.)."
+            ),
+            "impact": "Abweichende Berechnungsgrundlage im Exposé erfordert Prüfung der Mietverträge.",
+            "action": "Aktuelle Mietverträge und Kontoauszüge der letzten 6 Monate anfordern und abgleichen."
+        })
+
     # 1. 0 € Instandhaltungsrücklage
     if insights.get("no_reserve_found"):
         risks.append({
@@ -1801,7 +2291,7 @@ def detect_hidden_problems_and_risks(insights: Dict[str, Any], property_data: Di
 def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str, Any], capex: Dict[str, Any]) -> Dict[str, Any]:
     """
     Berechnet alle Investoren-Kennzahlen auf Basis der verifizierten Exposé-Daten
-    (inkl. Paket-Summierung und strikter Trennung von IST vs. SOLL-Benchmark).
+    (inkl. MFH-Einzelwohnungen, Paket-Summierung und strikter Trennung von Ist vs. Exposé-Soll vs. Mietspiegel).
     """
     price = float(property_data.get("purchase_price") or 0.0)
     sqm = float(property_data.get("living_space") or 0.0)
@@ -1818,18 +2308,40 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     if not state:
         state = "Deutschland"
     year_built = int(insights.get("year_built_extracted") or property_data.get("year_built") or 1980)
+    prop_type = str(insights.get("corrected_property_type") or property_data.get("property_type") or "Eigentumswohnung")
+    units_list = insights.get("units") or []
+    unit_count_in_offer = max(1, int(insights.get("unit_count_in_offer") or len(units_list) or 1))
+    is_mfh = bool(
+        insights.get("is_mfh")
+        or ("mehrfamilienhaus" in prop_type.lower())
+        or (unit_count_in_offer >= 3 and not insights.get("is_package_deal"))
+    )
 
-    benchmark = evaluate_property_valuation(city, sqm, price, year_built=year_built)
+    benchmark = evaluate_property_valuation(city, sqm, price, year_built=year_built, property_type=prop_type)
     market_val = benchmark.get("estimated_market_value", price)
     market_val_sqm = benchmark.get("estimated_market_value_per_sqm", 2500.0)
     expected_rent_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
+
+    size_bm = get_mietspiegel_size_benchmark(
+        city,
+        sqm,
+        is_package_deal=bool(insights.get("is_package_deal")),
+        unit_count=unit_count_in_offer,
+        units=units_list,
+    )
+    mietspiegel_range_sqm = size_bm["range_label"]
+    mietspiegel_size_label = size_bm["size_label"]
+
+    if unit_count_in_offer > 1 and size_bm.get("base_avg_sqm_rent") and size_bm.get("expected_sqm_rent"):
+        size_ratio = float(size_bm["expected_sqm_rent"]) / float(size_bm["base_avg_sqm_rent"])
+        expected_rent_sqm = round(expected_rent_sqm * size_ratio, 2)
     expected_market_rent = round(sqm * expected_rent_sqm, 2)
 
     is_rented_explicit = bool(insights.get("is_rented", False))
 
     if insights.get("extracted_rent") is not None and float(insights["extracted_rent"]) > 0:
         current_rent = float(insights["extracted_rent"])
-        rent_source = insights["rent_source"]
+        rent_source = insights.get("rent_source") or "EXPOSE_STATED_COLD"
         rent_is_verified = True
         is_actually_rented = True
     elif is_rented_explicit:
@@ -1844,6 +2356,19 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         rent_source = "BENCHMARK_ESTIMATE"
         rent_is_verified = False
         is_actually_rented = False
+
+    target_expose_rent = insights.get("target_expose_monthly_rent")
+    try:
+        target_expose_rent = round(float(target_expose_rent), 2) if target_expose_rent is not None else None
+    except (ValueError, TypeError):
+        target_expose_rent = None
+    if target_expose_rent is not None and (target_expose_rent <= current_rent or not rent_is_verified):
+        target_expose_rent = None
+    target_expose_gross_yield = (
+        round(((target_expose_rent * 12.0) / price) * 100.0, 2)
+        if (target_expose_rent and price > 0)
+        else None
+    )
 
     potential_annual_rent = round(expected_market_rent * 12.0, 2)
     potential_gross_yield = round((potential_annual_rent / price) * 100.0, 2) if price > 0 else 0.0
@@ -1874,7 +2399,16 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     commission_pct = 0.0 if insights.get("commission_free") else float(insights.get("commission_percent", property_data.get("commission_percent", 3.57)))
 
     rent_for_cf = current_rent if (rent_is_verified and current_rent > 0) else expected_market_rent
-    non_rec_monthly = float(insights.get("hausgeld_non_recoverable") or 50.0) if insights.get("has_explicit_hausgeld") else 50.0
+    if insights.get("has_explicit_hausgeld"):
+        non_rec_monthly = float(insights.get("hausgeld_non_recoverable") or 50.0)
+        operating_costs_label = "Hausgeld (nicht uml.)"
+    elif is_mfh and sqm > 0:
+        non_rec_monthly = max(50.0, round(sqm * 1.50, 2))
+        operating_costs_label = "Bewirtschaftung (MFH ca. 1,50 €/m²)"
+    else:
+        non_rec_monthly = 50.0
+        operating_costs_label = "Hausgeld (nicht uml.)"
+
     prop_plz = str(property_data.get("postal_code") or insights.get("postal_code") or "").strip() or None
     cf_data = calculate_cashflow(
         price=price,
@@ -1902,6 +2436,21 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     )
     potential_monthly_cashflow = potential_cf_data.get("monthly_cashflow", 0.0)
 
+    target_expose_cf = None
+    if target_expose_rent:
+        target_cf_data = calculate_cashflow(
+            price=price,
+            rent=target_expose_rent,
+            city=city,
+            state=state,
+            postal_code=prop_plz,
+            living_space=sqm,
+            commission_percent=commission_pct,
+            additional_costs=non_rec_monthly,
+            interest_rate=resolved_quote_rate
+        )
+        target_expose_cf = target_cf_data.get("monthly_cashflow")
+
     ancillary_costs = cf_data.get("total_buy_costs", round(price * 0.10, 2))
     total_capex = capex.get("total_capex", 0.0)
     effective_total_investment = round(price + ancillary_costs + total_capex, 2)
@@ -1920,7 +2469,7 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         interest_rate=resolved_quote_rate if capex_amount <= 0 else None
     ) if capex_amount > 0 else cf_data
 
-    # Einheitliche Basis mit calculator.py: non_rec_monthly (50 €/M Standard sofern kein explizites Hausgeld vorliegt)
+    # Einheitliche Basis mit calculator.py: non_rec_monthly (50 €/M Standard bei ETW, bzw. 1,50 €/m² bei MFH ohne WEG)
     non_recoverable_annual = non_rec_monthly * 12.0
     net_rental_income = (annual_rent if annual_rent > 0 else potential_annual_rent) - non_recoverable_annual
     real_net_yield = round((net_rental_income / effective_total_investment) * 100.0, 2) if effective_total_investment > 0 else 0.0
@@ -1929,17 +2478,14 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     price_to_rent_ratio = round(price / (rent_for_ratio * 12.0), 1) if rent_for_ratio > 0 else 0.0
     rent_upside_percent = round(((expected_market_rent - current_rent) / current_rent) * 100.0, 1) if (rent_is_verified and current_rent > 0) else 0.0
 
-    current_rent_per_sqm = round(current_rent / sqm, 2) if (sqm > 0 and rent_is_verified and current_rent > 0) else 0.0
+    rented_units_list = [u for u in units_list if isinstance(u, dict) and u.get("is_rented")]
+    vacant_units_list = [u for u in units_list if isinstance(u, dict) and not u.get("is_rented")]
+    rented_sqm = sum(float(u.get("sqm") or 0.0) for u in rented_units_list) if rented_units_list else 0.0
+    if insights.get("has_partial_vacancy") and rented_sqm > 0 and rent_is_verified and current_rent > 0:
+        current_rent_per_sqm = round(current_rent / rented_sqm, 2)
+    else:
+        current_rent_per_sqm = round(current_rent / sqm, 2) if (sqm > 0 and rent_is_verified and current_rent > 0) else 0.0
     expected_rent_per_sqm = round(expected_market_rent / sqm, 2) if sqm > 0 else expected_rent_sqm
-
-    size_bm = get_mietspiegel_size_benchmark(
-        city,
-        sqm,
-        is_package_deal=bool(insights.get("is_package_deal")),
-        unit_count=int(insights.get("unit_count_in_offer") or 1)
-    )
-    mietspiegel_range_sqm = size_bm["range_label"]
-    mietspiegel_size_label = size_bm["size_label"]
 
     # 7. Mietspiegel-Rentabilitäts-Prüfung & Hebel-Analyse
     # WICHTIG: Ein Ist-vs.-Mietspiegel Hebel / Turnaround existiert NUR bei aktuell vermieteten Objekten mit Ist-Miete!
@@ -2015,9 +2561,15 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         # Unvermietet / Bezugsfrei / keine Ist-Miete: Kein Altmietvertrag vorhanden, daher entfällt der Turnaround-Hebel
         mietspiegel_analysis = None
 
-    if rent_source in ["EXPOSE_STATED_COLD", "EXPOSE_STATED_RENT", "EXPOSE_STATED_ANNUAL"]:
-        pkg_suffix = f" ({insights.get('unit_count_in_offer', 2)} Einheiten)" if insights.get("is_package_deal") else ""
-        rent_badge = f"🎯 Exposé-Ist-Miete: {fmt_de(current_rent)} €{pkg_suffix}"
+    if rent_source in ["EXPOSE_STATED_COLD", "EXPOSE_STATED_RENT", "EXPOSE_STATED_ANNUAL", "EXPOSE_STATED_UNITS"]:
+        rented_count = len(rented_units_list)
+        if insights.get("has_partial_vacancy") and rented_units_list:
+            unit_suffix = f" ({rented_count}/{unit_count_in_offer} Einheiten vermietet)"
+        elif is_mfh or insights.get("is_package_deal") or unit_count_in_offer > 1:
+            unit_suffix = f" ({unit_count_in_offer} Einheiten)"
+        else:
+            unit_suffix = ""
+        rent_badge = f"🎯 Exposé-Ist-Miete: {fmt_de(current_rent)} €{unit_suffix}"
     elif rent_source == "DERIVED_FROM_STATED_YIELD":
         rent_badge = f"🎯 Abgeleitet aus {fmt_de(gross_yield, 2)}% Rendite (Exposé)"
     elif is_actually_rented:
@@ -2034,9 +2586,18 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         "market_deviation_percent": market_deviation,
         "current_monthly_rent": current_rent,
         "expected_monthly_rent": expected_market_rent,
+        "target_expose_monthly_rent": target_expose_rent,
+        "target_expose_gross_yield": target_expose_gross_yield,
+        "target_expose_monthly_cashflow": target_expose_cf,
         "rent_source": rent_source,
         "rent_is_verified": rent_is_verified,
         "is_rented": is_actually_rented,
+        "is_mfh": is_mfh,
+        "unit_count_in_offer": unit_count_in_offer,
+        "rented_units_count": len(rented_units_list),
+        "vacant_units_count": len(vacant_units_list),
+        "has_partial_vacancy": bool(insights.get("has_partial_vacancy")),
+        "operating_costs_label": operating_costs_label,
         "rent_badge": rent_badge,
         "yield_type": yield_type,
         "annual_gross_rent": annual_rent,
@@ -2383,13 +2944,20 @@ def generate_ai_due_diligence_report(
         summary_paragraphs = []
 
         if metrics["rent_is_verified"]:
-            summary_paragraphs.append(
+            ist_paragraph = (
                 f"Das Objekt '{title}' in {city} wird zu einem Kaufpreis von {fmt_de(price)} € angeboten "
                 f"({fmt_de(metrics['price_per_sqm'])} €/m²). Das Objekt ist aktuell vermietet mit einer "
                 f"verifizierten Ist-Kaltmiete von {fmt_de(metrics['current_monthly_rent'])} € / Monat ({metrics['rent_badge']}). "
                 f"Daraus errechnet sich eine reale Ist-Bruttomietrendite von {fmt_de(metrics['gross_yield'], 2)}% "
                 f"und ein monatlicher Netto-Cashflow von ca. {fmt_de(metrics['monthly_cashflow'])} €."
             )
+            if metrics.get("target_expose_monthly_rent"):
+                ist_paragraph += (
+                    f" Bei Vollvermietung nennt das Exposé eine Soll-Kaltmiete von "
+                    f"{fmt_de(metrics['target_expose_monthly_rent'])} € / Monat "
+                    f"({fmt_de(metrics.get('target_expose_gross_yield') or 0.0, 2)}% Exposé-Soll-Rendite)."
+                )
+            summary_paragraphs.append(ist_paragraph)
         elif metrics.get("is_rented"):
             summary_paragraphs.append(
                 f"Das Objekt '{title}' in {city} wird zu einem Kaufpreis von {fmt_de(price)} € angeboten "
@@ -2422,6 +2990,12 @@ def generate_ai_due_diligence_report(
             if float(insights["hausgeld"]) > float(metrics["current_monthly_rent"] or 0) > 0:
                 hg_note += " ACHTUNG: Hausgeld übersteigt die Ist-Kaltmiete – Abrechnungen dringend prüfen!"
             summary_paragraphs.append(f"ℹ️ BEWIRTSCHAFTUNG: {hg_note}")
+        elif metrics.get("is_mfh"):
+            summary_paragraphs.append(
+                f"ℹ️ BEWIRTSCHAFTUNG (MFH): Kein WEG-Hausgeld angegeben (Gesamtgebäude). Für nicht umlagefähige "
+                f"Bewirtschaftungskosten und Instandhaltungsrücklage werden pauschal ca. "
+                f"{fmt_de(metrics.get('additional_costs', 0.0))} € / Monat (ca. 1,50 €/m²) angesetzt."
+            )
 
         if miet_ana and miet_ana.get("turns_profitable"):
             summary_paragraphs.append(
@@ -2553,7 +3127,10 @@ def build_missing_documents_request(
     price = float(property_data.get("purchase_price") or 0.0)
     sqm = float(property_data.get("living_space") or 0.0)
     prop_type = str(insights.get("corrected_property_type") or property_data.get("property_type") or "Eigentumswohnung")
-    is_house_or_mfh = any(k in prop_type.lower() for k in ["haus", "grundstück", "villa", "mehrfamilien"]) and "wohnung" not in prop_type.lower()
+    is_house_or_mfh = bool(insights.get("is_mfh")) or (
+        any(k in prop_type.lower() for k in ["haus", "grundstück", "villa", "mehrfamilien"])
+        and "wohnung" not in prop_type.lower()
+    )
 
     docs: List[Dict[str, Any]] = []
 
@@ -2587,7 +3164,7 @@ def build_missing_documents_request(
             "email_line": "Aktueller Mietvertrag (zur Überprüfung der Nettokaltmiete, Kautionshaltung und etwaiger Index-/Staffelvereinbarungen)"
         })
 
-    # 2. Paket-Aufschlüsselung
+    # 2. Paket- / MFH-Aufschlüsselung
     if insights.get("is_package_deal"):
         docs.append({
             "id": "package_breakdown",
@@ -2596,6 +3173,15 @@ def build_missing_documents_request(
             "priority": "HIGH",
             "checked": True,
             "email_line": "Getrennte Aufstellung für alle Wohneinheiten im Paket (einzelne Wohnflächen, Grundbuchblätter, jeweilige Ist-Kaltmieten und Hausgeldbeträge)"
+        })
+    elif insights.get("is_mfh") or int(insights.get("unit_count_in_offer") or metrics.get("unit_count_in_offer") or 1) > 1:
+        docs.append({
+            "id": "mfh_rent_roll",
+            "label": "Aktuelle Mieterliste / Mietaufstellung je Wohneinheit (Flächen, Ist-Mieten, Leerstand, Nebenkosten)",
+            "reason": "MFH / MEHRERE EINHEITEN",
+            "priority": "HIGH",
+            "checked": True,
+            "email_line": "Vollständige Mieterliste / Mietaufstellung je Wohneinheit (einzelne Wohnflächen, aktuelle Nettokaltmieten, Betriebskostenvorauszahlungen, Leerstand und Mietbeginn)"
         })
 
     # 3. WEG vs. Haus-Unterlagen

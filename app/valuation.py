@@ -3,7 +3,7 @@ ImmoMetrica Valuation & Benchmark Engine (Sprengnetter & Market Data Model)
 Computes estimated market value, regional benchmark rents, and market deviations.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 # Regional baseline benchmarks for German metropolitan and secondary cities
 CITY_BENCHMARKS = {
@@ -91,38 +91,20 @@ def get_city_benchmark(city: str) -> Dict[str, Any]:
 
     return {**DEFAULT_BENCHMARK, "city": city, "state": resolved_state}
 
-def get_mietspiegel_size_benchmark(
-    city: str,
-    living_space: float,
-    is_package_deal: bool = False,
-    unit_count: int = 1
-) -> Dict[str, Any]:
-    """
-    Computes German Mietspiegel rent range in €/m² tailored to apartment size category:
-    - Kompaktwohnungen (< 45 m²): Higher €/m² due to small surface overhead.
-    - Standardwohnungen (45-80 m²): Core standard rental bracket.
-    - Großwohnungen (80-120 m²): Slightly lower €/m².
-    - Sehr große Wohnungen (> 120 m²): Volume discount in €/m².
-    For package deals with multiple units, adjusts based on effective average unit size.
-    """
-    bm = get_city_benchmark(city)
-    base_rent = bm["avg_sqm_rent"]
-
-    # Effective unit size for package deals
-    effective_sqm = (living_space / max(1, unit_count)) if (is_package_deal and unit_count > 1) else living_space
-    effective_sqm = max(15.0, effective_sqm)
-
-    if effective_sqm < 45.0:
+def _classify_unit_size_bracket(base_rent: float, unit_sqm: float) -> Dict[str, Any]:
+    """Classifies a single apartment surface into its Mietspiegel bracket."""
+    eff = max(15.0, float(unit_sqm or 50.0))
+    if eff < 45.0:
         factor = 1.15
         size_label = "Kompaktwohnung (< 45 m²)"
         r_min = round(base_rent * 1.05, 2)
         r_max = round(base_rent * 1.25, 2)
-    elif effective_sqm <= 80.0:
+    elif eff <= 80.0:
         factor = 1.03
         size_label = "Standardwohnung (45–80 m²)"
         r_min = round(base_rent * 0.95, 2)
         r_max = round(base_rent * 1.12, 2)
-    elif effective_sqm <= 120.0:
+    elif eff <= 120.0:
         factor = 0.97
         size_label = "Großwohnung (80–120 m²)"
         r_min = round(base_rent * 0.90, 2)
@@ -132,8 +114,74 @@ def get_mietspiegel_size_benchmark(
         size_label = "Großraumwohnung (> 120 m²)"
         r_min = round(base_rent * 0.85, 2)
         r_max = round(base_rent * 1.00, 2)
+    return {
+        "factor": factor,
+        "size_label": size_label,
+        "r_min": r_min,
+        "r_max": r_max,
+        "expected_sqm_rent": round(base_rent * factor, 2),
+    }
 
-    expected_sqm_rent = round(base_rent * factor, 2)
+
+def get_mietspiegel_size_benchmark(
+    city: str,
+    living_space: float,
+    is_package_deal: bool = False,
+    unit_count: int = 1,
+    units: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Computes German Mietspiegel rent range in €/m² tailored to apartment size category:
+    - Kompaktwohnungen (< 45 m²): Higher €/m² due to small surface overhead.
+    - Standardwohnungen (45-80 m²): Core standard rental bracket.
+    - Großwohnungen (80-120 m²): Slightly lower €/m².
+    - Sehr große Wohnungen (> 120 m²): Volume discount in €/m².
+    For multi-unit properties (both Mehrfamilienhaus and package deals), evaluates each
+    individual unit surface if available, or falls back to average unit size (living_space / unit_count).
+    """
+    bm = get_city_benchmark(city)
+    base_rent = bm["avg_sqm_rent"]
+    safe_unit_count = max(1, int(unit_count or 1))
+    valid_units = [u for u in (units or []) if isinstance(u, dict) and float(u.get("sqm") or 0) > 0]
+
+    if len(valid_units) > 1 or (valid_units and safe_unit_count > 1):
+        unit_list = units if (units and len(units) >= len(valid_units)) else valid_units
+        avg_fallback_sqm = max(15.0, float(living_space or 60.0) / max(safe_unit_count, len(unit_list) or 1))
+        total_weighted_sqm = 0.0
+        total_expected_rent = 0.0
+        total_r_min = 0.0
+        total_r_max = 0.0
+        for u in unit_list:
+            u_sqm = float(u.get("sqm") or 0.0)
+            if u_sqm <= 0:
+                u_sqm = avg_fallback_sqm
+            br = _classify_unit_size_bracket(base_rent, u_sqm)
+            total_weighted_sqm += u_sqm
+            total_expected_rent += u_sqm * br["expected_sqm_rent"]
+            total_r_min += u_sqm * br["r_min"]
+            total_r_max += u_sqm * br["r_max"]
+
+        effective_sqm = max(15.0, total_weighted_sqm / max(1, len(unit_list)))
+        expected_sqm_rent = round(total_expected_rent / max(1.0, total_weighted_sqm), 2)
+        r_min = round(total_r_min / max(1.0, total_weighted_sqm), 2)
+        r_max = round(total_r_max / max(1.0, total_weighted_sqm), 2)
+        avg_bracket = _classify_unit_size_bracket(base_rent, effective_sqm)
+        size_label = f"{avg_bracket['size_label']} ({len(unit_list)} WE à Ø {round(effective_sqm)} m²)"
+    else:
+        # Effective unit size for both Mehrfamilienhaus and package deals
+        multi_unit = safe_unit_count > 1 or is_package_deal
+        effective_sqm = (float(living_space or 0.0) / safe_unit_count) if (multi_unit and safe_unit_count > 1) else float(living_space or 0.0)
+        effective_sqm = max(15.0, effective_sqm)
+        br = _classify_unit_size_bracket(base_rent, effective_sqm)
+        expected_sqm_rent = br["expected_sqm_rent"]
+        r_min = br["r_min"]
+        r_max = br["r_max"]
+        size_label = (
+            f"{br['size_label']} ({safe_unit_count} WE à Ø {round(effective_sqm)} m²)"
+            if safe_unit_count > 1
+            else br["size_label"]
+        )
+
     min_str = f"{r_min:.2f}".replace(".", ",")
     max_str = f"{r_max:.2f}".replace(".", ",")
 

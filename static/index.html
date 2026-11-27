@@ -2399,7 +2399,7 @@
                   <div class="font-bold text-slate-900 dark:text-white">Hintergrund-Crawler aktivieren</div>
                   <p class="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">Scannt automatisch alle aktiven Suchprofile im Hintergrund und benachrichtigt bei neuen Deals.</p>
                 </div>
-                <button @click="alertSettings.crawler_active = !alertSettings.crawler_active; saveAlertSettingsForm()"
+                <button @click="alertSettings.crawler_active = !alertSettings.crawler_active; saveAlertSettingsForm({ silent: true })"
                         class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden"
                         :class="alertSettings.crawler_active ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-700'">
                   <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out"
@@ -2409,24 +2409,28 @@
 
               <!-- Interval Selector -->
               <div>
-                <label class="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">Abfrage-Intervall:</label>
+                <div class="flex items-center justify-between gap-2 mb-1.5">
+                  <label class="block font-semibold text-slate-700 dark:text-slate-300">Abfrage-Intervall:</label>
+                  <span x-show="crawlerSettingsStatus === 'saving'" x-cloak class="text-[11px] font-medium text-sky-600 dark:text-sky-400">Speichere...</span>
+                  <span x-show="crawlerSettingsStatus === 'saved'" x-cloak class="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">✓ Gespeichert</span>
+                </div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <button @click="alertSettings.crawler_interval_minutes = 60; saveAlertSettingsForm()"
+                  <button @click="alertSettings.crawler_interval_minutes = 60; saveAlertSettingsForm({ silent: true })"
                           class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
                           :class="alertSettings.crawler_interval_minutes === 60 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
                     1h
                   </button>
-                  <button @click="alertSettings.crawler_interval_minutes = 120; saveAlertSettingsForm()"
+                  <button @click="alertSettings.crawler_interval_minutes = 120; saveAlertSettingsForm({ silent: true })"
                           class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
                           :class="alertSettings.crawler_interval_minutes === 120 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
                     2h
                   </button>
-                  <button @click="alertSettings.crawler_interval_minutes = 360; saveAlertSettingsForm()"
+                  <button @click="alertSettings.crawler_interval_minutes = 360; saveAlertSettingsForm({ silent: true })"
                           class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
                           :class="alertSettings.crawler_interval_minutes === 360 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
                     6h
                   </button>
-                  <button @click="alertSettings.crawler_interval_minutes = 720; saveAlertSettingsForm()"
+                  <button @click="alertSettings.crawler_interval_minutes = 720; saveAlertSettingsForm({ silent: true })"
                           class="py-2 px-3 rounded-lg border font-semibold text-center transition-all cursor-pointer"
                           :class="alertSettings.crawler_interval_minutes === 720 ? 'bg-sky-50 dark:bg-sky-950 border-sky-500 text-sky-700 dark:text-sky-300 ring-2 ring-sky-500/20' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50'">
                     12h
@@ -3163,6 +3167,11 @@
                               x-text="`📦 Paket (${selectedProperty.ai_analysis.insights.unit_count_in_offer || 2} Einheiten summiert)`">
                         </span>
                       </template>
+                      <template x-if="!selectedProperty.ai_analysis.insights.is_package_deal && (selectedProperty.ai_analysis.insights.is_mfh || (selectedProperty.ai_analysis.insights.unit_count_in_offer || 1) > 1)">
+                        <span class="text-[10px] px-2 py-0.5 rounded-full font-bold bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300 border border-sky-300 dark:border-sky-700"
+                              x-text="selectedProperty.ai_analysis.metrics.has_partial_vacancy ? `🏢 MFH (${selectedProperty.ai_analysis.metrics.rented_units_count || 0}/${selectedProperty.ai_analysis.insights.unit_count_in_offer || (selectedProperty.ai_analysis.insights.units || []).length} WE vermietet)` : `🏢 MFH (${selectedProperty.ai_analysis.insights.unit_count_in_offer || (selectedProperty.ai_analysis.insights.units || []).length} Wohneinheiten)`">
+                        </span>
+                      </template>
                     </div>
                     <span class="text-[11px] px-2.5 py-0.5 rounded-full font-bold"
                           :class="selectedProperty.ai_analysis.metrics.rent_is_verified 
@@ -3172,7 +3181,43 @@
                     </span>
                   </div>
 
-                  <template x-if="selectedProperty.ai_analysis.insights.package_breakdown">
+                  <template x-if="selectedProperty.ai_analysis.insights.units && selectedProperty.ai_analysis.insights.units.length > 0">
+                    <div class="rounded-lg border border-sky-200/80 dark:border-sky-800/70 bg-white/90 dark:bg-slate-900/90 overflow-hidden">
+                      <div class="px-3 py-1.5 bg-sky-50/90 dark:bg-sky-950/50 border-b border-sky-200/70 dark:border-sky-800/70 flex flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-sky-900 dark:text-sky-200">
+                        <span x-text="`${selectedProperty.ai_analysis.insights.is_package_deal ? '📦' : '🏢'} Einzelaufstellung (${selectedProperty.ai_analysis.insights.units.length} Wohneinheiten)`"></span>
+                        <span class="font-mono text-[10px]" x-text="selectedProperty.ai_analysis.metrics.target_expose_monthly_rent ? `Ist: ${formatCurrency(selectedProperty.ai_analysis.metrics.current_monthly_rent)}/M • Exposé-Soll: ${formatCurrency(selectedProperty.ai_analysis.metrics.target_expose_monthly_rent)}/M` : `Summe Ist-Kaltmiete: ${formatCurrency(selectedProperty.ai_analysis.metrics.current_monthly_rent)}/M`"></span>
+                      </div>
+                      <div class="overflow-x-auto">
+                        <table class="w-full text-[11px] text-left">
+                          <thead class="bg-slate-50 dark:bg-slate-800/70 text-slate-500 dark:text-slate-400">
+                            <tr>
+                              <th class="px-3 py-1.5 font-semibold">Einheit</th>
+                              <th class="px-2 py-1.5 font-semibold text-right">Fläche</th>
+                              <th class="px-2 py-1.5 font-semibold text-right">Ist / Monat</th>
+                              <th class="px-2 py-1.5 font-semibold text-right">Status / Hinweis</th>
+                            </tr>
+                          </thead>
+                          <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                            <template x-for="(unit, idx) in selectedProperty.ai_analysis.insights.units" :key="idx">
+                              <tr class="text-slate-800 dark:text-slate-200">
+                                <td class="px-3 py-1.5 font-medium" x-text="unit.label || `Einheit ${idx + 1}`"></td>
+                                <td class="px-2 py-1.5 text-right font-mono text-slate-600 dark:text-slate-300" x-text="unit.sqm ? `${formatNumber(unit.sqm, 1)} m²` : 'k. A.'"></td>
+                                <td class="px-2 py-1.5 text-right font-mono font-semibold"
+                                    :class="unit.is_rented ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'"
+                                    x-text="unit.is_rented ? formatCurrency(unit.cold_rent_monthly) : (unit.target_rent_monthly ? `0 € (Soll ${formatCurrency(unit.target_rent_monthly)})` : '0 €')"></td>
+                                <td class="px-2 py-1.5 text-right">
+                                  <span class="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold"
+                                        :class="unit.is_rented ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300' : 'bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300'"
+                                        x-text="unit.is_rented ? 'Vermietet' : 'Leerstand'"></span>
+                                </td>
+                              </tr>
+                            </template>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </template>
+                  <template x-if="(!selectedProperty.ai_analysis.insights.units || selectedProperty.ai_analysis.insights.units.length === 0) && selectedProperty.ai_analysis.insights.package_breakdown">
                     <div class="text-[11px] px-3 py-2 rounded-lg bg-indigo-50/90 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/70 text-indigo-900 dark:text-indigo-200 font-medium"
                          x-text="`📦 Einheiten-Aufschlüsselung: ${selectedProperty.ai_analysis.insights.package_breakdown}`">
                     </div>
@@ -3185,6 +3230,9 @@
                         <div class="min-w-0">
                           <span class="text-slate-500 dark:text-slate-400 block mb-0.5 font-medium">Monatliche Ist-Kaltmiete:</span>
                           <div class="text-sm sm:text-base font-extrabold text-slate-900 dark:text-slate-100 break-words" x-text="formatCurrency(selectedProperty.ai_analysis.metrics.current_monthly_rent) + ' / M.'"></div>
+                          <template x-if="selectedProperty.ai_analysis.metrics.target_expose_monthly_rent > 0">
+                            <div class="text-[10px] text-sky-600 dark:text-sky-400 font-semibold mt-0.5 break-words" x-text="`Exposé-Soll (Vollverm.): ${formatCurrency(selectedProperty.ai_analysis.metrics.target_expose_monthly_rent)} / M.`"></div>
+                          </template>
                           <div class="text-[10px] text-slate-400 mt-0.5 break-words" x-text="`Sprengnetter Markt: ${formatCurrency(selectedProperty.ai_analysis.metrics.expected_monthly_rent)}`"></div>
                         </div>
                       </template>
@@ -3210,6 +3258,9 @@
                         <div class="min-w-0">
                           <span class="text-slate-500 dark:text-slate-400 block mb-0.5 font-medium">Reale Ist-Rendite:</span>
                           <div class="text-sm sm:text-base font-extrabold text-emerald-600 dark:text-emerald-400 break-words" x-text="formatPercent(selectedProperty.ai_analysis.metrics.gross_yield, 2)"></div>
+                          <template x-if="selectedProperty.ai_analysis.metrics.target_expose_gross_yield > 0">
+                            <div class="text-[10px] text-sky-600 dark:text-sky-400 font-semibold mt-0.5 break-words" x-text="`Exposé-Soll-Rendite: ${formatPercent(selectedProperty.ai_analysis.metrics.target_expose_gross_yield, 2)}`"></div>
+                          </template>
                           <div class="text-[10px] text-slate-400 mt-0.5 break-words" x-text="`Faktor: ${formatNumber(selectedProperty.ai_analysis.metrics.price_to_rent_ratio, 1)}x Jahresmiete`"></div>
                         </div>
                       </template>
@@ -3238,18 +3289,19 @@
                       <div class="text-[10px] text-slate-400 mt-0.5 break-words" x-text="selectedProperty.ai_analysis.insights.commission_free ? 'Privatverkauf / Direkt' : 'Über Makler'"></div>
                     </div>
 
-                    <!-- 4. Hausgeld & WEG -->
+                    <!-- 4. Hausgeld & Bewirtschaftung -->
                     <div class="p-2.5 sm:p-3 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 shadow-2xs min-w-0">
-                      <span class="text-slate-500 dark:text-slate-400 block mb-0.5 font-medium">Hausgeld & Rücklage:</span>
+                      <span class="text-slate-500 dark:text-slate-400 block mb-0.5 font-medium"
+                            x-text="(!selectedProperty.ai_analysis.insights.has_explicit_hausgeld && selectedProperty.ai_analysis.metrics.is_mfh) ? 'Bewirtschaftung (MFH):' : 'Hausgeld & Rücklage:'"></span>
                       <div class="text-xs sm:text-sm font-extrabold break-words"
                            :class="(selectedProperty.ai_analysis.insights.has_explicit_hausgeld && selectedProperty.ai_analysis.metrics.current_monthly_rent > 0 && selectedProperty.ai_analysis.insights.hausgeld > selectedProperty.ai_analysis.metrics.current_monthly_rent) ? 'text-rose-600 dark:text-rose-400' : 'text-slate-900 dark:text-slate-100'"
-                           x-text="selectedProperty.ai_analysis.insights.has_explicit_hausgeld ? (formatCurrency(selectedProperty.ai_analysis.insights.hausgeld) + ' / M.') : 'k. A. (nicht im Exposé)'">
+                           x-text="selectedProperty.ai_analysis.insights.has_explicit_hausgeld ? (formatCurrency(selectedProperty.ai_analysis.insights.hausgeld) + ' / M.') : (selectedProperty.ai_analysis.metrics.is_mfh ? (formatCurrency(selectedProperty.ai_analysis.metrics.additional_costs) + ' / M. (pauschal)') : 'k. A. (nicht im Exposé)')">
                       </div>
                       <template x-if="selectedProperty.ai_analysis.insights.has_explicit_hausgeld && selectedProperty.ai_analysis.metrics.current_monthly_rent > 0 && selectedProperty.ai_analysis.insights.hausgeld > selectedProperty.ai_analysis.metrics.current_monthly_rent">
                         <div class="text-[10px] font-bold text-rose-600 dark:text-rose-400 mt-0.5 break-words">⚠️ Übersteigt Ist-Kaltmiete!</div>
                       </template>
                       <div class="text-[10px] mt-0.5 font-semibold break-words" :class="selectedProperty.ai_analysis.insights.no_reserve_found ? 'text-rose-600 dark:text-rose-400' : 'text-slate-400'"
-                           x-text="selectedProperty.ai_analysis.insights.no_reserve_found ? '⚠️ Keine Rücklagen (0 €)' : (selectedProperty.ai_analysis.insights.reserve_amount > 0 ? `Rücklage: ${formatCurrency(selectedProperty.ai_analysis.insights.reserve_amount)}` : 'Rücklage k.A.')">
+                           x-text="selectedProperty.ai_analysis.insights.no_reserve_found ? '⚠️ Keine Rücklagen (0 €)' : (selectedProperty.ai_analysis.insights.reserve_amount > 0 ? `Rücklage: ${formatCurrency(selectedProperty.ai_analysis.insights.reserve_amount)}` : ((!selectedProperty.ai_analysis.insights.has_explicit_hausgeld && selectedProperty.ai_analysis.metrics.is_mfh) ? 'Kein WEG-Hausgeld (ca. 1,50 €/m²)' : 'Rücklage k.A.'))">
                       </div>
                     </div>
                   </div>
@@ -3354,8 +3406,8 @@
                           </template>
                         </div>
 
-                        <template x-if="selectedProperty.ai_analysis.insights.is_package_deal && selectedProperty.ai_analysis.insights.package_breakdown">
-                          <div class="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-[10px] text-indigo-700 dark:text-indigo-400 break-words" x-text="`📦 ${selectedProperty.ai_analysis.insights.package_breakdown}`"></div>
+                        <template x-if="(selectedProperty.ai_analysis.insights.is_package_deal || selectedProperty.ai_analysis.insights.is_mfh || (selectedProperty.ai_analysis.insights.unit_count_in_offer || 1) > 1) && selectedProperty.ai_analysis.insights.package_breakdown">
+                          <div class="mt-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80 text-[10px] text-indigo-700 dark:text-indigo-400 break-words" x-text="`${selectedProperty.ai_analysis.insights.is_package_deal ? '📦' : '🏢'} ${selectedProperty.ai_analysis.insights.package_breakdown}`"></div>
                         </template>
                       </div>
 
@@ -3419,13 +3471,13 @@
                           Genaue Berechnungsgrundlage:
                         </span>
                         <span class="text-[11px] text-slate-600 dark:text-slate-400 font-mono break-words"
-                              x-text="`${formatCurrency(selectedProperty.ai_analysis.metrics.current_monthly_rent > 0 ? selectedProperty.ai_analysis.metrics.current_monthly_rent : selectedProperty.ai_analysis.metrics.expected_monthly_rent, true)} Miete − ${formatCurrency(selectedProperty.ai_analysis.metrics.monthly_rate || ((selectedProperty.purchase_price * 0.8) * ((selectedProperty.ai_analysis.metrics.applied_interest_rate || 3.93) + 2.0) / 1200), true)} Bankrate − ${formatCurrency(selectedProperty.ai_analysis.metrics.additional_costs || 50, true)} Hausgeld = ${formatCurrency(selectedProperty.ai_analysis.metrics.monthly_cashflow, true)} / M`"></span>
+                              x-text="`${formatCurrency(selectedProperty.ai_analysis.metrics.current_monthly_rent > 0 ? selectedProperty.ai_analysis.metrics.current_monthly_rent : selectedProperty.ai_analysis.metrics.expected_monthly_rent, true)} Miete − ${formatCurrency(selectedProperty.ai_analysis.metrics.monthly_rate || ((selectedProperty.purchase_price * 0.8) * ((selectedProperty.ai_analysis.metrics.applied_interest_rate || 3.93) + 2.0) / 1200), true)} Bankrate − ${formatCurrency(selectedProperty.ai_analysis.metrics.additional_costs || 50, true)} ${(selectedProperty.ai_analysis.metrics.is_mfh && !selectedProperty.ai_analysis.insights.has_explicit_hausgeld) ? 'Bewirtschaftung' : 'Hausgeld'} = ${formatCurrency(selectedProperty.ai_analysis.metrics.monthly_cashflow, true)} / M`"></span>
                       </div>
                       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-200/80 dark:border-slate-800/60 font-mono">
                         <div>Darlehen: <strong class="text-slate-800 dark:text-slate-200" x-text="formatCurrency(selectedProperty.ai_analysis.metrics.loan_amount || (selectedProperty.purchase_price * 0.8))"></strong> <span class="text-[9px]">(20% EK)</span></div>
                         <div>Zinssatz (10J): <strong class="text-sky-600 dark:text-sky-300" x-text="`${formatPercent(selectedProperty.ai_analysis.metrics.applied_interest_rate || (liveRates ? liveRates.default_nominal_rate : 3.93), 2)}`"></strong> <span class="text-[9px]">(Live)</span></div>
                         <div>Tilgung: <strong class="text-slate-800 dark:text-slate-200" x-text="`${formatPercent(selectedProperty.ai_analysis.metrics.applied_repayment_rate || 2.0, 2)}`"></strong></div>
-                        <div>Hausgeld (nicht uml.): <strong class="text-slate-800 dark:text-slate-200" x-text="formatCurrency(selectedProperty.ai_analysis.metrics.additional_costs || 50) + '/M'"></strong></div>
+                        <div><span x-text="(selectedProperty.ai_analysis.metrics.operating_costs_label || 'Hausgeld (nicht uml.)') + ': '"></span><strong class="text-slate-800 dark:text-slate-200" x-text="formatCurrency(selectedProperty.ai_analysis.metrics.additional_costs || 50) + '/M'"></strong></div>
                       </div>
 
                       <!-- Dr. Klein Direct Live Quote & Calculator Link -->

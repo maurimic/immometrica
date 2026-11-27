@@ -1258,12 +1258,24 @@ def run_property_image_analysis(
         analyzed_urls = [p["url"] for p in img_report.get("analyzed_photos", []) if p.get("url")]
         gallery_json = json.dumps(analyzed_urls, ensure_ascii=False) if analyzed_urls else None
 
-        # Also update ai_analysis if present (inkl. CaPEx-Abgleich mit neu geprüften Fotos & Unterlagen-Checkliste!)
+        # Also update ai_analysis if present (inkl. Upgrade von Fallback-Audits, CaPEx-Abgleich & Checkliste!)
         ai_analysis_val = prop.get("ai_analysis")
         updated_ai_obj = None
+        refreshed_property_updates = None
         if ai_analysis_val:
             try:
                 ai_data = json.loads(ai_analysis_val)
+                was_fallback = not bool(ai_data.get("used_llm"))
+                if was_fallback and api_key:
+                    from app.ai_analyst import generate_ai_due_diligence_report
+                    refreshed_report = generate_ai_due_diligence_report(
+                        prop,
+                        full_description=description,
+                        api_key=api_key,
+                        image_analysis=img_report,
+                    )
+                    if refreshed_report and isinstance(refreshed_report, dict):
+                        ai_data = refreshed_report
                 ai_data = reconcile_capex_with_images(ai_data, prop, img_report)
                 doc_req = build_missing_documents_request(prop, ai_data)
                 ai_data["missing_documents"] = doc_req.get("missing_documents", [])
@@ -1271,16 +1283,83 @@ def run_property_image_analysis(
                 ai_data["document_request"] = doc_req
                 updated_ai_obj = ai_data
                 ai_analysis_val = json.dumps(ai_data, ensure_ascii=False)
-            except Exception:
-                pass
+                if was_fallback and api_key and updated_ai_obj.get("metrics"):
+                    met = updated_ai_obj.get("metrics") or {}
+                    ins = updated_ai_obj.get("insights") or {}
+                    new_prop_type = ins.get("corrected_property_type") or prop.get("property_type")
+                    new_is_rented = 1 if met.get("is_rented", ins.get("is_rented", False)) else 0
+                    new_comm = 0.0 if ins.get("commission_free") else float(ins.get("commission_percent", prop.get("commission_percent", 3.57)))
+                    refreshed_property_updates = {
+                        "current_rent": float(met.get("current_monthly_rent") or 0.0),
+                        "expected_rent": float(met.get("expected_monthly_rent") or 0.0),
+                        "gross_yield": float(met.get("gross_yield") or 0.0),
+                        "monthly_cashflow": float(met.get("monthly_cashflow") or 0.0),
+                        "is_rented": new_is_rented,
+                        "is_private": 1 if ins.get("is_private") else 0,
+                        "commission_percent": new_comm,
+                        "property_type": new_prop_type,
+                        "market_value": float(met.get("market_value") or prop.get("market_value") or 0.0),
+                        "market_value_per_sqm": float(met.get("market_value_per_sqm") or prop.get("market_value_per_sqm") or 0.0),
+                        "market_deviation_percent": float(met.get("market_deviation_percent") if met.get("market_deviation_percent") is not None else (prop.get("market_deviation_percent") or 0.0)),
+                    }
+            except Exception as e:
+                logger.warning(f"Error updating ai_analysis after image analysis for property {property_id}: {e}")
 
-        cursor.execute("""
-            UPDATE properties 
-            SET image_analysis = ?,
-                gallery_images = COALESCE(?, gallery_images),
-                ai_analysis = COALESCE(?, ai_analysis)
-            WHERE id = ?
-        """, (img_json, gallery_json, ai_analysis_val, property_id))
+        if refreshed_property_updates:
+            cursor.execute("""
+                UPDATE properties
+                SET image_analysis = ?,
+                    gallery_images = COALESCE(?, gallery_images),
+                    ai_analysis = COALESCE(?, ai_analysis),
+                    current_rent = ?,
+                    expected_rent = ?,
+                    gross_yield = ?,
+                    monthly_cashflow = ?,
+                    is_rented = ?,
+                    is_private = ?,
+                    commission_percent = ?,
+                    property_type = ?,
+                    market_value = ?,
+                    market_value_per_sqm = ?,
+                    market_deviation_percent = ?
+                WHERE id = ?
+            """, (
+                img_json,
+                gallery_json,
+                ai_analysis_val,
+                refreshed_property_updates["current_rent"],
+                refreshed_property_updates["expected_rent"],
+                refreshed_property_updates["gross_yield"],
+                refreshed_property_updates["monthly_cashflow"],
+                refreshed_property_updates["is_rented"],
+                refreshed_property_updates["is_private"],
+                refreshed_property_updates["commission_percent"],
+                refreshed_property_updates["property_type"],
+                refreshed_property_updates["market_value"],
+                refreshed_property_updates["market_value_per_sqm"],
+                refreshed_property_updates["market_deviation_percent"],
+                property_id,
+            ))
+            cursor.execute("""
+                UPDATE deal_alerts
+                SET monthly_cashflow = ?,
+                    gross_yield = ?,
+                    market_discount_pct = ?
+                WHERE property_id = ?
+            """, (
+                refreshed_property_updates["monthly_cashflow"],
+                refreshed_property_updates["gross_yield"],
+                refreshed_property_updates["market_deviation_percent"],
+                property_id,
+            ))
+        else:
+            cursor.execute("""
+                UPDATE properties 
+                SET image_analysis = ?,
+                    gallery_images = COALESCE(?, gallery_images),
+                    ai_analysis = COALESCE(?, ai_analysis)
+                WHERE id = ?
+            """, (img_json, gallery_json, ai_analysis_val, property_id))
         conn.commit()
     finally:
         conn.close()
@@ -1294,6 +1373,8 @@ def run_property_image_analysis(
         resp_payload["missing_documents"] = updated_ai_obj.get("missing_documents", [])
         resp_payload["doc_checklist"] = updated_ai_obj.get("doc_checklist", [])
         resp_payload["document_request"] = updated_ai_obj.get("document_request")
+    if refreshed_property_updates is not None:
+        resp_payload["property_updates"] = refreshed_property_updates
     return resp_payload
 
 @router.get("/{property_id}/image-analysis")
