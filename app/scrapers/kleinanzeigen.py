@@ -33,6 +33,88 @@ CITY_SLUG_ALIASES = {
     "saarbrücken": "saarbruecken",
 }
 
+_KNOWN_LOCATION_IDS = {
+    "essen": "2027",
+    "dortmund": "1085",
+    "bochum": "1932",
+    "nürnberg": "6810",
+    "nuernberg": "6810",
+    "wörth am rhein": "5207",
+    "woerth am rhein": "5207",
+}
+_LOCATION_ID_CACHE: Dict[str, Optional[str]] = {}
+
+
+def resolve_kleinanzeigen_location_id(
+    city: str = "",
+    postal_code: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Resolves a German city or 5-digit PLZ to Kleinanzeigen's numeric location ID (e.g. '2027' for Essen)
+    so searches filter by location (`c208l2027r1`) instead of triggering a nationwide keyword search (`k0c208`).
+    """
+    plz_clean = re.sub(r"\D", "", str(postal_code or ""))[:5]
+    city_clean = str(city or "").strip()
+    city_key = city_clean.lower()
+
+    if plz_clean and f"plz:{plz_clean}" in _LOCATION_ID_CACHE:
+        return _LOCATION_ID_CACHE[f"plz:{plz_clean}"]
+    if not plz_clean and city_key in _KNOWN_LOCATION_IDS:
+        return _KNOWN_LOCATION_IDS[city_key]
+    if not plz_clean and city_key and f"city:{city_key}" in _LOCATION_ID_CACHE:
+        return _LOCATION_ID_CACHE[f"city:{city_key}"]
+
+    query_val = plz_clean or city_clean
+    if not query_val:
+        return None
+
+    cache_key = f"plz:{plz_clean}" if plz_clean else f"city:{city_key}"
+    try:
+        resp = requests.get(
+            "https://www.kleinanzeigen.de/s-ort-empfehlungen.json",
+            params={"query": query_val},
+            headers=BROWSER_HEADERS,
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, dict):
+                candidates = [
+                    (str(k).lstrip("_"), str(v).strip())
+                    for k, v in data.items()
+                    if str(k) != "_0" and str(k).lstrip("_").isdigit()
+                ]
+                if candidates:
+                    if plz_clean:
+                        for loc_id, label in candidates:
+                            if plz_clean in label:
+                                _LOCATION_ID_CACHE[cache_key] = loc_id
+                                return loc_id
+                    if city_key:
+                        from app.geo_resolver import resolve_location_and_tax
+                        expected_state = resolve_location_and_tax(city=city_clean).get("state", "").lower()
+                        # 1. Exact base name match + state match (distinguishes Essen NRW vs Essen Oldenburg)
+                        for loc_id, label in candidates:
+                            base = label.split(" - ")[0].strip().lower()
+                            if base == city_key and (not expected_state or expected_state in label.lower()):
+                                _LOCATION_ID_CACHE[cache_key] = loc_id
+                                return loc_id
+                        # 2. Exact base name match regardless of state
+                        for loc_id, label in candidates:
+                            base = label.split(" - ")[0].strip().lower()
+                            if base == city_key:
+                                _LOCATION_ID_CACHE[cache_key] = loc_id
+                                return loc_id
+                    # 3. First non-Germany location candidate
+                    _LOCATION_ID_CACHE[cache_key] = candidates[0][0]
+                    return candidates[0][0]
+    except Exception as e:
+        logger.debug(f"Kleinanzeigen location lookup failed for '{query_val}': {e}")
+
+    if city_key in _KNOWN_LOCATION_IDS:
+        return _KNOWN_LOCATION_IDS[city_key]
+    return None
+
 
 def clean_city_slug(city: str) -> str:
     c = city.lower().strip()
@@ -70,7 +152,7 @@ def scrape_kleinanzeigen_deals(
     """
     from app.calculator import calculate_cashflow
     from app.valuation import evaluate_property_valuation
-    from app.geo_resolver import resolve_location_and_tax, resolve_city_coordinates
+    from app.geo_resolver import is_within_search_radius, resolve_location_and_tax, resolve_city_coordinates
     from app.availability import check_portal_url_live
     from app.scrapers.deal_fusion import normalize_portal_url
 
@@ -84,7 +166,11 @@ def scrape_kleinanzeigen_deals(
         city_slug = plz_clean
     exclude_set = {normalize_portal_url(u) for u in exclude_urls} if exclude_urls else set()
     search_targets = _build_kleinanzeigen_search_targets(property_type)
-    radius_suffix = f"?radius={int(radius_km)}" if int(radius_km or 0) > 0 else ""
+    loc_id = resolve_kleinanzeigen_location_id(city=city, postal_code=plz_clean or None)
+    if not loc_id:
+        logger.warning(f"Kleinanzeigen search aborted for '{loc_input}': could not resolve location ID (avoids nationwide keyword fallback).")
+        return []
+    r_suffix = f"r{int(radius_km)}" if int(radius_km or 0) > 0 else ""
 
     results = []
     seen_urls = set()
@@ -92,6 +178,7 @@ def scrape_kleinanzeigen_deals(
     for seg_slug, cat_code in search_targets:
         if len(results) >= max_results:
             break
+        cat_num = cat_code.lstrip("c")
         for page in range(1, 4):
             if len(results) >= max_results:
                 break
@@ -99,14 +186,14 @@ def scrape_kleinanzeigen_deals(
             if query:
                 q_slug = clean_city_slug(query)
                 if page == 1:
-                    url = f"https://www.kleinanzeigen.de/{seg_slug}/{city_slug}/{q_slug}/k0{cat_code}{radius_suffix}"
+                    url = f"https://www.kleinanzeigen.de/{seg_slug}/{city_slug}/{q_slug}/k0c{cat_num}l{loc_id}{r_suffix}"
                 else:
-                    url = f"https://www.kleinanzeigen.de/{seg_slug}/seite:{page}/{city_slug}/{q_slug}/k0{cat_code}{radius_suffix}"
+                    url = f"https://www.kleinanzeigen.de/{seg_slug}/seite:{page}/{city_slug}/{q_slug}/k0c{cat_num}l{loc_id}{r_suffix}"
             else:
                 if page == 1:
-                    url = f"https://www.kleinanzeigen.de/{seg_slug}/{city_slug}/k0{cat_code}{radius_suffix}"
+                    url = f"https://www.kleinanzeigen.de/{seg_slug}/{city_slug}/c{cat_num}l{loc_id}{r_suffix}"
                 else:
-                    url = f"https://www.kleinanzeigen.de/{seg_slug}/seite:{page}/{city_slug}/k0{cat_code}{radius_suffix}"
+                    url = f"https://www.kleinanzeigen.de/{seg_slug}/seite:{page}/{city_slug}/c{cat_num}l{loc_id}{r_suffix}"
 
             try:
                 resp = requests.get(url, headers=BROWSER_HEADERS, timeout=7.0)
@@ -117,7 +204,15 @@ def scrape_kleinanzeigen_deals(
                 break
 
             soup = BeautifulSoup(resp.text, "html.parser")
-            articles = soup.find_all("article")
+            h1_elem = soup.find("h1")
+            if h1_elem:
+                h1_low = h1_elem.get_text(" ", strip=True).lower()
+                if "in deutschland" in h1_low and ("für „" in h1_low or 'für "' in h1_low):
+                    logger.warning(f"Kleinanzeigen returned nationwide keyword results instead of '{loc_input}' for {url}; aborting.")
+                    break
+
+            main_table = soup.find(id="srchrslt-adtable")
+            articles = (main_table or soup).find_all("article")
             if not articles:
                 break
 
@@ -236,15 +331,28 @@ def scrape_kleinanzeigen_deals(
                 if not img_url or "placeholder" in img_url or img_url.startswith("data:"):
                     img_url = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
 
-                card_text = art.get_text(separator=" ")
+                card_text = art.get_text(separator=" | ", strip=True)
+                loc_elem = art.find(class_=re.compile(r"aditem-main--top--left"))
+                loc_source = loc_elem.get_text(" ", strip=True) if loc_elem else card_text
                 extracted_plz = None
                 extracted_city = None
                 extracted_street = None
 
-                plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]{2,30})", card_text)
+                # Respect explicit Kleinanzeigen distance badges like "(0.7 km)" or "(289 km)"
+                dist_badge = re.search(r"\((\d+(?:[.,]\d+)?)\s*km\)", card_text)
+                if dist_badge:
+                    try:
+                        card_dist = float(dist_badge.group(1).replace(",", "."))
+                        max_badge_dist = float(radius_km) + 5.0 if int(radius_km or 0) > 0 else 15.0
+                        if card_dist > max_badge_dist:
+                            continue
+                    except ValueError:
+                        pass
+
+                plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß][A-Za-zäöüÄÖÜß\s\-]{1,40}?)(?:\s*\||\s*\(|$)", loc_source)
                 if plz_match:
                     extracted_plz = plz_match.group(1).strip()
-                    cand_city = plz_match.group(2).strip()
+                    cand_city = plz_match.group(2).strip().rstrip("-").strip()
                     if len(cand_city) > 2:
                         extracted_city = cand_city
 
@@ -258,10 +366,8 @@ def scrape_kleinanzeigen_deals(
                 resolved_city = extracted_city or search_city_clean
                 combined_card = f"{title} {card_text}".lower()
 
-                if city and city.lower().strip() in combined_card and (
-                    not extracted_city or extracted_city.lower() != city.lower().strip()
-                ):
-                    district_note = extracted_city if (extracted_city and extracted_city.lower() != city.lower().strip()) else None
+                if city and extracted_city and city.lower().strip() in extracted_city.lower() and extracted_city.lower() != city.lower().strip():
+                    district_note = extracted_city
                     resolved_city = search_city_clean
                 else:
                     district_note = None
@@ -269,6 +375,16 @@ def scrape_kleinanzeigen_deals(
                         resolved_city = search_city_clean
 
                 resolved_plz = extracted_plz or plz_clean or ""
+                in_radius, _ = is_within_search_radius(
+                    target_city=city,
+                    target_postal_code=plz_clean or None,
+                    radius_km=radius_km,
+                    deal_city=resolved_city,
+                    deal_postal_code=resolved_plz,
+                )
+                if not in_radius:
+                    continue
+
                 geo_info = resolve_location_and_tax(postal_code=resolved_plz, city=resolved_city)
                 resolved_state = geo_info["state"]
                 if not resolved_plz and geo_info.get("postal_code"):

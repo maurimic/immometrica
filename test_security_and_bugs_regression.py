@@ -704,6 +704,148 @@ class TestPoint1SecurityAndBugs(unittest.TestCase):
         self.assertLessEqual(res["categories"]["windows"]["score"], 5.0)
         self.assertIn("Nicht beurteilbar", res["categories"]["windows"]["status"])
 
+    def test_17_kleinanzeigen_location_id_url_and_geo_radius_filter(self):
+        from app.geo_resolver import is_within_search_radius
+        from app.scrapers.kleinanzeigen import resolve_kleinanzeigen_location_id
+
+        self.assertEqual(resolve_kleinanzeigen_location_id("Essen"), "2027")
+
+        # Distance & false-homonym checks
+        ok_essen, _ = is_within_search_radius("Essen", None, 1, "Essen-Stadtmitte", "45127")
+        self.assertTrue(ok_essen)
+        bad_woerth, dist_w = is_within_search_radius("Essen", None, 1, "Wörth am Rhein", "76744")
+        self.assertFalse(bad_woerth)
+        self.assertGreater(dist_w, 250.0)
+        bad_oldenburg, dist_o = is_within_search_radius("Essen", None, 1, "Essen (Oldenburg)", "49632")
+        self.assertFalse(bad_oldenburg)
+        self.assertGreater(dist_o, 100.0)
+
+        # Verify location-scoped Kleinanzeigen URL + card radius/distance filtering
+        requested_urls = []
+        ka_html = """
+        <h1>Häuser zum Kauf in Essen 1 - 2 von 2 Ergebnissen in Essen</h1>
+        <ul id="srchrslt-adtable">
+          <article class="aditem">
+            <a href="/s-anzeige/mfh-woerth-falsch/99901-208-5212">Mehrfamilienhaus mit 10 Zimmern</a>
+            <p class="aditem-main--middle--price-shipping--price">489.000 €</p>
+            <p class="aditem-main--middle--tags">284,8 m² · 10 Zi.</p>
+            <p class="aditem-main--top--left">76744 Wörth am Rhein (289 km)</p>
+          </article>
+          <article class="aditem">
+            <a href="/s-anzeige/mfh-essen-echt/99902-208-2027">Voll vermietetes Mehrfamilienhaus in Essen</a>
+            <p class="aditem-main--middle--price-shipping--price">450.000 €</p>
+            <p class="aditem-main--middle--tags">240 m² · 8 Zi.</p>
+            <p class="aditem-main--top--left">45127 Essen-Stadtmitte (0.7 km)</p>
+          </article>
+        </ul>
+        <ul id="srchrslt-adtable-altads">
+          <article class="aditem">
+            <a href="/s-anzeige/mfh-altad-berlin/99903-208-3333">Mehrfamilienhaus Berlin Alternative</a>
+            <p class="aditem-main--middle--price-shipping--price">400.000 €</p>
+            <p class="aditem-main--middle--tags">200 m² · 6 Zi.</p>
+            <p class="aditem-main--top--left">10115 Berlin</p>
+          </article>
+        </ul>
+        """
+
+        def fake_ka_get(url, **kwargs):
+            requested_urls.append(url)
+            m = MagicMock()
+            m.status_code = 200
+            m.text = ka_html
+            return m
+
+        with patch("app.scrapers.kleinanzeigen.requests.get", side_effect=fake_ka_get):
+            deals = scrape_kleinanzeigen_deals("Essen", radius_km=1, property_type="Mehrfamilienhaus", max_results=10)
+
+        self.assertTrue(any("/s-haus-kaufen/essen/c208l2027r1" in u for u in requested_urls), f"URLs: {requested_urls}")
+        self.assertFalse(any("/k0c208" in u for u in requested_urls), f"Must not use k0 nationwide query: {requested_urls}")
+        self.assertEqual(len(deals), 1)
+        self.assertEqual(deals[0]["postal_code"], "45127")
+        self.assertEqual(deals[0]["city"], "Essen")
+
+        # Safeguard: reject response if Kleinanzeigen served a nationwide keyword fallback heading
+        de_html = "<h1>Häuser zum Kauf 1 - 25 von 460 Ergebnissen für „essen“ in Deutschland</h1>" + ka_html
+        with patch("app.scrapers.kleinanzeigen.requests.get", return_value=MagicMock(status_code=200, text=de_html)):
+            deals_de = scrape_kleinanzeigen_deals("Essen", radius_km=1, property_type="Mehrfamilienhaus")
+        self.assertEqual(deals_de, [])
+
+    def test_18_search_agent_stage1_and_stage4_reject_out_of_radius_even_after_audit(self):
+        from app.database import save_search_profile, delete_search_profile, get_seen_listing_urls
+        from app.search_agent import execute_search_profile
+
+        pid = save_search_profile({
+            "name": "Essen MFH Strict Geo",
+            "city": "Essen",
+            "radius_km": 1,
+            "property_type": "Mehrfamilienhaus",
+            "is_active": True,
+        })
+        fake_deals = [
+            {
+                "title": "Far-away MFH Wörth",
+                "city": "Wörth am Rhein",
+                "postal_code": "76744",
+                "property_type": "Mehrfamilienhaus",
+                "purchase_price": 489000.0,
+                "living_space": 284.8,
+                "rooms": 10.0,
+                "gross_yield": 6.53,
+                "source_portal": "Kleinanzeigen",
+                "portal_url": "https://www.kleinanzeigen.de/s-anzeige/woerth-stage1-test/88801-208-5212",
+            },
+            {
+                "title": "Disguised MFH claiming Essen on teaser",
+                "city": "Essen",
+                "postal_code": "",
+                "property_type": "Mehrfamilienhaus",
+                "purchase_price": 489000.0,
+                "living_space": 284.8,
+                "rooms": 10.0,
+                "gross_yield": 6.53,
+                "source_portal": "Kleinanzeigen",
+                "portal_url": "https://www.kleinanzeigen.de/s-anzeige/woerth-stage4-test/88802-208-5212",
+            },
+        ]
+        fake_audit_for_disguised = {
+            "ai_audit": {
+                "score": 8.5,
+                "status": "GREEN",
+                "status_label": "Value-Add",
+                "metrics": {
+                    "purchase_price": 489000.0,
+                    "living_space": 284.8,
+                    "gross_yield": 6.53,
+                    "potential_gross_yield": 6.53,
+                    "monthly_cashflow": 300.0,
+                    "potential_monthly_cashflow": 300.0,
+                    "market_deviation_percent": -25.0,
+                },
+                "insights": {
+                    "corrected_city": "Wörth am Rhein",
+                    "postal_code": "76744",
+                    "full_description": "76744 Wörth am Rhein",
+                },
+                "capex": {"total_capex": 20000.0},
+                "risks": [],
+            }
+        }
+        try:
+            with patch("app.search_agent.scrape_multi_portal_deals", return_value=fake_deals), \
+                 patch("app.routers.properties.run_property_ai_audit", return_value=fake_audit_for_disguised) as mock_audit:
+                res = execute_search_profile(pid, force=True)
+
+            self.assertTrue(res["success"])
+            self.assertEqual(res["qualified_deals"], 0)
+            self.assertEqual(res["new_alerts"], 0)
+            # Only the disguised deal reached Stage 3; the Wörth deal was dropped in Stage 1 with 0 LLM cost!
+            self.assertEqual(mock_audit.call_count, 1)
+            seen = get_seen_listing_urls(pid)
+            self.assertIn("https://www.kleinanzeigen.de/s-anzeige/woerth-stage1-test/88801-208-5212", seen)
+            self.assertIn("https://www.kleinanzeigen.de/s-anzeige/woerth-stage4-test/88802-208-5212", seen)
+        finally:
+            delete_search_profile(pid)
+
 
 if __name__ == "__main__":
     try:

@@ -242,13 +242,25 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             mark_listing_seen(portal_url, profile_id, "dropped_stage1_property_type")
             continue
 
-        # Strikte Stadtgrenzen-Prüfung wenn Radius = 0 km gewählt wurde
-        if radius_km == 0 and city:
-            deal_c = str(deal.get("city") or "").lower().strip()
-            target_c = city.lower().strip()
-            if target_c and target_c not in deal_c and deal_c not in target_c:
+        # Strikte Stadt-/Geo-Umkreisprüfung (gilt für radius_km == 0 UND radius_km > 0)
+        if city or postal_code:
+            from app.geo_resolver import is_within_search_radius
+            in_range, dist_km = is_within_search_radius(
+                target_city=city,
+                target_postal_code=postal_code,
+                radius_km=radius_km,
+                deal_city=deal.get("city"),
+                deal_postal_code=deal.get("postal_code"),
+                deal_lat=deal.get("lat"),
+                deal_lng=deal.get("lng"),
+            )
+            if not in_range:
                 filtered_stage1_2 += 1
-                mark_listing_seen(portal_url, profile_id, "dropped_stage1_city_boundary")
+                mark_listing_seen(portal_url, profile_id, "dropped_stage1_radius")
+                logger.info(
+                    f"Stage 1 Geo-Filter discarded '{deal.get('title')}' ({deal.get('postal_code')} {deal.get('city')}, "
+                    f"dist={dist_km} km, target={city or postal_code}, radius={radius_km} km)."
+                )
                 continue
 
         # Stage 1 Rendite-Vorfilter: Berücksichtigt konfigurierte Rendite-Basis ('actual', 'potential', 'any')
@@ -417,7 +429,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             or audited_score >= 6.0
         )
 
-        # Stage 4: Verbindlicher Abgleich gegen die Renditevorgaben des Ankaufsprofils ('actual', 'potential', 'any')
+        # Stage 4: Verbindlicher Abgleich gegen die Renditevorgaben & Geo-Radius des Ankaufsprofils ('actual', 'potential', 'any')
         if yield_basis == "actual":
             eff_audited_yield = audited_actual_yield
         elif yield_basis == "potential":
@@ -425,8 +437,25 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         else: # "any" (Standard: Höhere Rendite aus Ist und verifiziertem Mietspiegel-Potenzial)
             eff_audited_yield = max(audited_actual_yield, audited_potential_yield, audited_yield)
 
+        # Nachträglicher Geo-Umkreis-Check auf Basis des im KI-Exposé-Audit verifizierten Standorts
+        geo_within_radius = True
+        geo_dist_km = None
+        audited_city = str(insights.get("corrected_city") or deal.get("city") or "").strip()
+        audited_plz = str(insights.get("postal_code") or deal.get("postal_code") or "").strip()
+        if (city or postal_code) and (audited_city or audited_plz):
+            from app.geo_resolver import is_within_search_radius
+            geo_within_radius, geo_dist_km = is_within_search_radius(
+                target_city=city,
+                target_postal_code=postal_code,
+                radius_km=radius_km,
+                deal_city=audited_city,
+                deal_postal_code=audited_plz,
+                allow_geocoder=False,
+            )
+
         meets_profile_limits = (
-            (max_price <= 0 or audited_price <= max_price)
+            geo_within_radius
+            and (max_price <= 0 or audited_price <= max_price)
             and (max_price_per_sqm <= 0 or audited_price_per_sqm <= max_price_per_sqm)
             and (min_living_space <= 0 or audited_sqm >= min_living_space)
             and (min_yield <= 0 or eff_audited_yield >= min_yield)
@@ -439,6 +468,9 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
 
         if not is_interesting_after_audit:
             reasons = []
+            if not geo_within_radius:
+                dist_txt = f", ca. {geo_dist_km:.0f} km entfernt" if geo_dist_km is not None else ""
+                reasons.append(f"Standort ({audited_plz} {audited_city}{dist_txt}) außerhalb Suchradius ({radius_km} km um {city or postal_code})")
             if max_price > 0 and audited_price > max_price:
                 reasons.append(f"Kaufpreis ({audited_price:,.0f} €) übersteigt Profil-Maximum ({max_price:,.0f} €)")
             if max_price_per_sqm > 0 and audited_price_per_sqm > max_price_per_sqm:

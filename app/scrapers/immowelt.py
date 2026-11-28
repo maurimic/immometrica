@@ -240,9 +240,15 @@ def search_immowelt_deals(
 
                 # Extract postal code & location
                 extracted_plz = plz_clean
-                plz_match = re.search(r"\b(\d{5})\b", card_text)
-                if plz_match:
-                    extracted_plz = plz_match.group(1)
+                extracted_city = ""
+                plz_city_match = re.search(r"\b(\d{5})\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-\s]{1,35}?)(?:\s*\(|,|\||$)", card_text)
+                if plz_city_match:
+                    extracted_plz = plz_city_match.group(1)
+                    extracted_city = plz_city_match.group(2).strip()
+                else:
+                    plz_match = re.search(r"\b(\d{5})\b", card_text)
+                    if plz_match:
+                        extracted_plz = plz_match.group(1)
 
                 # Extract district
                 district = ""
@@ -289,7 +295,13 @@ def search_immowelt_deals(
 
                 title_h = card.find(["h2", "h3", "h1"])
                 raw_title = title_h.text.strip() if (title_h and title_h.text.strip()) else desc_teaser
-                resolved_city = (city or extracted_plz or "Deutschland").strip().capitalize()
+                resolved_city = (extracted_city or city or extracted_plz or "Deutschland").strip()
+                if city and city.lower() in resolved_city.lower() and resolved_city.lower() != city.lower():
+                    if not district:
+                        district = resolved_city
+                    resolved_city = city.strip().capitalize()
+                elif resolved_city and resolved_city.islower():
+                    resolved_city = resolved_city.capitalize()
                 title = clean_immowelt_title(raw_title, rooms, sqm, district, resolved_city, p_type)
 
                 if query and query.lower() not in title.lower() and query.lower() not in ct_lower:

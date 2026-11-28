@@ -81,6 +81,20 @@ def scrape_multi_portal_deals(
         if min_price is not None and min_price > 0 and price < min_price:
             return False
 
+        if city or postal_code:
+            from app.geo_resolver import is_within_search_radius
+            in_range, _ = is_within_search_radius(
+                target_city=city,
+                target_postal_code=postal_code,
+                radius_km=radius_km,
+                deal_city=d.get("city"),
+                deal_postal_code=d.get("postal_code"),
+                deal_lat=d.get("lat"),
+                deal_lng=d.get("lng"),
+            )
+            if not in_range:
+                return False
+
         if min_yield is not None and min_yield > 0:
             from app.valuation import get_mietspiegel_size_benchmark, evaluate_property_valuation
             sqm = float(d.get("living_space") or 0.0)

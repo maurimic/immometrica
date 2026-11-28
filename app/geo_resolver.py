@@ -4,6 +4,7 @@ and Geographic Coordinates Resolver.
 Enables automatic transfer tax calculation and precise interactive map plotting.
 """
 
+import math
 import re
 import requests
 from typing import Dict, Any, Optional, Tuple, Set
@@ -750,3 +751,105 @@ def resolve_location_and_tax(
         "city": city or "",
         "auto_resolved": True
     }
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Great-circle distance between two WGS84 coordinates in kilometers."""
+    r = 6371.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
+    return r * 2.0 * math.atan2(math.sqrt(a), math.sqrt(max(0.0, 1.0 - a)))
+
+
+def _resolve_static_or_cached_coords(
+    city: Optional[str] = None,
+    postal_code: Optional[str] = None,
+    allow_geocoder: bool = False,
+) -> Optional[Tuple[float, float]]:
+    """Resolves coords without ever falling back to geographic center of Germany."""
+    plz_clean = "".join(c for c in str(postal_code or "") if c.isdigit())[:5]
+    city_clean = str(city or "").strip().lower()
+    if plz_clean and plz_clean in PLZ_COORDINATES:
+        return PLZ_COORDINATES[plz_clean]
+
+    prefix_coords = PLZ_PREFIX_COORDINATES.get(plz_clean[:2]) if len(plz_clean) >= 2 else None
+    matched = _match_city_coord(city_clean) if city_clean else None
+    if matched:
+        if prefix_coords and haversine_km(matched[0], matched[1], prefix_coords[0], prefix_coords[1]) > 80.0:
+            # Homonym city in a different PLZ region (e.g. '49632 Essen (Oldenburg)' vs 'Essen' NRW)
+            matched = None
+        if matched:
+            return matched
+
+    if allow_geocoder and (plz_clean or city_clean):
+        nom = geocode_de_nominatim(city=city, postal_code=plz_clean or None)
+        if nom:
+            return nom
+    if prefix_coords:
+        return prefix_coords
+    return None
+
+
+def is_within_search_radius(
+    target_city: Optional[str],
+    target_postal_code: Optional[str],
+    radius_km: Optional[int],
+    deal_city: Optional[str],
+    deal_postal_code: Optional[str] = None,
+    deal_lat: Optional[float] = None,
+    deal_lng: Optional[float] = None,
+    allow_geocoder: bool = False,
+) -> Tuple[bool, Optional[float]]:
+    """
+    Verifies whether a listing's location lies within the search profile's target area.
+    Returns (is_inside, distance_km). Uses offline PLZ/city tables first (plus optional geocoder)
+    with a realistic centroid tolerance (+12 km) so intra-city districts are never dropped while
+    distant out-of-region listings (e.g. 280+ km away) are strictly rejected.
+    """
+    t_city = str(target_city or "").strip().lower()
+    t_plz = "".join(c for c in str(target_postal_code or "") if c.isdigit())[:5]
+    d_city = str(deal_city or "").strip().lower()
+    d_plz = "".join(c for c in str(deal_postal_code or "") if c.isdigit())[:5]
+    eff_radius = int(radius_km or 0)
+
+    if not t_city and not t_plz:
+        return (True, 0.0)
+    if t_plz and d_plz and t_plz == d_plz:
+        return (True, 0.0)
+
+    target_coords = _resolve_static_or_cached_coords(t_city, t_plz, allow_geocoder=allow_geocoder)
+    deal_coords = _resolve_static_or_cached_coords(d_city, d_plz, allow_geocoder=allow_geocoder)
+    if deal_coords is None and deal_lat is not None and deal_lng is not None:
+        try:
+            dlat_f, dlng_f = float(deal_lat), float(deal_lng)
+            # Ignore generic fallback center of Germany (51.1657, 10.4515)
+            if abs(dlat_f - 51.1657) > 0.05 or abs(dlng_f - 10.4515) > 0.05:
+                deal_coords = (dlat_f, dlng_f)
+        except (TypeError, ValueError):
+            pass
+
+    dist_km: Optional[float] = None
+    if target_coords and deal_coords:
+        dist_km = round(haversine_km(target_coords[0], target_coords[1], deal_coords[0], deal_coords[1]), 1)
+
+    whole_city_match = bool(
+        t_city and d_city and re.search(rf"(?<![a-zäöüß]){re.escape(t_city)}(?![a-zäöüß])", d_city)
+    )
+
+    if eff_radius <= 0:
+        if whole_city_match:
+            if dist_km is not None and dist_km > 20.0:
+                return (False, dist_km)
+            return (True, dist_km)
+        if dist_km is not None:
+            return (dist_km <= 15.0, dist_km)
+        return (not bool(d_city), None)
+
+    allowed_km = float(eff_radius) + 12.0
+    if dist_km is not None:
+        return (dist_km <= allowed_km, dist_km)
+    if whole_city_match:
+        return (True, None)
+    return (True, None)
