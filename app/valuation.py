@@ -71,25 +71,29 @@ CITY_BENCHMARKS = {
 
 DEFAULT_BENCHMARK = {"avg_sqm_buy": 3100.0, "avg_sqm_rent": 10.50, "avg_yield": 4.06, "state": "Nordrhein-Westfalen"}
 
-def get_city_benchmark(city: str) -> Dict[str, Any]:
-    if not city:
+def get_city_benchmark(
+    city: str,
+    postal_code: Optional[str] = None,
+    state: Optional[str] = None
+) -> Dict[str, Any]:
+    if not city and not postal_code:
         return {**DEFAULT_BENCHMARK, "city": "Unbekannt", "state": "Deutschland"}
 
     for known_city, data in CITY_BENCHMARKS.items():
-        if known_city.lower() in city.lower() or city.lower() in known_city.lower():
+        if city and (known_city.lower() in city.lower() or city.lower() in known_city.lower()):
             return {**data, "city": known_city}
 
-    # Dynamically resolve state for any German city instead of hardcoding NRW
-    resolved_state = "Deutschland"
+    # Dynamically resolve state via PLZ + city instead of hardcoding NRW
+    resolved_state = state if state and state != "Deutschland" else "Deutschland"
     try:
         from app.geo_resolver import resolve_location_and_tax
-        geo = resolve_location_and_tax(city=city)
+        geo = resolve_location_and_tax(postal_code=postal_code, city=city, state=state)
         if geo and geo.get("state"):
             resolved_state = geo["state"]
     except Exception:
         pass
 
-    return {**DEFAULT_BENCHMARK, "city": city, "state": resolved_state}
+    return {**DEFAULT_BENCHMARK, "city": city or "Unbekannt", "state": resolved_state}
 
 def _classify_unit_size_bracket(base_rent: float, unit_sqm: float) -> Dict[str, Any]:
     """Classifies a single apartment surface into its Mietspiegel bracket."""
@@ -203,7 +207,9 @@ def evaluate_property_valuation(
     year_built: int = 1980,
     condition: str = "Gepflegt",
     is_rented: bool = False,
-    property_type: str = "Eigentumswohnung"
+    property_type: str = "Eigentumswohnung",
+    postal_code: Optional[str] = None,
+    state: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Sprengnetter AVM proxy model:
@@ -213,7 +219,7 @@ def evaluate_property_valuation(
     - Tenancy status (occupied rented units typically trade at 10-20% discount)
     - Property type (MFH vs ETW vs EFH)
     """
-    benchmark = get_city_benchmark(city)
+    benchmark = get_city_benchmark(city, postal_code=postal_code, state=state)
     base_sqm_price = benchmark["avg_sqm_buy"]
 
     safe_year_built = int(year_built) if year_built else 1980

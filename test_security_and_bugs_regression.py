@@ -554,6 +554,156 @@ class TestPoint1SecurityAndBugs(unittest.TestCase):
             t.join(timeout=2.0)
             self.authed.post("/api/alerts/settings", json={"crawler_active": False, "crawler_interval_minutes": 60})
 
+    def test_15_foreclosure_blind_flight_cap_mfh_scaling_and_geo_sync(self):
+        from app.ai_analyst import reconcile_capex_with_images
+
+        # 76744 Wörth am Rhein lies in Rheinland-Pfalz, NOT Baden-Württemberg
+        geo = resolve_location_and_tax(postal_code="76744", city="Wörth am Rhein", state="Baden-Württemberg")
+        self.assertEqual(geo["state"], "Rheinland-Pfalz")
+        self.assertEqual(geo["tax_rate"], 5.0)
+        val = evaluate_property_valuation(
+            "Wörth am Rhein", 284.8, 489000.0, year_built=1962, property_type="Mehrfamilienhaus",
+            postal_code="76744", state=geo["state"]
+        )
+        self.assertEqual(val["state"], "Rheinland-Pfalz")
+
+        prop_38 = {
+            "id": 9038,
+            "title": "Mehrfamilienhaus mit 10 Zimmern - Eine Chance für Immobilieninteressenten ohne Provision",
+            "city": "Wörth am Rhein",
+            "state": "Baden-Württemberg",
+            "postal_code": "76744",
+            "property_type": "Mehrfamilienhaus",
+            "living_space": 284.8,
+            "purchase_price": 489000.0,
+            "year_built": 1962,
+            "commission_percent": 0.0,
+            "is_private": 1,
+            "is_online": 1,
+            "availability_status": "online",
+            "portal_url": "https://www.kleinanzeigen.de/s-anzeige/test-mfh-38/12345",
+            "description": (
+                "Dreifamilienhaus mit 3 Wohneinheiten im Zwangsversteigerungsverfahren (Argetra), "
+                "Baujahr 1962, Ölheizung, provisionsfrei. Keine Mietangaben vorhanden."
+            ),
+        }
+
+        fake_llm = {
+            "ai_provider": "Test Mock LLM",
+            "corrected_property_type": "Mehrfamilienhaus",
+            "unit_count_in_offer": 3,
+            "commission_free": True,
+            "is_private": True,
+            "is_rented": False,
+            "llm_executive_summary": "Solides Objekt (CaPEx: 11.111,00 €). VERHANDLUNGSEMPFEHLUNG: alt.",
+        }
+        fake_quote = {
+            "nominal_rate": 3.90,
+            "effective_rate": 4.00,
+            "monthly_rate": 1923.40,
+            "bank_name": "TestBank",
+            "is_live_quote": False,
+            "rates_by_term": [],
+        }
+
+        with patch("app.ai_analyst.call_llm_text_analysis", return_value=fake_llm), \
+             patch("app.interest_service.get_property_mortgage_interest_quote", return_value=fake_quote):
+            base_report = generate_ai_due_diligence_report(prop_38, full_description=prop_38["description"])
+
+        # MFH with 3 units must scale Elektrik > ETW 4500 EUR
+        elec_items = [i for i in base_report["capex"]["items"] if "Elektrik" in i["title"]]
+        self.assertTrue(elec_items)
+        self.assertGreater(elec_items[0]["amount"], 4500.0)
+        self.assertEqual(elec_items[0]["amount"], 9500.0)
+        self.assertEqual(base_report["metrics"]["state"], "Rheinland-Pfalz")
+
+        # Now apply image_analysis with zero real interior photos (1 Musterfoto + 2 ads)
+        blind_img_report = {
+            "photos_analyzed_count": 3,
+            "has_interior_photos": False,
+            "overall_visual_score": 5.0,
+            "analyzed_photos": [
+                {"index": 1, "tag": "🏢 Fassade / Außenansicht", "is_blueprint": False, "is_ai_generated": True},
+                {"index": 2, "tag": "📄 Dokument / Info", "is_blueprint": False, "is_ai_generated": False},
+                {"index": 3, "tag": "📄 Dokument / Info", "is_blueprint": False, "is_ai_generated": False},
+            ],
+            "visual_capex_items": [],
+            "total_visual_capex": 0.0,
+        }
+        with patch("app.interest_service.get_property_mortgage_interest_quote", return_value=fake_quote):
+            reconciled = reconcile_capex_with_images(base_report, prop_38, blind_img_report)
+            # Reconcile twice to ensure blind-flight / foreclosure risk insertion is idempotent
+            reconciled_twice = reconcile_capex_with_images(reconciled, prop_38, blind_img_report)
+
+        self.assertLessEqual(reconciled["score"], 5.8)
+        self.assertEqual(reconciled["status"], "YELLOW")
+        self.assertNotIn("Value-Add Empfehlung", reconciled["status_label"])
+        self.assertTrue(any("innenraumfotos" in r["title"].lower() for r in reconciled["risks"]))
+        self.assertEqual(len(reconciled["risks"]), len(reconciled_twice["risks"]))
+        # Stale LLM inline CaPEx mention (11.111,00 €) was synced to actual total_capex
+        self.assertNotIn("11.111,00", reconciled["executive_summary"])
+
+    def test_16_image_analyst_counts_blueprints_after_vision_and_guards_musterfoto_windows(self):
+        def fake_white_img_get(url, **kwargs):
+            from PIL import Image
+            import io
+            buf = io.BytesIO()
+            Image.new("RGB", (200, 200), color="white").save(buf, format="JPEG")
+            r = MagicMock()
+            r.status_code = 200
+            r.content = buf.getvalue() * 15
+            return r
+
+        fake_vision = {
+            "overall_visual_score": 5.0,
+            "has_interior_photos": False,
+            "condition_rating": "MODERNISIERUNGSBEDARF",
+            "condition_label": "🟡 Nicht beurteilbar",
+            "categories": {
+                "bathroom": {"score": 5.0, "status": "Nicht beurteilbar", "findings": "Kein Badfoto.", "cost": 7500.0},
+                "kitchen": {"score": 5.0, "status": "Nicht beurteilbar", "findings": "Kein Küchenfoto.", "cost": 0.0},
+                "flooring": {"score": 5.0, "status": "Nicht beurteilbar", "findings": "Kein Bodenfoto.", "cost": 5000.0},
+                "windows": {"score": 8.0, "status": "Gut", "findings": "Fenster auf Foto #1 wirken modern.", "cost": 0.0},
+                "heating_electrics": {"score": 4.0, "status": "Nicht beurteilbar", "findings": "Kein Foto.", "cost": 4500.0},
+                "walls_substance": {"score": 5.0, "status": "Nicht beurteilbar", "findings": "Kein Foto.", "cost": 3000.0},
+            },
+            "photo_classifications": [
+                {"index": 1, "tag": "🏢 Fassade / Außenansicht", "description": "Außenansicht als Musterfoto ohne Objektbezug.", "quality_score": 6.5, "is_blueprint": False, "is_ai_generated": True, "findings": ["Musterfoto"]},
+                {"index": 2, "tag": "Werbegrafik", "description": "Werbegrafik Argetra ohne Objektbezug.", "quality_score": 2.0, "is_blueprint": False, "is_ai_generated": False, "findings": ["Marketinggrafik"]},
+                {"index": 3, "tag": "📄 Dokument / Info", "description": "Beratungsservice Kontaktfolie.", "quality_score": 2.0, "is_blueprint": False, "is_ai_generated": False, "findings": ["Marketinggrafik"]},
+            ],
+            "visual_capex_items": [],
+            "investor_summary": "Keine Innenraumfotos.",
+        }
+
+        with patch("app.image_analyst.requests.get", side_effect=fake_white_img_get), \
+             patch("app.image_analyst.call_gemini_vision", return_value=fake_vision):
+            res = analyze_property_images(
+                {
+                    "id": 9039,
+                    "title": "Test MFH",
+                    "city": "Wörth am Rhein",
+                    "property_type": "Mehrfamilienhaus",
+                    "purchase_price": 489000.0,
+                    "gross_yield": 6.53,
+                    "living_space": 250.0,
+                    "year_built": 1962,
+                    "description": "Dreifamilienhaus in Wörth am Rhein ohne Innenfotos, nur mit Musterfoto und Werbegrafiken im Exposé.",
+                },
+                image_urls=[
+                    "https://example.com/muster.jpg",
+                    "https://example.com/ad1.jpg",
+                    "https://example.com/ad2.jpg",
+                ],
+                full_description="Dreifamilienhaus in Wörth am Rhein ohne Innenfotos, nur mit Musterfoto und Werbegrafiken im Exposé.",
+                api_key="AIzaFakeKey1234567890",
+            )
+
+        self.assertEqual(res["blueprints_count"], 0)
+        self.assertFalse(res["has_interior_photos"])
+        self.assertLessEqual(res["categories"]["windows"]["score"], 5.0)
+        self.assertIn("Nicht beurteilbar", res["categories"]["windows"]["status"])
+
 
 if __name__ == "__main__":
     try:

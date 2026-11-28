@@ -1082,6 +1082,7 @@ def run_property_ai_audit(
 
     # Synchronize all verified insights, metadata, geo coordinates and metrics back into DB
     prop_price_val = float(prop.get("purchase_price", 0.0))
+    new_state = metrics.get("state") or prop.get("state")
     cursor.execute("""
         UPDATE properties 
         SET ai_analysis = ?,
@@ -1096,6 +1097,7 @@ def run_property_ai_audit(
             is_private = ?,
             commission_percent = ?,
             city = ?,
+            state = COALESCE(NULLIF(?, ''), state),
             address = ?,
             postal_code = COALESCE(NULLIF(?, ''), postal_code),
             lat = ?,
@@ -1122,6 +1124,7 @@ def run_property_ai_audit(
         is_private_val,
         comm_pct_val,
         new_city,
+        new_state,
         new_address,
         new_plz,
         new_lat,
@@ -1298,6 +1301,7 @@ def run_property_image_analysis(
                         "is_private": 1 if ins.get("is_private") else 0,
                         "commission_percent": new_comm,
                         "property_type": new_prop_type,
+                        "state": met.get("state") or prop.get("state") or "",
                         "market_value": float(met.get("market_value") or prop.get("market_value") or 0.0),
                         "market_value_per_sqm": float(met.get("market_value_per_sqm") or prop.get("market_value_per_sqm") or 0.0),
                         "market_deviation_percent": float(met.get("market_deviation_percent") if met.get("market_deviation_percent") is not None else (prop.get("market_deviation_percent") or 0.0)),
@@ -1319,6 +1323,7 @@ def run_property_image_analysis(
                     is_private = ?,
                     commission_percent = ?,
                     property_type = ?,
+                    state = COALESCE(NULLIF(?, ''), state),
                     market_value = ?,
                     market_value_per_sqm = ?,
                     market_deviation_percent = ?
@@ -1335,6 +1340,7 @@ def run_property_image_analysis(
                 refreshed_property_updates["is_private"],
                 refreshed_property_updates["commission_percent"],
                 refreshed_property_updates["property_type"],
+                refreshed_property_updates["state"],
                 refreshed_property_updates["market_value"],
                 refreshed_property_updates["market_value_per_sqm"],
                 refreshed_property_updates["market_deviation_percent"],

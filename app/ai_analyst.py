@@ -1747,7 +1747,9 @@ def estimate_capex_and_hidden_costs(
             "description": "Austausch älterer 2-fach oder 1-fach Fensterflügel gegen isolierte Wärmeschutzfenster."
         })
 
-    # 4. Elektrik (Explizit unterscheiden: Sicherungskasten auf Foto vs. Baujahrs-Mutmaßung!)
+    # 4. Elektrik (Explizit unterscheiden: Sicherungskasten auf Foto vs. Baujahrs-Mutmaßung, MFH skalieren!)
+    unit_mult = max(1, int(insights.get("unit_count_in_offer", 1) or 1)) if (insights.get("is_package_deal") or insights.get("is_mfh") or int(insights.get("unit_count_in_offer") or 1) > 1) else 1
+    elec_base_amt = 4500.0 if unit_mult <= 1 else round(4500.0 + (unit_mult - 1) * 2500.0, 2)
     vis_elec = _find_visual_evidence(
         image_analysis,
         ["elektrik", "sicherung", "unterverteilung", "fi", "leitung"],
@@ -1786,9 +1788,14 @@ def estimate_capex_and_hidden_costs(
                 ev_txt = f"⚠️ Reine Baujahrs-Mutmaßung (Bj. {year_built}): Im Inserat liegen keine Innenraumfotos vor – Unterverteilung vor Ort prüfen."
             else:
                 ev_txt = f"⚠️ Reine Baujahrs-Mutmaßung (Bj. {year_built}): Auf keinem der {vis_photo_count} Fotos ist ein Sicherungskasten oder eine Unterverteilung sichtbar – vorsorglicher Puffer für FI-Nachrüstung."
+        elec_title = (
+            f"Elektrik-Modernisierung ({unit_mult} Einheiten: Unterverteilung & FI)"
+            if unit_mult > 1
+            else "Elektrik-Modernisierung (Unterverteilung & FI)"
+        )
         items.append({
-            "title": "Elektrik-Modernisierung (Unterverteilung & FI)",
-            "amount": 4500.0,
+            "title": elec_title,
+            "amount": elec_base_amt,
             "urgency": "HOCH" if year_built < 1975 else "MITTEL",
             "source_type": src_type,
             "photo_indices": p_idx,
@@ -2024,14 +2031,299 @@ def estimate_capex_and_hidden_costs(
     return res
 
 
+def _detect_foreclosure(
+    property_data: Optional[Dict[str, Any]],
+    insights: Optional[Dict[str, Any]],
+    risks: Optional[List[Dict[str, Any]]] = None,
+) -> bool:
+    """Detects Zwangsversteigerung / foreclosure listings from flags, text, or risk items."""
+    prop = property_data or {}
+    if prop.get("is_foreclosure"):
+        return True
+    ins = insights or {}
+    text_parts = [
+        str(prop.get("title") or ""),
+        str(prop.get("description") or ""),
+        str(ins.get("raw_text") or ""),
+    ]
+    for r in (risks or []):
+        if isinstance(r, dict):
+            text_parts.append(str(r.get("title") or ""))
+            text_parts.append(str(r.get("category") or ""))
+            text_parts.append(str(r.get("description") or ""))
+    combined = " ".join(text_parts).lower()
+    return any(
+        kw in combined
+        for kw in (
+            "zwangsversteigerung",
+            "zwangsversteiger",
+            "argetra",
+            "verkehrswertgutachten",
+            "versteigerungstermin",
+            "amtsgericht",
+        )
+    )
+
+
+def _assess_visual_evidence(image_analysis: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Summarizes whether Vision AI ran and whether real interior photos exist.
+    Preserves compatibility with simplified unit-test fixtures that omit has_interior_photos
+    when photo_classifications/analyzed_photos contain no non-interior/ad tags.
+    """
+    if not isinstance(image_analysis, dict):
+        return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
+    if image_analysis.get("vision_skipped") or image_analysis.get("vision_mode") == "SKIPPED_UNPROFITABLE":
+        return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
+
+    photos = image_analysis.get("analyzed_photos") or []
+    raw_vis_score = image_analysis.get("overall_visual_score")
+    vision_ran = bool(photos) or raw_vis_score is not None
+    if not vision_ran:
+        return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
+
+    visual_score = float(raw_vis_score) if raw_vis_score is not None else None
+
+    if "has_interior_photos" in image_analysis:
+        has_interior = bool(image_analysis.get("has_interior_photos"))
+    else:
+        non_interior_markers = (
+            "fassade", "außenansicht", "dokument", "werbegrafik", "marketinggrafik",
+            "lageplan", "umgebungskarte", "musterfoto", "kein objektbezug"
+        )
+        tagged_photos = [p for p in photos if isinstance(p, dict) and (p.get("tag") or p.get("is_blueprint") is not None or p.get("is_ai_generated") is not None)]
+        if tagged_photos:
+            has_interior = any(
+                not p.get("is_blueprint")
+                and not p.get("is_ai_generated")
+                and not any(m in f"{p.get('tag', '')} {p.get('description', '')}".lower() for m in non_interior_markers)
+                for p in tagged_photos
+            )
+        else:
+            has_interior = bool(photos)
+
+    return {
+        "vision_ran": True,
+        "has_interior_photos": has_interior,
+        "visual_score": visual_score,
+    }
+
+
+def _compute_holistic_deal_verdict(
+    metrics: Dict[str, Any],
+    insights: Dict[str, Any],
+    capex: Dict[str, Any],
+    risks: List[Dict[str, Any]],
+    image_analysis: Optional[Dict[str, Any]] = None,
+    property_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Single source of truth for holistic deal scoring, status classification, All-In metrics,
+    blind-flight penalties (no real interior photos), and foreclosure gating.
+    Used by both generate_ai_due_diligence_report() and reconcile_capex_with_images().
+    """
+    updated_risks = list(risks or [])
+    vis_ev = _assess_visual_evidence(image_analysis)
+    vision_ran = vis_ev["vision_ran"]
+    has_interior_photos = vis_ev["has_interior_photos"]
+    visual_score = vis_ev["visual_score"]
+    is_foreclosure = _detect_foreclosure(property_data, insights, updated_risks)
+    rent_is_verified = bool(metrics.get("rent_is_verified"))
+
+    # Add idempotent Blind-Flight / Foreclosure risk flags if missing
+    risk_titles_lower = " ".join(str(r.get("title", "")).lower() for r in updated_risks if isinstance(r, dict))
+    if vision_ran and not has_interior_photos:
+        if "innenraumfotos" not in risk_titles_lower and "innenfotos" not in risk_titles_lower:
+            updated_risks.append({
+                "category": "Datenqualität & Fotos",
+                "severity": "HIGH",
+                "badge": "🟡 Blindflug ohne Innenfotos",
+                "title": "Keine echten Innenraumfotos vorhanden (Blindflug-Risiko)",
+                "description": (
+                    "Das Exposé enthält ausschließlich Außen-, Muster-, Werbe- oder KI-Bilder ohne verifizierte Innenaufnahmen. "
+                    "Bäder, Küchen, Elektrik, Böden und Feuchtigkeit konnten visuell nicht geprüft werden."
+                ),
+                "impact": "Hohes Risiko verdeckter Bauschäden; alle Sanierungsschätzungen basieren auf Baujahrs-Annahmen.",
+                "action": "Vor Gebotsabgabe echte Innenfotos, Gutachten oder eine Vor-Ort-Besichtigung erzwingen."
+            })
+
+    if is_foreclosure and "zwangsversteiger" not in risk_titles_lower:
+        updated_risks.append({
+            "category": "Zwangsversteigerung",
+            "severity": "HIGH",
+            "badge": "🟡 Zwangsversteigerung",
+            "title": "Zwangsversteigerungsverfahren – eingeschränkte Prüfung",
+            "description": "Bei einer Zwangsversteigerung besteht kein reguläres Besichtigungsrecht und keine Sachmängelhaftung.",
+            "impact": "Erhöhtes Risiko bei Zustand, Mietverträgen und Grundbuchlasten.",
+            "action": "Amtsgerichtliches Verkehrswertgutachten und Grundbuchauszug Abt. II/III vollständig prüfen."
+        })
+
+    def _is_true_critical_deal_killer(r_obj: Dict[str, Any]) -> bool:
+        if r_obj.get("severity") != "CRITICAL":
+            return False
+        t = str(r_obj.get("title", "")).lower()
+        d = str(r_obj.get("description", "")).lower()
+        if any(k in t or k in d for k in [
+            "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis",
+            "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
+            "weit unter", "preis weit", "verdecktes risiko"
+        ]):
+            return False
+        return True
+
+    # Deterministic Deal Scoring (1.0 bis 9.9)
+    score = 7.5
+    gross_yield = float(metrics.get("gross_yield") or 0.0)
+    market_dev = float(metrics.get("market_deviation_percent") or 0.0)
+    if gross_yield >= 7.0:
+        score += 1.5
+    elif gross_yield >= 5.5:
+        score += 0.8
+
+    if market_dev < -15.0:
+        score += 1.2
+    elif market_dev < -5.0:
+        score += 0.6
+
+    if insights.get("is_kernsaniert"):
+        score += 1.0
+    if insights.get("commission_free"):
+        score += 0.8
+
+    miet_ana = metrics.get("mietspiegel_analysis")
+    turns_profitable_miet = bool(miet_ana and miet_ana.get("turns_profitable"))
+    if turns_profitable_miet:
+        score += 0.8
+
+    critical_risks = [r for r in updated_risks if _is_true_critical_deal_killer(r)]
+    high_risks = [r for r in updated_risks if r.get("severity") == "HIGH" or (r.get("severity") == "CRITICAL" and not _is_true_critical_deal_killer(r))]
+    score -= len(critical_risks) * 1.5
+    score -= len(high_risks) * 0.7
+
+    # Calculate All-In Rentabilität (Kaufpreis + Kaufnebenkosten + Gesamt-CaPEx)
+    purchase_price = float(metrics.get("purchase_price", (property_data or {}).get("purchase_price", 0.0)) or 0.0)
+    total_capex = float(capex.get("total_capex", 0.0) or 0.0)
+    ancillary_costs = float(metrics.get("ancillary_costs", 0.0) or 0.0)
+    all_in_invest = purchase_price + ancillary_costs + total_capex
+
+    living_sqm = float((property_data or {}).get("living_space") or metrics.get("living_space") or 50.0)
+    expected_monthly_rent = float(metrics.get("expected_monthly_rent") or (float(metrics.get("expected_rent_per_sqm", 10.0) or 10.0) * living_sqm))
+    annual_soll_rent = expected_monthly_rent * 12.0
+    all_in_gross_yield = (annual_soll_rent / all_in_invest * 100.0) if all_in_invest > 0 else 0.0
+    metrics["all_in_investment"] = round(all_in_invest, 2)
+    metrics["all_in_gross_yield"] = round(all_in_gross_yield, 2)
+
+    potential_cf = float(metrics.get("potential_monthly_cashflow", metrics.get("monthly_cashflow", 0.0)) or 0.0)
+    has_visual_capex = bool(capex.get("visual_capex", 0) > 0 or any(it.get("source_type") == "FOTO_BELEG" for it in capex.get("items", [])))
+
+    # Economic Knockout: Yield < 2.5% AND cashflow < -300 €
+    is_economically_toxic = (gross_yield < 2.5 and potential_cf < -300.0 and not turns_profitable_miet)
+
+    # Apply Vision / Blind-Flight / Foreclosure Uncertainty Caps
+    if vision_ran and not has_interior_photos:
+        score -= 1.5
+        cap_limit = 5.8 if (is_foreclosure or not rent_is_verified) else 6.5
+        score = min(score, cap_limit)
+    elif vision_ran and visual_score is not None and visual_score < 4.5:
+        score -= min(1.5, (5.0 - visual_score) * 0.5)
+
+    if is_foreclosure and not rent_is_verified:
+        score = min(score, 6.8)
+
+    # Value-Add Recognition requires real interior visual evidence (when Vision ran) and no foreclosure blind-flight
+    can_award_value_add = (not vision_ran or has_interior_photos) and not (is_foreclosure and not rent_is_verified)
+    is_value_add = (
+        can_award_value_add
+        and len(critical_risks) == 0
+        and not is_economically_toxic
+        and (turns_profitable_miet or (potential_cf >= -50.0 and all_in_gross_yield >= 4.5))
+        and (has_visual_capex or total_capex >= 5000.0 or market_dev < -10.0)
+    )
+
+    if is_economically_toxic:
+        score = min(score, 3.5)
+        status = "RED"
+        status_label = "🔴 Wirtschaftlich unrentabel (Negativer Cashflow & Niedrigrendite)"
+    elif vision_ran and not has_interior_photos:
+        if len(critical_risks) > 0 or score < 5.0:
+            status = "RED"
+            status_label = "🔴 Hohes Risiko (Keine Innenfotos & kritische Risiken)"
+        else:
+            status = "YELLOW"
+            if is_foreclosure:
+                status_label = "🟡 Prüfbedarf: Zwangsversteigerung ohne Innenfotos (Blindflug-Risiko)"
+            elif not rent_is_verified:
+                status_label = "🟡 Prüfbedarf: Keine Innenfotos & keine verifizierte Ist-Miete"
+            else:
+                status_label = "🟡 Prüfbedarf: Keine echten Innenraumfotos vorhanden"
+    elif vision_ran and visual_score is not None and visual_score < 4.0 and len(critical_risks) > 0:
+        status = "RED"
+        status_label = "🔴 Hohes Risiko / Bauschäden"
+    elif is_value_add:
+        score = max(score, 7.8)
+        status = "GREEN"
+        status_label = "🟢 Value-Add Empfehlung (Hoher Rendite-Hebel nach Sanierung)"
+    elif score >= 7.5 and len(critical_risks) == 0:
+        status = "GREEN"
+        status_label = "🟢 Kaufempfehlung / Solider Deal"
+    elif turns_profitable_miet and len(critical_risks) == 0:
+        status = "GREEN" if score >= 6.8 else "YELLOW"
+        status_label = "🟢 Value-Add Deal (Rentabel bei Mietspiegel)" if score >= 6.8 else "🟡 Value-Add (Rentabel bei Mietspiegel)"
+    elif score >= 5.0 and len(critical_risks) == 0:
+        status = "YELLOW"
+        status_label = "🟡 Prüfbedarf & Risiken verhandeln"
+    else:
+        status = "RED"
+        status_label = "🔴 Hohes Risiko / Finger weg"
+
+    score = max(1.0, min(9.9, round(score, 1)))
+    return {
+        "score": score,
+        "status": status,
+        "status_label": status_label,
+        "risks": updated_risks,
+        "is_value_add": is_value_add,
+    }
+
+
+def _sync_executive_summary_metrics(
+    executive_summary: str,
+    capex_total: float,
+    negotiation_target_price: float,
+    recommended_discount: float,
+    purchase_price: float,
+    market_value: float,
+    market_value_per_sqm: float,
+    is_value_add: Optional[bool] = None,
+) -> str:
+    """Keeps CaPEx, Value-Add banner, and negotiation figures in executive_summary aligned after reconciliation."""
+    if not isinstance(executive_summary, str):
+        return ""
+    capex_str = f"{fmt_de(capex_total)} €"
+    # Normalize any inline CaPEx mentions in LLM narrative that drifted from reconciled total_capex
+    synced = re.sub(r"(?i)(\bCaPEx:\s*)[\d\.,]+\s*€", rf"\g<1>{capex_str}", executive_summary)
+    if is_value_add is False:
+        synced = re.sub(r"\n*🚀 VALUE-ADD ANALYSE \(SANIERUNGSPOTENZIAL\):.*?(?=\n\n|$)", "", synced, flags=re.DOTALL).strip()
+    disc_pct = round((recommended_discount / purchase_price) * 100.0, 1) if purchase_price > 0 else 0.0
+    nego_line = (
+        f"VERHANDLUNGSEMPFEHLUNG: Empfohlenes Kaufpreis-Zielangebot: {fmt_de(negotiation_target_price)} € "
+        f"(Nachlass ca. {fmt_de(recommended_discount)} € bzw. {fmt_de(disc_pct, 1)}% "
+        f"aufgrund ermitteltem CaPEx/Prüfbedarf von {capex_str}). "
+        f"Sprengnetter-Marktwertbenchmark: {fmt_de(market_value)} € ({fmt_de(market_value_per_sqm)} €/m²)."
+    )
+    if re.search(r"(?i)VERHANDLUNGSEMPFEHLUNG:", synced):
+        return re.sub(r"(?i)VERHANDLUNGSEMPFEHLUNG:.*?(?=\n\n|$)", nego_line, synced).strip()
+    return f"{synced.strip()}\n\n{nego_line}".strip()
+
+
 def reconcile_capex_with_images(
     ai_analysis: Dict[str, Any],
     property_data: Dict[str, Any],
     image_analysis: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Aktualisiert die CaPEx-Positionen einer bestehenden KI-Due-Diligence sofort anhand neu analysierter Fotos
-    (ohne erneuten Text-LLM-Aufruf) und aktualisiert den Verhandlungspreis konsistent.
+    Aktualisiert CaPEx, All-In/Cashflow-Kennzahlen, ganzheitlichen Score, Status, Risiken
+    und Verhandlungsfazit anhand neu analysierter Fotos konsistent ohne extra Text-LLM-Call.
     """
     if not isinstance(ai_analysis, dict) or not isinstance(image_analysis, dict):
         return ai_analysis
@@ -2040,34 +2332,91 @@ def reconcile_capex_with_images(
     insights = updated.get("insights") or {}
     new_capex = estimate_capex_and_hidden_costs(insights, property_data, image_analysis=image_analysis)
     updated["capex"] = new_capex
+
+    price = float(property_data.get("purchase_price") or 0.0)
     if isinstance(updated.get("metrics"), dict):
         m = dict(updated["metrics"])
-        m["total_capex"] = new_capex["total_capex"]
-        m["effective_total_investment"] = round(
-            float(m.get("purchase_price") or 0.0) + float(m.get("ancillary_costs") or 0.0) + new_capex["total_capex"], 2
+        price = float(m.get("purchase_price") or price or 0.0)
+        sqm = float(m.get("living_space") or property_data.get("living_space") or 0.0)
+        city = str(insights.get("corrected_city") or property_data.get("city") or "").strip()
+        prop_plz = str(property_data.get("postal_code") or insights.get("postal_code") or "").strip() or None
+        state = str(m.get("state") or property_data.get("state") or "").strip()
+        if prop_plz or city:
+            try:
+                from app.geo_resolver import resolve_location_and_tax
+                geo = resolve_location_and_tax(postal_code=prop_plz, city=city, state=state or None)
+                if geo and geo.get("state"):
+                    state = geo["state"]
+                    m["state"] = state
+            except Exception:
+                pass
+
+        ancillary_costs = float(m.get("ancillary_costs") or 0.0)
+        total_capex_val = float(new_capex["total_capex"] or 0.0)
+        eff_invest = round(price + ancillary_costs + total_capex_val, 2)
+        m["total_capex"] = total_capex_val
+        m["effective_total_investment"] = eff_invest
+
+        # Keep monthly_cashflow_with_capex & real_net_yield aligned with updated total_capex
+        if price > 0 and sqm > 0:
+            rent_is_ver = bool(m.get("rent_is_verified"))
+            cur_rent = float(m.get("current_monthly_rent") or 0.0)
+            exp_rent = float(m.get("expected_monthly_rent") or 0.0)
+            rent_for_cf = cur_rent if (rent_is_ver and cur_rent > 0) else exp_rent
+            non_rec = float(m.get("additional_costs") or 50.0)
+            comm_pct = 0.0 if insights.get("commission_free") else float(insights.get("commission_percent", property_data.get("commission_percent", 3.57)))
+            base_annual_rent = float(m.get("annual_gross_rent") or 0.0) or (exp_rent * 12.0)
+            if eff_invest > 0:
+                m["real_net_yield"] = round(((base_annual_rent - non_rec * 12.0) / eff_invest) * 100.0, 2)
+            if total_capex_val > 0:
+                from app.calculator import calculate_cashflow
+                cf_cap = calculate_cashflow(
+                    price=price,
+                    rent=rent_for_cf,
+                    city=city,
+                    state=state or "Deutschland",
+                    postal_code=prop_plz,
+                    living_space=sqm,
+                    commission_percent=comm_pct,
+                    additional_costs=non_rec,
+                    renovation_costs=total_capex_val,
+                    interest_rate=m.get("applied_interest_rate"),
+                )
+                m["monthly_cashflow_with_capex"] = cf_cap.get("monthly_cashflow", m.get("monthly_cashflow", 0.0))
+                m["monthly_rate_with_capex"] = cf_cap.get("monthly_rate", m.get("monthly_rate", 0.0))
+            else:
+                m["monthly_cashflow_with_capex"] = m.get("monthly_cashflow", 0.0)
+                m["monthly_rate_with_capex"] = m.get("monthly_rate", 0.0)
+
+        verdict = _compute_holistic_deal_verdict(
+            m,
+            insights,
+            new_capex,
+            updated.get("risks") or [],
+            image_analysis=image_analysis,
+            property_data=property_data,
         )
+        updated["score"] = verdict["score"]
+        updated["status"] = verdict["status"]
+        updated["status_label"] = verdict["status_label"]
+        updated["risks"] = verdict["risks"]
         updated["metrics"] = m
-        price = float(m.get("purchase_price") or property_data.get("purchase_price") or 0.0)
+
         if price > 0:
-            rec_disc = round(min(price * 0.25, new_capex["total_capex"] * 0.85 + (8000.0 if insights.get("no_reserve_found") else 0.0)), -2)
+            rec_disc = round(min(price * 0.25, total_capex_val * 0.85 + (8000.0 if insights.get("no_reserve_found") else 0.0)), -2)
             updated["recommended_discount"] = rec_disc
             tgt_price = max(10000.0, round(price - rec_disc, -2))
             updated["negotiation_target_price"] = tgt_price
-
-            if "executive_summary" in updated and isinstance(updated["executive_summary"], str):
-                def _fmt(val, dec=2):
-                    return f"{val:,.{dec}f}".replace(",", "X").replace(".", ",").replace("X", ".")
-                disc_pct = round((rec_disc / price) * 100, 1)
-                nego_replacement = (
-                    f"VERHANDLUNGSEMPFEHLUNG: Empfohlenes Kaufpreis-Zielangebot: {_fmt(tgt_price)} € "
-                    f"(Nachlass ca. {_fmt(rec_disc)} € bzw. {_fmt(disc_pct, 1)}% "
-                    f"aufgrund ermitteltem CaPEx/Prüfbedarf von {_fmt(new_capex['total_capex'])} €). "
-                    f"Sprengnetter-Marktwertbenchmark: {_fmt(m.get('market_value') or 0.0)} € ({_fmt(m.get('market_value_per_sqm') or 0.0)} €/m²)."
-                )
-                updated["executive_summary"] = re.sub(
-                    r"(?i)VERHANDLUNGSEMPFEHLUNG:.*?(?=\n\n|$)",
-                    nego_replacement,
-                    updated["executive_summary"]
+            if "executive_summary" in updated:
+                updated["executive_summary"] = _sync_executive_summary_metrics(
+                    updated["executive_summary"],
+                    capex_total=total_capex_val,
+                    negotiation_target_price=tgt_price,
+                    recommended_discount=rec_disc,
+                    purchase_price=price,
+                    market_value=float(m.get("market_value") or 0.0),
+                    market_value_per_sqm=float(m.get("market_value_per_sqm") or 0.0),
+                    is_value_add=verdict["is_value_add"],
                 )
     return updated
 
@@ -2296,11 +2645,12 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
     price = float(property_data.get("purchase_price") or 0.0)
     sqm = float(property_data.get("living_space") or 0.0)
     city = str(insights.get("corrected_city") or property_data.get("city") or "").strip()
+    prop_plz = str(property_data.get("postal_code") or insights.get("postal_code") or "").strip() or None
     state = str(property_data.get("state") or "").strip()
-    if not state and city:
+    if prop_plz or city:
         try:
             from app.geo_resolver import resolve_location_and_tax
-            geo = resolve_location_and_tax(city=city)
+            geo = resolve_location_and_tax(postal_code=prop_plz, city=city, state=state or None)
             if geo and geo.get("state"):
                 state = geo["state"]
         except Exception:
@@ -2317,7 +2667,9 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         or (unit_count_in_offer >= 3 and not insights.get("is_package_deal"))
     )
 
-    benchmark = evaluate_property_valuation(city, sqm, price, year_built=year_built, property_type=prop_type)
+    benchmark = evaluate_property_valuation(
+        city, sqm, price, year_built=year_built, property_type=prop_type, postal_code=prop_plz, state=state
+    )
     market_val = benchmark.get("estimated_market_value", price)
     market_val_sqm = benchmark.get("estimated_market_value_per_sqm", 2500.0)
     expected_rent_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
@@ -2409,7 +2761,6 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         non_rec_monthly = 50.0
         operating_costs_label = "Hausgeld (nicht uml.)"
 
-    prop_plz = str(property_data.get("postal_code") or insights.get("postal_code") or "").strip() or None
     cf_data = calculate_cashflow(
         price=price,
         rent=rent_for_cf,
@@ -2578,6 +2929,7 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         rent_badge = f"ℹ️ Unvermietet: Marktschätzung {fmt_de(expected_market_rent)} €"
 
     return {
+        "state": state,
         "purchase_price": price,
         "living_space": sqm,
         "price_per_sqm": price_per_sqm,
@@ -2764,29 +3116,7 @@ def generate_ai_due_diligence_report(
     # 4. Versteckte Probleme & Risiken
     risks = detect_hidden_problems_and_risks(insights, property_data, capex)
 
-    # 5. Deterministisches Deal Scoring (1.0 bis 9.9)
-    score = 7.5
-    if metrics["gross_yield"] >= 7.0:
-        score += 1.5
-    elif metrics["gross_yield"] >= 5.5:
-        score += 0.8
-
-    if metrics["market_deviation_percent"] < -15.0:
-        score += 1.2
-    elif metrics["market_deviation_percent"] < -5.0:
-        score += 0.6
-
-    if insights.get("is_kernsaniert"):
-        score += 1.0
-    if insights.get("commission_free"):
-        score += 0.8
-
-    # Value-Add Bonus: Property turns cashflow-positive at local Mietspiegel benchmark
-    miet_ana = metrics.get("mietspiegel_analysis")
-    turns_profitable_miet = bool(miet_ana and miet_ana.get("turns_profitable"))
-    if turns_profitable_miet:
-        score += 0.8
-
+    # 5. Ganzheitliches Scoring & Stage-4-Verdict (Zahlen, Text & Bilder)
     # Price discrepancy check between portal purchase_price and exposé text
     portal_price = float(metrics.get("purchase_price", property_data.get("purchase_price", 0.0)))
     text_price = float(insights.get("stated_purchase_price_in_text") or 0.0)
@@ -2844,78 +3174,24 @@ def generate_ai_due_diligence_report(
             "action": "Hinterlegen Sie ein konkretes Einzel-Exposé (/expose/...) oder pflegen Sie die vollständige Objektbeschreibung manuell ein."
         })
 
-    # --------------------------------------------------------------------------
-    # STAGE 4: GANZHEITLICHE ENTSCHEIDUNG (HOLISTIC VERDICT: ZAHLEN, TEXT & BILDER)
-    # --------------------------------------------------------------------------
-    def _is_true_critical_deal_killer(r_obj: Dict[str, Any]) -> bool:
-        if r_obj.get("severity") != "CRITICAL":
-            return False
-        t = str(r_obj.get("title", "")).lower()
-        d = str(r_obj.get("description", "")).lower()
-        if any(k in t or k in d for k in [
-            "unter marktdurchschnitt", "unter marktwert", "kaufpreisniveau", "niedriger kaufpreis", 
-            "günstiger kaufpreis", "preisniveau", "marktabweichung", "preis unter", "preisabstand",
-            "weit unter", "preis weit", "verdecktes risiko"
-        ]):
-            return False
-        return True
-
-    critical_risks = [r for r in risks if _is_true_critical_deal_killer(r)]
-    high_risks = [r for r in risks if r["severity"] == "HIGH" or (r.get("severity") == "CRITICAL" and not _is_true_critical_deal_killer(r))]
-    score -= len(critical_risks) * 1.5
-    score -= len(high_risks) * 0.7
-
-    # Calculate All-In Rentabilität (Kaufpreis + Kaufnebenkosten + Gesamt-CaPEx)
-    purchase_price = float(metrics.get("purchase_price", property_data.get("purchase_price", 0.0)))
-    total_capex = float(capex.get("total_capex", 0.0))
-    ancillary_costs = float(metrics.get("ancillary_costs", 0.0))
-    all_in_invest = purchase_price + ancillary_costs + total_capex
-    
-    living_sqm = float(property_data.get("living_space") or 50.0)
-    expected_monthly_rent = float(metrics.get("expected_monthly_rent") or (metrics.get("expected_rent_per_sqm", 10.0) * living_sqm))
-    annual_soll_rent = expected_monthly_rent * 12.0
-    all_in_gross_yield = (annual_soll_rent / all_in_invest * 100.0) if all_in_invest > 0 else 0.0
-    metrics["all_in_investment"] = round(all_in_invest, 2)
-    metrics["all_in_gross_yield"] = round(all_in_gross_yield, 2)
-
-    potential_cf = float(metrics.get("potential_monthly_cashflow", metrics.get("monthly_cashflow", 0.0)))
-    has_visual_capex = bool(capex.get("visual_capex", 0) > 0 or any(it.get("source_type") == "FOTO_BELEG" for it in capex.get("items", [])))
-
-    # Economic Knockout: Yield < 2.5% AND cashflow < -300 €
-    is_economically_toxic = (metrics["gross_yield"] < 2.5 and potential_cf < -300.0 and not turns_profitable_miet)
-
-    # Value-Add Recognition (Renovation Opportunity with Strong Upside)
-    # Unrenovated != Bad! If all-in math works out at market rent, reward as Green Value-Add!
-    is_value_add = (
-        len(critical_risks) == 0
-        and not is_economically_toxic
-        and (turns_profitable_miet or (potential_cf >= -50.0 and all_in_gross_yield >= 4.5))
-        and (has_visual_capex or total_capex >= 5000.0 or metrics.get("market_deviation_percent", 0.0) < -10.0)
+    verdict = _compute_holistic_deal_verdict(
+        metrics,
+        insights,
+        capex,
+        risks,
+        image_analysis=image_analysis,
+        property_data=property_data,
     )
-
-    if is_economically_toxic:
-        score = min(score, 3.5)
-        status = "RED"
-        status_label = "🔴 Wirtschaftlich unrentabel (Negativer Cashflow & Niedrigrendite)"
-    elif is_value_add:
-        # Boost score: Renovation upside is recognized as an investment opportunity!
-        score = max(score, 7.8)
-        status = "GREEN"
-        status_label = "🟢 Value-Add Empfehlung (Hoher Rendite-Hebel nach Sanierung)"
-    elif score >= 7.5 and len(critical_risks) == 0:
-        status = "GREEN"
-        status_label = "🟢 Kaufempfehlung / Solider Deal"
-    elif turns_profitable_miet and len(critical_risks) == 0:
-        status = "GREEN" if score >= 6.8 else "YELLOW"
-        status_label = "🟢 Value-Add Deal (Rentabel bei Mietspiegel)" if score >= 6.8 else "🟡 Value-Add (Rentabel bei Mietspiegel)"
-    elif score >= 5.0 and len(critical_risks) == 0:
-        status = "YELLOW"
-        status_label = "🟡 Prüfbedarf & Risiken verhandeln"
-    else:
-        status = "RED"
-        status_label = "🔴 Hohes Risiko / Finger weg"
-
-    score = max(1.0, min(9.9, round(score, 1)))
+    score = verdict["score"]
+    status = verdict["status"]
+    status_label = verdict["status_label"]
+    risks = verdict["risks"]
+    is_value_add = verdict["is_value_add"]
+    miet_ana = metrics.get("mietspiegel_analysis")
+    total_capex = float(capex.get("total_capex", 0.0) or 0.0)
+    expected_monthly_rent = float(metrics.get("expected_monthly_rent") or 0.0)
+    all_in_invest = float(metrics.get("all_in_investment") or 0.0)
+    all_in_gross_yield = float(metrics.get("all_in_gross_yield") or 0.0)
 
     recommended_discount = round(min(metrics["purchase_price"] * 0.25, capex["total_capex"] * 0.85 + (8000.0 if insights.get("no_reserve_found") else 0.0)), -2)
     negotiation_target_price = max(10000.0, round(metrics["purchase_price"] - recommended_discount, -2))
@@ -2928,15 +3204,15 @@ def generate_ai_due_diligence_report(
         llm_narrative = re.sub(r"(?i)\n*Empfohlenes Kaufpreis-Zielangebot:.*", "", llm_narrative).strip()
         llm_narrative = re.sub(r"(?i)\n*Sprengnetter-Marktwertbenchmark:.*", "", llm_narrative).strip()
 
-        # Append single authoritative, deterministically computed negotiation & Sprengnetter benchmark line
-        disc_pct_val = (recommended_discount / metrics["purchase_price"]) * 100 if metrics["purchase_price"] > 0 else 0.0
-        nego_line = (
-            f"VERHANDLUNGSEMPFEHLUNG: Empfohlenes Kaufpreis-Zielangebot: {fmt_de(negotiation_target_price)} € "
-            f"(Nachlass ca. {fmt_de(recommended_discount)} € bzw. {fmt_de(disc_pct_val, 1)}% "
-            f"aufgrund ermitteltem CaPEx/Prüfbedarf von {fmt_de(capex['total_capex'])} €). "
-            f"Sprengnetter-Marktwertbenchmark: {fmt_de(metrics['market_value'])} € ({fmt_de(metrics['market_value_per_sqm'])} €/m²)."
+        executive_summary = _sync_executive_summary_metrics(
+            llm_narrative,
+            capex_total=capex["total_capex"],
+            negotiation_target_price=negotiation_target_price,
+            recommended_discount=recommended_discount,
+            purchase_price=metrics["purchase_price"],
+            market_value=metrics["market_value"],
+            market_value_per_sqm=metrics["market_value_per_sqm"],
         )
-        executive_summary = f"{llm_narrative}\n\n{nego_line}"
     else:
         title = property_data.get("title", "Immobilie")
         city = insights.get("corrected_city") or property_data.get("city", "Standort")

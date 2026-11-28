@@ -313,7 +313,13 @@ def refine_photo_tag(
         return "📐 Bauzeichnung / Grundriss"
 
     # 2. Maklerwerbung, Logos, Dokumente & Energieausweise
-    if any(k in d for k in ["unternehmenslogo", "makler-einblend", "werbefolie", "marketinggrafik", "kontaktdatenblatt", "beratungsservice", "partnerlogos", "energieausweis", "werbe- und kontakt", "kontaktfolie", "vonovia verkauf", "fiktives, ki-generiertes musterfoto"]):
+    ad_keywords = (
+        "unternehmenslogo", "makler-einblend", "werbefolie", "werbegrafik", "marketinggrafik",
+        "kontaktdatenblatt", "beratungsservice", "partnerlogos", "energieausweis",
+        "werbe- und kontakt", "kontaktfolie", "vonovia verkauf", "fiktives, ki-generiertes musterfoto",
+        "kein objektbezug"
+    )
+    if any(k in d or k in f_str for k in ad_keywords) or "werbegrafik" in t.lower():
         return "📄 Dokument / Info"
 
     # 3. Fassade / Außenansicht / Straßenansicht des Gebäudes
@@ -484,18 +490,25 @@ def call_gemini_vision(
 
     # Limit primary call to at most 8 images to prevent generation timeouts (>90s)
     active_images = images_base64[:8]
+    prop_type_str = str(property_data.get("property_type") or "")
+    mfh_hint = ""
+    if "mehrfamilien" in prop_type_str.lower() or "dreifamilien" in prop_type_str.lower() or "zweifamilien" in prop_type_str.lower() or float(property_data.get("living_space") or 0) >= 160:
+        mfh_hint = (
+            "\n   - MEHRFAMILIENHAUS / MEHRERE EINHEITEN: Falls Objektart oder Beschreibung mehrere Wohneinheiten nennen "
+            "(z. B. Drei-/Mehrfamilienhaus), kalkuliere CaPEx für Bäder, Elektrik, Böden/Maler und ggf. Küchen konsequent für ALLE Einheiten!"
+        )
 
     prompt = f"""Du bist ein DEKRA-zertifizierter Bausachverständiger und Immobilien-Due-Diligence-Auditor in Deutschland.
-Analysiere die beigefügten Fotos der Immobilie '{property_data.get('title')}' in {property_data.get('city')} (Baujahr {property_data.get('year_built', 'k.A.')}, {property_data.get('living_space', 50)} m² Wohnfläche).
+Analysiere die beigefügten Fotos der Immobilie '{property_data.get('title')}' ({prop_type_str or 'Immobilie'}) in {property_data.get('city')} (Baujahr {property_data.get('year_built', 'k.A.')}, {property_data.get('living_space', 50)} m² Wohnfläche).
 
 Objektbeschreibung des Verkäufers:
 \"\"\"{full_description[:2000]}\"\"\"
 
 WICHTIGE PRÜFKRITERIEN:
-0. KI-GENERIERTE BILDER / VIRTUAL STAGING STRIKT AUSSCHLIESSEN (EXTREM WICHTIG!):
-   - Prüfe bei jedem Foto kritisch, ob es sich um eine KI-generierte Visualisierung, Virtual Staging, digitale Möblierung, ein fiktives Einrichtungsbeispiel oder ein Vorher-/Nachher-Bild handelt (oft daran erkennbar, dass derselbe leere Raum auf einem anderen Foto leer ist und hier plötzlich virtuell mit Küche/Möbeln dargestellt wird, oder an Hinweisen wie "Virtual Staging", "Visualisierung", "Einrichtungsbeispiel", "KI-generiert").
+0. KI-GENERIERTE BILDER, MUSTERFOTOS & VIRTUAL STAGING STRIKT AUSSCHLIESSEN (EXTREM WICHTIG!):
+   - Prüfe bei jedem Foto kritisch, ob es sich um eine KI-generierte Visualisierung, Virtual Staging, digitale Möblierung, ein fiktives Einrichtungsbeispiel, ein Musterfoto ohne Objektbezug oder eine Werbegrafik handelt (oft daran erkennbar, dass derselbe leere Raum auf einem anderen Foto leer ist und hier plötzlich virtuell mit Küche/Möbeln dargestellt wird, oder an Hinweisen wie "Virtual Staging", "Visualisierung", "Einrichtungsbeispiel", "KI-generiert", "Musterfoto").
    - Setze bei solchen Bildern zwingend `"is_ai_generated": true` (der Raum-`tag` wie z. B. `"🍳 Küche / EBK"` oder `"🛋️ Wohnbereich / Wohnzimmer"` darf zur besseren Orientierung beibehalten werden, das Bild gilt aber durch `is_ai_generated: true` nicht als realer Zustand).
-   - Solche KI-/Staging-Bilder zeigen NICHT den realen Ist-Zustand! Sie dürfen NIEMALS für Zustandsnoten (`categories`, `overall_visual_score`) oder als Nachweis für vorhandene Einbauten (wie eine Einbauküche) herangezogen werden. Wenn das echte Foto der Küche leer ist und nur das KI-Bild eine Einbauküche zeigt, gilt die EBK als NICHT vorhanden (volle Kosten für neue EBK ansetzen!).
+   - Solche KI-/Muster-/Staging-Bilder zeigen NICHT den realen Ist-Zustand! Sie dürfen NIEMALS für Zustandsnoten (`categories`, `overall_visual_score`) oder als Entlastung für Bauteile (weder als vorhandene Einbauküche noch als intakte Fenster/Fassade mit 0 € CaPEx!) herangezogen werden. Wenn das echte Foto der Küche leer ist und nur das KI-Bild eine Einbauküche zeigt, gilt die EBK als NICHT vorhanden (volle Kosten für neue EBK ansetzen!).{mfh_hint}
 1. Prüfe zuerst, ob es sich um echte Innenraumfotos oder um Bauzeichnungen / Grundrisse / Pläne handelt.
 2. Wenn nur Bauzeichnungen/Pläne vorliegen: Gib in 'notice' an, dass keine Innenraumfotos vorliegen, und leite den Zustand/CaPEx aus der Objektbeschreibung ab (z.B. wenn Verkäufer 'Renovieren!!!!' oder Sanierungsstau angibt).
 3. Untersuche den visuellen IST-Zustand folgender 6 Bauteile auf den Fotos:
@@ -1297,8 +1310,25 @@ def analyze_property_images(
                     p["is_blueprint"] = True
 
             ai_photo_indices = {p["index"] for p in analyzed_photos if p.get("is_ai_generated")}
+            blueprints_count = sum(1 for p in analyzed_photos if p.get("is_blueprint", False))
+
+            _non_interior_markers = (
+                "fassade", "außenansicht", "dokument", "werbegrafik", "marketinggrafik",
+                "lageplan", "umgebungskarte", "garten", "weitblick", "ausblick",
+                "garage", "stellplatz", "musterfoto", "kein objektbezug"
+            )
+
+            def _is_real_interior_photo(p_obj: Dict[str, Any]) -> bool:
+                if p_obj.get("is_blueprint") or p_obj.get("is_ai_generated"):
+                    return False
+                combined_meta = (
+                    f"{p_obj.get('tag', '')} {p_obj.get('description', '')} {' '.join(p_obj.get('findings') or [])}"
+                ).lower()
+                return not any(m in combined_meta for m in _non_interior_markers)
+
             real_photos = [p for p in analyzed_photos if not p.get("is_blueprint") and not p.get("is_ai_generated")]
-            has_interior_photos = bool(real_photos)
+            real_interior_photos = [p for p in analyzed_photos if _is_real_interior_photo(p)]
+            has_interior_photos = bool(real_interior_photos)
 
             gem_categories = gemini_res.get("categories", {})
             raw_capex_items = gemini_res.get("visual_capex_items", [])
@@ -1546,6 +1576,19 @@ def analyze_property_images(
                     "findings": f_desc,
                     "cost": 0.0
                 }
+
+            if "windows" in gem_categories and isinstance(gem_categories["windows"], dict) and ai_photo_indices:
+                w_cat = gem_categories["windows"]
+                w_find = str(w_cat.get("findings") or "").lower()
+                cited_ai = any(f"#{idx}" in w_find or f"foto {idx}" in w_find for idx in ai_photo_indices)
+                has_real_window_photo = any(
+                    any(w in (p.get("description", "") + " " + " ".join(p.get("findings") or [])).lower() for w in ["fenster", "verglasung"])
+                    for p in real_photos
+                )
+                if cited_ai and not has_real_window_photo:
+                    w_cat["score"] = min(float(w_cat.get("score") or 5.0), 5.0)
+                    w_cat["status"] = "Nicht beurteilbar (Muster-/KI-Foto ignoriert)"
+                    w_cat["findings"] = "Nur auf KI-/Musterfoto abgebildet – Fensterzustand am realen Objekt ungeprüft."
 
             if "windows" not in gem_categories or not isinstance(gem_categories["windows"], dict) or not gem_categories["windows"].get("status"):
                 win_mentions = [

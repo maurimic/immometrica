@@ -124,6 +124,10 @@ CITY_TO_STATE = {
     "garching": "Bayern",
     "esslingen": "Baden-Württemberg",
     "bergkamen": "Nordrhein-Westfalen",
+    "wörth am rhein": "Rheinland-Pfalz",
+    "woerth am rhein": "Rheinland-Pfalz",
+    "germersheim": "Rheinland-Pfalz",
+    "landau in der pfalz": "Rheinland-Pfalz",
 }
 
 CITY_COORDINATES = {
@@ -145,6 +149,10 @@ CITY_COORDINATES = {
     "esslingen": (48.7427, 9.3071),
     "esslingen am neckar": (48.7427, 9.3071),
     "landshut": (48.5372, 12.1522),
+    "wörth am rhein": (49.0519, 8.2611),
+    "woerth am rhein": (49.0519, 8.2611),
+    "germersheim": (49.2178, 8.3667),
+    "landau in der pfalz": (49.1989, 8.1172),
     "straubing": (48.8813, 12.5739),
     "passau": (48.5667, 13.4319),
     "bayreuth": (49.9456, 11.5713),
@@ -666,6 +674,9 @@ def resolve_location_and_tax(
                 resolved_state = "Niedersachsen"
             elif prefix3 in (228, 229):
                 resolved_state = "Schleswig-Holstein"
+            elif prefix3 in (767, 768):
+                # Südpfalz (Wörth am Rhein, Germersheim, Landau, Kandel, Bad Bergzabern) liegt in Rheinland-Pfalz
+                resolved_state = "Rheinland-Pfalz"
 
         if not resolved_state and len(plz_clean) >= 2:
             prefix2 = int(plz_clean[:2])

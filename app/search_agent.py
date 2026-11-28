@@ -598,7 +598,9 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 continue
 
         mark_listing_seen(portal_url, profile_id, "qualified")
-        target_stage = "merkliste" if (audited_score >= 8.0 or visual_score >= 8.5) else "neu"
+        has_real_interior = bool(img_report.get("has_interior_photos")) if isinstance(img_report, dict) and ("has_interior_photos" in img_report) else True
+        can_promote_merkliste = has_real_interior and visual_score >= 6.0 and (audited_score >= 8.0 or visual_score >= 8.5)
+        target_stage = "merkliste" if can_promote_merkliste else "neu"
         qualification_text = f"Qualifiziert: Score {audited_score:.1f}/10, Rendite {audited_yield:.1f}%, Cashflow {audited_cashflow:+,.0f} €/M"
         conn = get_connection()
         c = conn.cursor()
