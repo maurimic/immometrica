@@ -450,7 +450,11 @@ def check_all_properties_availability():
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT id, portal_url, source_portal, city, postal_code, address, lat, lng, description FROM properties")
+    cursor.execute("""
+        SELECT id, portal_url, source_portal, city, postal_code, address, lat, lng, description
+        FROM properties
+        WHERE NOT (availability_status = 'offline' AND pipeline_stage = 'archiv')
+    """)
     rows = cursor.fetchall()
     conn.close()
 
@@ -764,6 +768,7 @@ def run_property_ai_audit(
                     cursor.execute(f"UPDATE properties SET {', '.join(update_fields)} WHERE id = ?", tuple(update_vals))
                     conn.commit()
 
+                    prop["_expose_fetched_live"] = True
                     fetch_res = {
                         "is_online": True,
                         "availability_status": "online",
@@ -839,6 +844,7 @@ def run_property_ai_audit(
                     cursor.execute(f"UPDATE properties SET {', '.join(upd_fields)} WHERE id = ?", tuple(upd_vals))
                     conn.commit()
 
+                    prop["_expose_fetched_live"] = True
                     fetch_res = {
                         "is_online": True,
                         "availability_status": "online",
@@ -884,7 +890,7 @@ def run_property_ai_audit(
                         upd_vals.append(live_price)
                         prop["purchase_price"] = live_price
 
-                    # Extract full gallery for Kleinanzeigen / portal fallback
+                    # Adopt gallery returned by live check or only extract when missing/single-thumbnail
                     from app.image_analyst import extract_gallery_images
                     cur_gallery = []
                     if prop.get("gallery_images"):
@@ -892,21 +898,23 @@ def run_property_ai_audit(
                             cur_gallery = json.loads(prop["gallery_images"]) if isinstance(prop["gallery_images"], str) else prop["gallery_images"]
                         except Exception:
                             cur_gallery = []
-                    if len(cur_gallery or []) < 10:
+                    live_gallery = fetch_res.get("gallery_images") or []
+                    if not live_gallery and len(cur_gallery or []) <= 1:
                         live_gallery = extract_gallery_images(portal_url, source_portal, prop.get("image_url", ""))
-                        if len(live_gallery) > len(cur_gallery or []):
-                            upd_fields.append("gallery_images = ?")
-                            upd_vals.append(json.dumps(live_gallery, ensure_ascii=False))
-                            prop["gallery_images"] = json.dumps(live_gallery, ensure_ascii=False)
-                            cur_img = prop.get("image_url") or ""
-                            if not cur_img or "unsplash" in cur_img or len(cur_img) < 20:
-                                upd_fields.append("image_url = ?")
-                                upd_vals.append(live_gallery[0])
-                                prop["image_url"] = live_gallery[0]
+                    if len(live_gallery) > len(cur_gallery or []):
+                        upd_fields.append("gallery_images = ?")
+                        upd_vals.append(json.dumps(live_gallery, ensure_ascii=False))
+                        prop["gallery_images"] = json.dumps(live_gallery, ensure_ascii=False)
+                        cur_img = prop.get("image_url") or ""
+                        if not cur_img or "unsplash" in cur_img or len(cur_img) < 20:
+                            upd_fields.append("image_url = ?")
+                            upd_vals.append(live_gallery[0])
+                            prop["image_url"] = live_gallery[0]
 
                     upd_vals.append(property_id)
                     cursor.execute(f"UPDATE properties SET {', '.join(upd_fields)} WHERE id = ?", tuple(upd_vals))
                     conn.commit()
+                    prop["_expose_fetched_live"] = True
 
     # Auto-fix title if it is a generic placeholder like "Importiertes Inserat" or "Beschreibung"
     cur_t = (prop.get("title") or "").strip()

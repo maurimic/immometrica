@@ -1084,35 +1084,51 @@ def analyze_property_images(
             elif isinstance(prop_gallery, list) and len(prop_gallery) > 0:
                 image_urls = list(prop_gallery)
 
-    # Wenn bisher nur wenige Vorschaubilder (z. B. aus der Suche) oder gar keine vorliegen,
-    # dynamisch die vollständige Portal-Galerie live nachladen und übernehmen, sobald mehr Bilder gefunden werden.
-    if portal_url and (not image_urls or len(image_urls) < 10):
+    # Filter generic Unsplash placeholders early so missing-gallery detection works accurately
+    image_urls = [
+        u for u in (image_urls or [])
+        if u and "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(u)
+    ]
+
+    # Live-Galerie nur nachladen, wenn im aktuellen Audit noch kein Exposé geladen wurde UND
+    # entweder keine/max. 1 Vorschaubild vorliegen oder nur ein Search-Card-Kurztext existiert.
+    expose_just_fetched = bool(property_data.get("_expose_fetched_live"))
+    is_card_summary_only = (
+        "Eckdaten des Objekts:" in str(full_description or "")
+        or "Portal: Immowelt (Exposé-ID:" in str(full_description or "")
+    )
+    needs_gallery_extract = (
+        not expose_just_fetched
+        and bool(portal_url)
+        and (
+            len(image_urls) <= 1
+            or (is_card_summary_only and len(image_urls) < 10)
+        )
+    )
+    if needs_gallery_extract:
         extracted = extract_gallery_images(portal_url, source_portal, fallback_img)
-        if len(extracted) > len(image_urls or []):
-            image_urls = extracted
+        if len(extracted) > len(image_urls):
+            image_urls = [
+                u for u in extracted
+                if u and "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(u)
+            ]
             prop_id = property_data.get("id")
             if prop_id:
                 try:
                     from app.database import update_property
-                    upd_dict = {"gallery_images": json.dumps(extracted)}
+                    upd_dict = {"gallery_images": json.dumps(image_urls)}
                     cur_img = property_data.get("image_url") or ""
-                    if not cur_img or "unsplash" in cur_img or len(cur_img) < 20:
-                        upd_dict["image_url"] = extracted[0]
-                        property_data["image_url"] = extracted[0]
+                    if (not cur_img or "unsplash" in cur_img or len(cur_img) < 20) and image_urls:
+                        upd_dict["image_url"] = image_urls[0]
+                        property_data["image_url"] = image_urls[0]
                     update_property(prop_id, upd_dict)
-                    property_data["gallery_images"] = json.dumps(extracted)
+                    property_data["gallery_images"] = json.dumps(image_urls)
                 except Exception as e:
                     logger.debug(f"Could not persist extracted gallery for #{prop_id}: {e}")
-    elif not image_urls:
-        extracted = extract_gallery_images(portal_url, source_portal, fallback_img)
-        if extracted:
-            image_urls = extracted
 
     if not image_urls and fallback_img:
-        image_urls = [fallback_img]
-
-    # Never inject or analyze Unsplash placeholder stock photos as real property photos!
-    image_urls = [u for u in (image_urls or []) if u and "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(u)]
+        if "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(fallback_img):
+            image_urls = [fallback_img]
 
     if not image_urls:
         return {

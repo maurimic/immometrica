@@ -7,6 +7,9 @@ extracting real offer links, prices, living space, rooms, high-resolution photos
 import re
 import os
 import json
+import copy
+import time
+import threading
 import urllib.parse
 import requests
 import logging
@@ -15,6 +18,79 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 logger = logging.getLogger("immometrica.scraper.immowelt")
+
+_GATEWAY_LOCK = threading.Lock()
+_DIRECT_BLOCKED_UNTIL: float = 0.0
+_STANDARD_BLOCKED_UNTIL: float = 0.0
+_EXPOSE_CACHE: Dict[str, tuple] = {}
+_SEARCH_HTML_CACHE: Dict[str, tuple] = {}
+_EXPOSE_CACHE_TTL_SEC = 600.0
+_SEARCH_HTML_CACHE_TTL_SEC = 180.0
+_BLOCK_COOLDOWN_SEC = 900.0
+_EXPOSE_CACHE_MAX = 200
+_SEARCH_CACHE_MAX = 60
+
+
+def reset_immowelt_gateway_state() -> None:
+    """Clears in-memory Immowelt cooldowns and TTL caches (useful for tests/resets)."""
+    global _DIRECT_BLOCKED_UNTIL, _STANDARD_BLOCKED_UNTIL
+    with _GATEWAY_LOCK:
+        _DIRECT_BLOCKED_UNTIL = 0.0
+        _STANDARD_BLOCKED_UNTIL = 0.0
+        _EXPOSE_CACHE.clear()
+        _SEARCH_HTML_CACHE.clear()
+
+
+def _is_unmocked_fetch() -> bool:
+    """Returns True only when fetch_immowelt_html is the real module function (never bypass mocks in tests)."""
+    fn = globals().get("fetch_immowelt_html")
+    return bool(
+        callable(fn)
+        and getattr(fn, "__module__", None) == __name__
+        and not hasattr(fn, "assert_called")
+    )
+
+
+def _is_blocked_immowelt_response(resp: Optional[requests.Response]) -> bool:
+    """Detects DataDome/anti-bot challenges or transient blocks while letting genuine 200/404 responses pass."""
+    if resp is None:
+        return True
+    st = int(getattr(resp, "status_code", 0) or 0)
+    text = str(getattr(resp, "text", "") or "")
+    headers_raw = getattr(resp, "headers", None) or {}
+    headers_low = {str(k).lower(): str(v).lower() for k, v in headers_raw.items()} if hasattr(headers_raw, "items") else {}
+
+    if st in (404, 410):
+        # Treat genuine 404/410 as final unless an explicit DataDome block header/body is present
+        if "x-datadome" in headers_low and "datadome" in text[:4000].lower():
+            return True
+        return False
+
+    if st != 200:
+        return True
+
+    has_real_markers = (
+        "__UFRN_LIFECYCLE_SERVERREQUEST__" in text
+        or "__UFRN_STORE__" in text
+        or "/expose/" in text
+    )
+    if has_real_markers:
+        return False
+
+    head_low = text[:16000].lower()
+    challenge_sigs = (
+        "captcha-delivery.com",
+        "datadome",
+        "cf-browser-verification",
+        "access denied",
+        "enable javascript",
+    )
+    if any(sig in head_low for sig in challenge_sigs):
+        return True
+    if len(text.strip()) < 2500:
+        return True
+    return False
+
 
 BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -34,39 +110,111 @@ BROWSER_HEADERS = {
 }
 
 
-def fetch_immowelt_html(url: str, timeout: float = 12.0) -> requests.Response:
+def fetch_immowelt_html(url: str, timeout: float = 12.0, allow_gateway: bool = True) -> requests.Response:
     """
-    Fetches an Immowelt URL either directly or via a configured Scraping Gateway
-    (e.g. ScraperAPI, ZenRows, ScrapingBee, or a residential proxy) to bypass
-    DataDome HTTP 403 blocks on datacenter/cloud IPs.
+    Fetches an Immowelt URL with tiered cost protection:
+    1. Custom HTTP/HTTPS proxy if SCRAPER_PROXY_URL is configured.
+    2. Direct browser-header HTTP request first (0 ScraperAPI credits) when enabled,
+       with a 15-minute cooldown if the current IP is DataDome-blocked.
+    3. Managed Scraping Gateway fallback (ScraperAPI standard 10cr -> premium 20cr only on block).
     """
+    global _DIRECT_BLOCKED_UNTIL, _STANDARD_BLOCKED_UNTIL
+
     scraper_key = (os.getenv("SCRAPER_API_KEY") or os.getenv("SCRAPING_API_KEY") or "").strip()
     service = os.getenv("SCRAPING_SERVICE", "scraperapi").strip().lower()
     proxy_url = os.getenv("SCRAPER_PROXY_URL", "").strip()
+    gateway_enabled = os.getenv("SCRAPER_API_ENABLED", "1").strip().lower() not in ("0", "false", "no")
+    can_use_gateway = bool(allow_gateway and scraper_key and gateway_enabled)
+    direct_first = os.getenv("SCRAPER_DIRECT_FIRST", "1").strip().lower() not in ("0", "false", "no")
+    premium_mode = os.getenv("SCRAPER_PREMIUM_MODE", "fallback").strip().lower()
 
     # 1. Custom HTTP/HTTPS Proxy (e.g. Bright Data, Smartproxy, Webshare)
     if proxy_url:
         proxies = {"http": proxy_url, "https": proxy_url}
         return requests.get(url, headers=BROWSER_HEADERS, proxies=proxies, timeout=timeout)
 
-    # 2. Managed Scraping Gateway API (ScraperAPI / ZenRows / ScrapingBee)
-    if scraper_key:
+    # 2. Tier 1 (0 Credits): Try Direct Request First when enabled or when no gateway is available
+    last_direct_resp: Optional[requests.Response] = None
+    last_direct_err: Optional[Exception] = None
+    if direct_first or not can_use_gateway:
+        now_m = time.monotonic()
+        with _GATEWAY_LOCK:
+            in_direct_cooldown = can_use_gateway and (now_m < _DIRECT_BLOCKED_UNTIL)
+
+        if not in_direct_cooldown:
+            try:
+                direct_timeout = min(float(timeout or 12.0), 8.0) if can_use_gateway else float(timeout or 12.0)
+                direct_resp = requests.get(url, headers=BROWSER_HEADERS, timeout=direct_timeout)
+                if not _is_blocked_immowelt_response(direct_resp) or not can_use_gateway:
+                    with _GATEWAY_LOCK:
+                        _DIRECT_BLOCKED_UNTIL = 0.0
+                    return direct_resp
+                last_direct_resp = direct_resp
+            except requests.RequestException as req_err:
+                last_direct_err = req_err
+                if not can_use_gateway:
+                    raise
+
+            if can_use_gateway:
+                with _GATEWAY_LOCK:
+                    _DIRECT_BLOCKED_UNTIL = time.monotonic() + _BLOCK_COOLDOWN_SEC
+                logger.info("Direct Immowelt request blocked/restricted; falling back to scraping gateway...")
+
+    # 3. Managed Scraping Gateway API (ScraperAPI / ZenRows / ScrapingBee)
+    if can_use_gateway:
         encoded_url = urllib.parse.quote(url, safe="")
-        gateway_timeout = max(timeout, 35.0)
+        gateway_timeout = max(float(timeout or 12.0), 35.0)
 
         if service == "zenrows":
             gateway_url = f"https://api.zenrows.com/v1/?apikey={scraper_key}&url={encoded_url}&premium_proxy=true&proxy_country=de"
-        elif service == "scrapingbee":
+            logger.info("Routing Immowelt request through zenrows gateway...")
+            return requests.get(gateway_url, timeout=gateway_timeout)
+        if service == "scrapingbee":
             gateway_url = f"https://app.scrapingbee.com/api/v1/?api_key={scraper_key}&url={encoded_url}&country_code=de"
-        else:
-            # Default: ScraperAPI (supports country_code=de & premium=true for residential DE IP without slow JS rendering overhead)
-            render_param = "&render=true" if os.getenv("SCRAPER_RENDER", "").lower() == "true" else ""
-            gateway_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de&premium=true{render_param}"
+            logger.info("Routing Immowelt request through scrapingbee gateway...")
+            return requests.get(gateway_url, timeout=gateway_timeout)
 
-        logger.info(f"Routing Immowelt request through {service} gateway...")
-        return requests.get(gateway_url, timeout=gateway_timeout)
+        # ScraperAPI Tier 2 (standard: 10 credits) -> Tier 3 (premium: 20 credits only as fallback)
+        render_param = "&render=true" if os.getenv("SCRAPER_RENDER", "").lower() == "true" else ""
+        std_resp: Optional[requests.Response] = None
 
-    # 3. Direct request with modern Chrome browser headers
+        if premium_mode != "always":
+            now_m = time.monotonic()
+            with _GATEWAY_LOCK:
+                in_std_cooldown = now_m < _STANDARD_BLOCKED_UNTIL
+
+            if not in_std_cooldown:
+                std_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de{render_param}"
+                logger.info("Routing Immowelt request through scraperapi standard gateway (no premium)...")
+                try:
+                    std_resp = requests.get(std_url, timeout=gateway_timeout)
+                except requests.RequestException:
+                    std_resp = None
+
+                if std_resp is not None and (not _is_blocked_immowelt_response(std_resp) or premium_mode == "never"):
+                    if not _is_blocked_immowelt_response(std_resp):
+                        with _GATEWAY_LOCK:
+                            _STANDARD_BLOCKED_UNTIL = 0.0
+                    return std_resp
+
+                with _GATEWAY_LOCK:
+                    _STANDARD_BLOCKED_UNTIL = time.monotonic() + _BLOCK_COOLDOWN_SEC
+                logger.info("ScraperAPI standard gateway blocked; escalating to premium fallback...")
+
+        if premium_mode != "never":
+            prem_url = f"https://api.scraperapi.com?api_key={scraper_key}&url={encoded_url}&country_code=de&premium=true{render_param}"
+            logger.info("Routing Immowelt request through scraperapi premium gateway...")
+            return requests.get(prem_url, timeout=gateway_timeout)
+
+        if std_resp is not None:
+            return std_resp
+
+    if last_direct_resp is not None:
+        return last_direct_resp
+    if last_direct_err is not None:
+        raise last_direct_err
+
+    # Fallback direct request if gateway is disabled and direct_first was explicitly turned off
     return requests.get(url, headers=BROWSER_HEADERS, timeout=timeout)
 
 
@@ -138,7 +286,8 @@ def search_immowelt_deals(
     exclude_urls: Optional[Any] = None,
     postal_code: Optional[str] = None,
     radius_km: int = 0,
-    property_type: str = "all"
+    property_type: str = "all",
+    max_pages: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     """
     Scrapes live listings from Immowelt for a given German city or postal code.
@@ -160,6 +309,14 @@ def search_immowelt_deals(
     search_targets = _build_immowelt_search_paths(property_type)
     radius_param = f"&r={int(radius_km)}" if int(radius_km or 0) > 0 else ""
 
+    if max_pages is not None:
+        effective_max_pages = max(1, min(3, int(max_pages)))
+    else:
+        try:
+            effective_max_pages = max(1, min(3, int(os.getenv("IMMOWELT_MAX_PAGES", "3"))))
+        except (ValueError, TypeError):
+            effective_max_pages = 3
+
     results: List[Dict[str, Any]] = []
     seen_urls = set()
 
@@ -167,22 +324,39 @@ def search_immowelt_deals(
         if len(results) >= max_results:
             break
         prev_page_urls = set()
-        for page in range(1, 4):
+        for page in range(1, effective_max_pages + 1):
             if len(results) >= max_results:
                 break
 
             url = f"https://www.immowelt.de/suche/{city_slug}/{path_seg}?sp={page}&sort=createdate_desc{radius_param}"
 
-            try:
-                resp = fetch_immowelt_html(url, timeout=10.0)
-                if resp.status_code != 200:
-                    logger.warning(f"Immowelt search returned HTTP {resp.status_code} ({path_seg}, page {page})")
-                    break
-            except Exception as e:
-                logger.warning(f"Immowelt request error for {loc_input} ({path_seg}, page {page}): {e}")
-                break
+            html_text: Optional[str] = None
+            can_cache_search = _is_unmocked_fetch()
+            if can_cache_search:
+                now_m = time.monotonic()
+                with _GATEWAY_LOCK:
+                    cached = _SEARCH_HTML_CACHE.get(url)
+                    if cached and now_m < cached[0]:
+                        html_text = cached[1]
 
-            soup = BeautifulSoup(resp.text, "html.parser")
+            if html_text is None:
+                try:
+                    resp = fetch_immowelt_html(url, timeout=10.0)
+                    if resp.status_code != 200:
+                        logger.warning(f"Immowelt search returned HTTP {resp.status_code} ({path_seg}, page {page})")
+                        break
+                    html_text = resp.text
+                    if can_cache_search and html_text and not _is_blocked_immowelt_response(resp):
+                        with _GATEWAY_LOCK:
+                            if len(_SEARCH_HTML_CACHE) >= _SEARCH_CACHE_MAX:
+                                oldest_k = next(iter(_SEARCH_HTML_CACHE))
+                                _SEARCH_HTML_CACHE.pop(oldest_k, None)
+                            _SEARCH_HTML_CACHE[url] = (time.monotonic() + _SEARCH_HTML_CACHE_TTL_SEC, html_text)
+                except Exception as e:
+                    logger.warning(f"Immowelt request error for {loc_input} ({path_seg}, page {page}): {e}")
+                    break
+
+            soup = BeautifulSoup(html_text, "html.parser")
             expose_links = soup.find_all("a", href=re.compile(r"/expose/[a-f0-9\-]+", re.IGNORECASE))
             if not expose_links:
                 break
@@ -193,6 +367,13 @@ def search_immowelt_deals(
             if page > 1 and cur_page_urls and cur_page_urls == prev_page_urls:
                 break
             prev_page_urls = cur_page_urls
+
+            unseen_on_page = sum(
+                1 for u in cur_page_urls
+                if u not in seen_urls and (not exclude_set or u not in exclude_set)
+            )
+            # Results are sorted newest-first: if a full page has zero unseen URLs, deeper pages are also already seen.
+            stop_after_this_page = bool(exclude_set and len(cur_page_urls) >= 3 and unseen_on_page == 0)
 
             for link in expose_links:
                 raw_href = link["href"]
@@ -504,14 +685,17 @@ def search_immowelt_deals(
                 if len(results) >= max_results:
                     break
 
+            if stop_after_this_page:
+                break
+
     return results
 
 
 
 
-def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
+def fetch_immowelt_expose(url: str, use_cache: bool = True, allow_gateway: bool = True) -> Dict[str, Any]:
     """
-    Fetches comprehensive expose details for an Immowelt URL.
+    Fetches comprehensive expose details for an Immowelt URL (with 10-minute in-memory TTL cache).
     Parses embedded JSON state (__UFRN_LIFECYCLE_SERVERREQUEST__ / __UFRN_STORE__)
     to extract:
     - Full text description (main text + Lage + Weitere Infos / Garagen)
@@ -519,11 +703,36 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
     - Energy certificate (efficiency class, consumption in kWh, carrier, validity, type)
     - Hardfacts: purchase price, living space, rooms, year built, heating system.
     """
-    clean_url = url.split("?")[0]
+    clean_url = url.split("?")[0].rstrip("/")
+    cache_key = clean_url.lower()
+    can_cache = bool(use_cache and _is_unmocked_fetch())
+
+    if can_cache:
+        now_m = time.monotonic()
+        with _GATEWAY_LOCK:
+            cached = _EXPOSE_CACHE.get(cache_key)
+            if cached and now_m < cached[0]:
+                return copy.deepcopy(cached[1])
+
+    result = _fetch_immowelt_expose_uncached(clean_url, allow_gateway=allow_gateway)
+    if can_cache and isinstance(result, dict) and result.get("success"):
+        with _GATEWAY_LOCK:
+            if len(_EXPOSE_CACHE) >= _EXPOSE_CACHE_MAX:
+                oldest_k = next(iter(_EXPOSE_CACHE))
+                _EXPOSE_CACHE.pop(oldest_k, None)
+            _EXPOSE_CACHE[cache_key] = (time.monotonic() + _EXPOSE_CACHE_TTL_SEC, copy.deepcopy(result))
+    return result
+
+
+def _fetch_immowelt_expose_uncached(clean_url: str, allow_gateway: bool = True) -> Dict[str, Any]:
     expose_id = clean_url.split("/")[-1]
 
     try:
-        resp = fetch_immowelt_html(clean_url, timeout=12.0)
+        try:
+            resp = fetch_immowelt_html(clean_url, timeout=12.0, allow_gateway=allow_gateway)
+        except TypeError:
+            # Backward compatibility for 1- or 2-arg test mocks of fetch_immowelt_html
+            resp = fetch_immowelt_html(clean_url, timeout=12.0)
         if resp.status_code != 200:
             return {
                 "success": False,

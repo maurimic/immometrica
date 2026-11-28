@@ -124,11 +124,18 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
     t0 = time.time()
     try:
         from app.scrapers.immowelt import fetch_immowelt_expose, search_immowelt_deals
+        canary_use_gw = os.getenv("SCRAPER_CANARY_USE_GATEWAY", "1").strip().lower() not in ("0", "false", "no")
         iw_res = None
         for attempt in range(2):
             try:
-                iw_res = fetch_immowelt_expose(IMMOWELT_TEST_URL)
+                if canary_use_gw:
+                    iw_res = fetch_immowelt_expose(IMMOWELT_TEST_URL)
+                else:
+                    iw_res = fetch_immowelt_expose(IMMOWELT_TEST_URL, allow_gateway=False)
                 if iw_res.get("success") and float(iw_res.get("price") or 0) > 0 and float(iw_res.get("living_space") or 0) > 0:
+                    break
+                st_try = int(iw_res.get("status_code") or 0) if iw_res else 0
+                if st_try in (403, 404, 410, 429):
                     break
             except Exception:
                 pass
@@ -150,11 +157,16 @@ def run_canary_checks(force_notify: bool = False) -> Dict[str, Any]:
             err = iw_res.get("error") if iw_res else "Kaufpreis oder Wohnfläche konnten nicht extrahiert werden."
             level = "degraded" if st in [403, 429] else "critical"
 
-            # If it failed due to a bot-block (403), rate-limit (429) or dead URL (404/500), verify via search
+            # If it failed due to a bot-block (403), rate-limit (429) or dead URL (404/500), verify via single-page ETW search
             fallback_success = False
             if st in [403, 404, 429, 500, 502, 503] and os.getenv("TESTING") != "1":
                 try:
-                    fallback_deals = search_immowelt_deals(city="Dortmund", max_results=3)
+                    fallback_deals = search_immowelt_deals(
+                        city="Dortmund",
+                        max_results=3,
+                        property_type="Eigentumswohnung",
+                        max_pages=1,
+                    )
                     valid_fallback = [d for d in fallback_deals if float(d.get("purchase_price") or 0) > 0 and float(d.get("living_space") or 0) > 0]
                     if valid_fallback:
                         fallback_success = True

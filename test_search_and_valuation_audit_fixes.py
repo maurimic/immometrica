@@ -511,6 +511,100 @@ class TestSearchAndValuationAuditFixes(unittest.TestCase):
         finally:
             delete_search_profile(pid)
 
+    def test_08_scraperapi_cost_protection_and_caching(self):
+        from app.scrapers.immowelt import (
+            fetch_immowelt_expose,
+            fetch_immowelt_html,
+            reset_immowelt_gateway_state,
+            search_immowelt_deals,
+        )
+        from app.image_analyst import analyze_property_images
+        from app.portal_health import run_canary_checks
+
+        reset_immowelt_gateway_state()
+        valid_html = (
+            '<html><script>window["__UFRN_LIFECYCLE_SERVERREQUEST__"]=JSON.parse('
+            '"{\\"app_demand_referral_cldp\\":{\\"data\\":{\\"classified\\":{\\"title\\":\\"Top ETW\\",'
+            '\\"rawData\\":{\\"Preis\\":145000,\\"Wohnflaeche\\":62,\\"Raeume\\":2},'
+            '\\"domains\\":{\\"medias\\":{\\"images\\":[{\\"url\\":\\"https://mms.immowelt.de/a/1.jpg\\"}]}},'
+            '\\"sections\\":{\\"hardFacts\\":{\\"title\\":\\"ETW\\",\\"facts\\":[]},\\"location\\":{\\"address\\":{\\"city\\":\\"Dortmund\\",\\"zipCode\\":\\"44137\\"}}}}}}}");'
+            "</script></html>"
+        )
+
+        # 1. Direct-first (0 credits) succeeds without touching ScraperAPI
+        with patch.dict(os.environ, {"SCRAPER_API_KEY": "test_key_123", "SCRAPER_DIRECT_FIRST": "1", "SCRAPER_PREMIUM_MODE": "fallback"}):
+            with patch("app.scrapers.immowelt.requests.get") as mock_req:
+                mock_req.return_value = MagicMock(status_code=200, text=valid_html, headers={})
+                r = fetch_immowelt_html("https://www.immowelt.de/expose/11111111-1111-1111-1111-111111111111")
+                self.assertEqual(r.status_code, 200)
+                self.assertEqual(mock_req.call_count, 1)
+                self.assertNotIn("scraperapi.com", mock_req.call_args.args[0])
+
+        # 2. Direct 403 -> Standard ScraperAPI (NO premium=true) succeeds -> NEVER calls premium=true
+        reset_immowelt_gateway_state()
+        called_urls = []
+        def _fake_gw(u, **kwargs):
+            called_urls.append(u)
+            if "scraperapi.com" not in u:
+                return MagicMock(status_code=403, text="DataDome", headers={"x-datadome": "protected"})
+            if "premium=true" in u:
+                raise AssertionError("Should not escalate to premium=true when standard succeeds")
+            return MagicMock(status_code=200, text=valid_html, headers={})
+
+        with patch.dict(os.environ, {"SCRAPER_API_KEY": "test_key_123", "SCRAPER_DIRECT_FIRST": "1", "SCRAPER_PREMIUM_MODE": "fallback"}):
+            with patch("app.scrapers.immowelt.requests.get", side_effect=_fake_gw):
+                r2 = fetch_immowelt_html("https://www.immowelt.de/expose/22222222-2222-2222-2222-222222222222")
+                self.assertEqual(r2.status_code, 200)
+                self.assertEqual(len(called_urls), 2)
+                self.assertNotIn("premium=true", called_urls[1])
+
+        # 3. 10-min TTL expose cache prevents repeat HTTP hits for identical URL
+        reset_immowelt_gateway_state()
+        with patch.dict(os.environ, {"SCRAPER_API_KEY": "", "SCRAPER_DIRECT_FIRST": "1"}):
+            with patch("app.scrapers.immowelt.requests.get", return_value=MagicMock(status_code=200, text=valid_html, headers={})) as mock_req2:
+                ex1 = fetch_immowelt_expose("https://www.immowelt.de/expose/33333333-3333-3333-3333-333333333333")
+                ex2 = fetch_immowelt_expose("https://www.immowelt.de/expose/33333333-3333-3333-3333-333333333333")
+                self.assertTrue(ex1["success"])
+                self.assertEqual(ex1["price"], ex2["price"])
+                self.assertEqual(mock_req2.call_count, 1)
+
+        # 4. Pagination stops on page 1 when all newest-sorted listings are already in exclude_urls
+        reset_immowelt_gateway_state()
+        search_html = "".join(
+            f'<div><a href="/expose/00000000-0000-0000-0000-00000000000{i}">2-Zi ETW</a><span>120.000 €</span><span>60 m²</span><span>44137 Dortmund</span></div>'
+            for i in range(1, 5)
+        )
+        seen_urls = {f"https://www.immowelt.de/expose/00000000-0000-0000-0000-00000000000{i}" for i in range(1, 5)}
+        with patch("app.scrapers.immowelt.fetch_immowelt_html", return_value=MagicMock(status_code=200, text=search_html, headers={})) as mock_srch:
+            deals = search_immowelt_deals("Dortmund", property_type="Eigentumswohnung", exclude_urls=seen_urls, max_results=20)
+            self.assertEqual(deals, [])
+            self.assertEqual(mock_srch.call_count, 1)
+
+        # 5. Vision analysis must NOT re-fetch gallery when >=2 real photos and full description already exist (or _expose_fetched_live=True)
+        with patch("app.image_analyst.extract_gallery_images") as mock_gal, \
+             patch("app.image_analyst.requests.get", return_value=MagicMock(status_code=404)):
+            prop_ok = {
+                "id": 999,
+                "portal_url": "https://www.immowelt.de/expose/44444444-4444-4444-4444-444444444444",
+                "source_portal": "Immowelt",
+                "living_space": 65.0,
+                "gallery_images": json.dumps(["https://mms.immowelt.de/a/1.jpg", "https://mms.immowelt.de/a/2.jpg", "https://mms.immowelt.de/a/3.jpg"]),
+                "description": "Vollständiger Exposé-Text aus dem Portal mit Küche, Bad, Balkon und vermieteter Wohnung in ruhiger Lage.",
+            }
+            analyze_property_images(prop_ok, full_description=prop_ok["description"])
+            self.assertEqual(mock_gal.call_count, 0)
+
+        # 6. Canary fallback passes single-category single-page limit
+        with patch("app.scrapers.kleinanzeigen.scrape_kleinanzeigen_deals", return_value=[]), \
+             patch("app.scrapers.immoscout.search_immoscout_deals", return_value=[]), \
+             patch("app.scrapers.immowelt.fetch_immowelt_expose", return_value={"success": False, "status_code": 403, "error": "Blocked"}), \
+             patch("app.scrapers.immowelt.search_immowelt_deals", return_value=[{"purchase_price": 150000, "living_space": 60}]) as mock_can_iw, \
+             patch.dict(os.environ, {"TESTING": "0"}), \
+             patch("app.portal_health.send_system_telegram_alert", return_value={"success": True}):
+            run_canary_checks(force_notify=False)
+            self.assertEqual(mock_can_iw.call_args.kwargs.get("property_type"), "Eigentumswohnung")
+            self.assertEqual(mock_can_iw.call_args.kwargs.get("max_pages"), 1)
+
 
 if __name__ == "__main__":
     try:
