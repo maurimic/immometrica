@@ -3,6 +3,7 @@ ImmoMetrica Valuation & Benchmark Engine (Sprengnetter & Market Data Model)
 Computes estimated market value, regional benchmark rents, and market deviations.
 """
 
+import re
 from typing import Dict, Any, List, Optional
 
 # Regional baseline benchmarks for German metropolitan and secondary cities
@@ -79,9 +80,18 @@ def get_city_benchmark(
     if not city and not postal_code:
         return {**DEFAULT_BENCHMARK, "city": "Unbekannt", "state": "Deutschland"}
 
-    for known_city, data in CITY_BENCHMARKS.items():
-        if city and (known_city.lower() in city.lower() or city.lower() in known_city.lower()):
-            return {**data, "city": known_city}
+    city_clean = (city or "").strip().lower()
+    if city_clean:
+        if city_clean in ("frankfurt", "frankfurt/main", "frankfurt a. m.", "frankfurt a.m.", "frankfurt main"):
+            return {**CITY_BENCHMARKS["Frankfurt am Main"], "city": "Frankfurt am Main"}
+        # 1. Exact key match first
+        for known_city, data in CITY_BENCHMARKS.items():
+            if known_city.lower() == city_clean:
+                return {**data, "city": known_city}
+        # 2. Word-boundary match ordered longest first (prevents short substrings colliding)
+        for known_city, data in sorted(CITY_BENCHMARKS.items(), key=lambda kv: -len(kv[0])):
+            if re.search(rf"(?<![a-zäöüß]){re.escape(known_city.lower())}(?![a-zäöüß])", city_clean):
+                return {**data, "city": known_city}
 
     # Dynamically resolve state via PLZ + city instead of hardcoding NRW
     resolved_state = state if state and state != "Deutschland" else "Deutschland"
@@ -133,6 +143,8 @@ def get_mietspiegel_size_benchmark(
     is_package_deal: bool = False,
     unit_count: int = 1,
     units: Optional[List[Dict[str, Any]]] = None,
+    postal_code: Optional[str] = None,
+    state: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Computes German Mietspiegel rent range in €/m² tailored to apartment size category:
@@ -143,7 +155,7 @@ def get_mietspiegel_size_benchmark(
     For multi-unit properties (both Mehrfamilienhaus and package deals), evaluates each
     individual unit surface if available, or falls back to average unit size (living_space / unit_count).
     """
-    bm = get_city_benchmark(city)
+    bm = get_city_benchmark(city, postal_code=postal_code, state=state)
     base_rent = bm["avg_sqm_rent"]
     safe_unit_count = max(1, int(unit_count or 1))
     valid_units = [u for u in (units or []) if isinstance(u, dict) and float(u.get("sqm") or 0) > 0]
@@ -242,15 +254,18 @@ def evaluate_property_valuation(
         # Altbau / älterer Bestand
         age_factor = 1.08 if "altbau" in safe_condition.lower() or safe_year_built < 1930 else 0.88
 
-    # Condition multiplier
+    # Condition multiplier (check negative/unrenovated states BEFORE positive 'saniert'/'renoviert' substrings!)
     cond_factor = 1.0
     cond_lower = safe_condition.lower()
-    if "erstbezug" in cond_lower or "neuwertig" in cond_lower:
-        cond_factor = 1.20
-    elif "saniert" in cond_lower or "renoviert" in cond_lower:
-        cond_factor = 1.10
-    elif "renovierungsbedürftig" in cond_lower or "sanierungsbedürftig" in cond_lower:
+    if any(k in cond_lower for k in (
+        "unsaniert", "unrenoviert", "renovierungsbedürftig", "sanierungsbedürftig",
+        "sanierungsstau", "entkernt", "abriss", "handwerker", "nicht saniert", "nicht renoviert",
+    )):
         cond_factor = 0.75
+    elif "erstbezug" in cond_lower or "neuwertig" in cond_lower or "kernsaniert" in cond_lower or "vollsaniert" in cond_lower:
+        cond_factor = 1.20
+    elif re.search(r"\b(?:saniert|renoviert|modernisiert)\b", cond_lower):
+        cond_factor = 1.10
     elif "gepflegt" in cond_lower:
         cond_factor = 1.00
 
@@ -259,10 +274,13 @@ def evaluate_property_valuation(
 
     # Property type adjustment
     type_factor = 1.0
-    if "mehrfamilienhaus" in safe_property_type.lower():
+    pt_lower = safe_property_type.lower()
+    if any(k in pt_lower for k in ("mehrfamilienhaus", "zinshaus", "renditehaus", "mfh")):
         type_factor = 0.92 # MFH trade at slightly lower €/sqm
-    elif "einfamilienhaus" in safe_property_type.lower():
+    elif any(k in pt_lower for k in ("einfamilienhaus", "doppelhaushälfte", "doppelhaus", "reihenhaus", "bungalow", "stadthaus")):
         type_factor = 1.12
+    elif "grundstück" in pt_lower:
+        type_factor = 0.25
 
     estimated_sqm_value = round(base_sqm_price * age_factor * cond_factor * rented_factor * type_factor, 2)
     estimated_total_value = round(estimated_sqm_value * living_space, 2)

@@ -93,12 +93,25 @@ def resolve_kleinanzeigen_location_id(
                     if city_key:
                         from app.geo_resolver import resolve_location_and_tax
                         expected_state = resolve_location_and_tax(city=city_clean).get("state", "").lower()
+                        alias_base = CITY_SLUG_ALIASES.get(city_key, "").replace("-", " ").strip().lower()
                         # 1. Exact base name match + state match (distinguishes Essen NRW vs Essen Oldenburg)
                         for loc_id, label in candidates:
                             base = label.split(" - ")[0].strip().lower()
                             if base == city_key and (not expected_state or expected_state in label.lower()):
                                 _LOCATION_ID_CACHE[cache_key] = loc_id
                                 return loc_id
+                        # 1b. Prefix / Alias + state match (distinguishes "Frankfurt" / "Frankfurt am Main - Hessen" vs "Frankfurt (Oder) - Brandenburg")
+                        if expected_state:
+                            for loc_id, label in candidates:
+                                base = label.split(" - ")[0].strip().lower()
+                                lbl_low = label.lower()
+                                if expected_state in lbl_low and (
+                                    base.startswith(city_key + " ")
+                                    or base.startswith(city_key + " (")
+                                    or (alias_base and all(tok in base for tok in alias_base.split()))
+                                ):
+                                    _LOCATION_ID_CACHE[cache_key] = loc_id
+                                    return loc_id
                         # 2. Exact base name match regardless of state
                         for loc_id, label in candidates:
                             base = label.split(" - ")[0].strip().lower()
@@ -120,7 +133,7 @@ def clean_city_slug(city: str) -> str:
     c = city.lower().strip()
     c = c.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
     c = re.sub(r"[^a-z0-9\-]", "-", c)
-    return c
+    return re.sub(r"-{2,}", "-", c).strip("-")
 
 
 def _build_kleinanzeigen_search_targets(property_type: str = "all") -> List[tuple]:
@@ -152,7 +165,7 @@ def scrape_kleinanzeigen_deals(
     """
     from app.calculator import calculate_cashflow
     from app.valuation import evaluate_property_valuation
-    from app.geo_resolver import is_within_search_radius, resolve_location_and_tax, resolve_city_coordinates
+    from app.geo_resolver import is_within_search_radius, resolve_location_and_tax, resolve_city_coordinates, normalize_district_city
     from app.availability import check_portal_url_live
     from app.scrapers.deal_fusion import normalize_portal_url
 
@@ -293,13 +306,26 @@ def scrape_kleinanzeigen_deals(
                 if price < 15000:
                     continue
 
-                # Extract living space & rooms
+                # Extract living space & rooms (prioritize structured fact tags over prose teasers so plot m² isn't grabbed first)
                 sqm = 0.0
                 rooms = 2.0
-                for p_tag in art.find_all("p"):
+                p_tags = art.find_all("p")
+                def _is_fact_p(p_el):
+                    cls_str = " ".join(p_el.get("class") or []).lower()
+                    txt_str = p_el.text.strip()
+                    return (
+                        "tags" in cls_str
+                        or "font-strong" in cls_str
+                        or ("zi." in txt_str.lower() and "m²" in txt_str.lower() and len(txt_str) <= 60)
+                    )
+                ordered_p_tags = sorted(p_tags, key=lambda el: (0 if _is_fact_p(el) else 1))
+                for p_tag in ordered_p_tags:
                     t = p_tag.text.strip()
                     if sqm <= 0:
-                        sqm_match = re.search(r"([\d,\.]+)\s*m²", t)
+                        t_low_p = t.lower()
+                        if cat_code != "c207" and not _is_fact_p(p_tag) and any(w in t_low_p for w in ["grundstück", "baugrundstück", "bauplatz", "gartenfläche"]):
+                            continue
+                        sqm_match = re.search(r"([\d,\.]+)\s*m²(?!\s*(?:grund|bauland))", t, re.IGNORECASE)
                         if sqm_match:
                             raw_sqm = sqm_match.group(1)
                             try:
@@ -356,23 +382,26 @@ def scrape_kleinanzeigen_deals(
                     if len(cand_city) > 2:
                         extracted_city = cand_city
 
-                street_match = re.search(r"\b([A-ZÄÖÜa-zäöüß\-]+(?:straße|str\.|weg|gasse|platz|allee|ring))\s*(\d+[a-zA-Z]?)?\b", card_text, re.IGNORECASE)
+                street_match = re.search(r"\b([A-ZÄÖÜa-zäöüß\-]{4,}(?:straße|str\.|weg|gasse|platz|allee|ring))\s*(\d+[a-zA-Z]?)?\b", card_text, re.IGNORECASE)
                 if street_match:
                     st_name = street_match.group(1).strip()
-                    st_nr = street_match.group(2).strip() if street_match.group(2) else ""
-                    extracted_street = f"{st_name} {st_nr}".strip()
+                    st_low = st_name.lower()
+                    if st_low not in {
+                        "stellplatz", "tiefgaragenstellplatz", "duplexfahrzeugstellplatz", "duplexstellplatz",
+                        "parkplatz", "bauplatz", "spielplatz", "sportplatz", "ausbauplatz", "abstellplatz",
+                    }:
+                        st_nr = street_match.group(2).strip() if street_match.group(2) else ""
+                        extracted_street = f"{st_name} {st_nr}".strip()
 
                 search_city_clean = (city or extracted_city or plz_clean or "").strip().capitalize()
                 resolved_city = extracted_city or search_city_clean
                 combined_card = f"{title} {card_text}".lower()
 
-                if city and extracted_city and city.lower().strip() in extracted_city.lower() and extracted_city.lower() != city.lower().strip():
-                    district_note = extracted_city
+                district_note = None
+                if city and extracted_city:
+                    resolved_city, district_note = normalize_district_city(city, extracted_city, extracted_plz or plz_clean)
+                elif not extracted_city:
                     resolved_city = search_city_clean
-                else:
-                    district_note = None
-                    if not extracted_city:
-                        resolved_city = search_city_clean
 
                 resolved_plz = extracted_plz or plz_clean or ""
                 in_radius, _ = is_within_search_radius(
@@ -397,21 +426,24 @@ def scrape_kleinanzeigen_deals(
                 else:
                     resolved_address = f"Zentrum / Mikrolage, {resolved_plz} {resolved_city}".strip()
 
-                # Property type
+                # Property type (check houses/MFH/ETW BEFORE Grundstück so EFH on a plot isn't misclassified as bare land)
                 detected_prop_type = "Grundstück" if cat_code == "c207" else ("Einfamilienhaus" if cat_code == "c208" else "Eigentumswohnung")
                 detected_bldg_type = "Grundstück" if cat_code == "c207" else ("Haus" if cat_code == "c208" else "Etagenwohnung")
-                if any(k in combined_card for k in ["grundstück", "baugrundstück", "bauplatz"]):
-                    detected_prop_type = "Grundstück"
-                    detected_bldg_type = "Grundstück"
-                elif any(k in combined_card for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
+                if any(k in combined_card for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh", "wohn- und geschäftshaus"]):
                     detected_prop_type = "Mehrfamilienhaus"
                     detected_bldg_type = "Mehrfamilienhaus"
-                elif any(k in combined_card for k in ["einfamilienhaus", "doppelhaushälfte", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus", "efh"]):
+                elif any(k in combined_card for k in ["einfamilienhaus", "doppelhaushälfte", "doppelhaus", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus", "efh"]):
                     detected_prop_type = "Einfamilienhaus"
                     detected_bldg_type = "Haus"
                 elif any(k in combined_card for k in ["wohnungspaket", "zwei wohnungen", "2 wohnungen", "immobilienpaket", "etw-paket"]):
                     detected_prop_type = "Wohnungspaket (ETW)"
                     detected_bldg_type = "Etagenwohnung"
+                elif cat_code == "c207" or (
+                    any(k in combined_card for k in ["grundstück", "baugrundstück", "bauplatz"])
+                    and not any(k in combined_card for k in ["wohnung", "etw", "maisonette", "penthouse", "einfamilienhaus", "haus", "mehrfamilienhaus"])
+                ):
+                    detected_prop_type = "Grundstück"
+                    detected_bldg_type = "Grundstück"
 
                 import zlib
                 url_seed = zlib.crc32(full_url.encode("utf-8"))
@@ -428,11 +460,10 @@ def scrape_kleinanzeigen_deals(
                 prop_lng = round(prop_lng + j_lng, 5)
 
                 eff_sqm = sqm if sqm > 0 else 50.0
-                benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=detected_prop_type)
+                benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=detected_prop_type, postal_code=resolved_plz)
                 expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
                 expected_rent = round(eff_sqm * expected_rent_per_sqm, 2) if detected_prop_type != "Grundstück" else 0.0
-                title_low = title.lower()
-                is_rented = 1 if ("vermietet" in title_low and "unvermietet" not in title_low and "nicht vermietet" not in title_low) else 0
+                is_rented = 1 if ("vermietet" in combined_card and "unvermietet" not in combined_card and "nicht vermietet" not in combined_card) else 0
                 current_rent = 0.0
                 gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
 
@@ -446,7 +477,7 @@ def scrape_kleinanzeigen_deals(
                 )
                 monthly_cashflow = cf.get("monthly_cashflow", 0.0)
 
-                is_private = 1 if ("provisionsfrei" in title.lower() or "privat" in title.lower()) else 0
+                is_private = 1 if ("provisionsfrei" in combined_card or "privatverkauf" in combined_card or "von privat" in combined_card or "ohne provision" in combined_card) else 0
                 comm_pct = 0.0 if is_private else 3.57
 
                 tags = ["Live Scraped", "Kleinanzeigen", resolved_state]

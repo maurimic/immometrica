@@ -31,6 +31,36 @@ def scrape_live_deals_kleinanzeigen(city: str, query: str = "", max_results: int
     return scrape_kleinanzeigen_deals(city=city, query=query, max_results=max_results)
 
 
+def matches_property_type(requested_type: str, candidate_type: str) -> bool:
+    """Unified property type matcher across scrapers, Search Agent, and Stage 4 audit."""
+    pt_req = str(requested_type or "all").lower().strip()
+    if not pt_req or pt_req == "all":
+        return True
+    pt_cand = str(candidate_type or "").lower().strip()
+    if not pt_cand:
+        return True
+
+    apt_terms = ("wohnung", "etw", "apartment", "maisonette", "penthouse", "loft", "dachgeschoss", "erdgeschoss", "souterrain")
+    mfh_terms = ("mehrfamilienhaus", "mfh", "zinshaus", "renditehaus", "wohn- und geschäftshaus", "anlageobjekt")
+    efh_terms = ("einfamilienhaus", "efh", "doppelhaushälfte", "doppelhaus", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus")
+    land_terms = ("grundstück", "baugrundstück", "bauplatz", "bauland")
+
+    if any(t in pt_req for t in ("grundst", "plot", "land")):
+        return any(t in pt_cand for t in land_terms)
+    if any(t in pt_req for t in ("mehrfamilien", "mfh", "zinshaus", "renditehaus")):
+        return any(t in pt_cand for t in mfh_terms)
+    if any(t in pt_req for t in ("einfamilien", "efh", "doppelhaus", "reihenhaus")):
+        return any(t in pt_cand for t in efh_terms) or pt_cand == "haus"
+    if pt_req in ("haus", "house"):
+        return any(t in pt_cand for t in efh_terms) or any(t in pt_cand for t in mfh_terms) or "haus" in pt_cand
+    if any(t in pt_req for t in ("wohnung", "etw", "apartment", "maisonette", "penthouse")):
+        if any(t in pt_cand for t in land_terms) or any(t in pt_cand for t in mfh_terms) or any(t in pt_cand for t in efh_terms):
+            return False
+        return any(t in pt_cand for t in apt_terms)
+
+    return pt_req in pt_cand or pt_cand in pt_req
+
+
 def scrape_multi_portal_deals(
     city: str,
     query: str = "",
@@ -69,12 +99,8 @@ def scrape_multi_portal_deals(
             return False
 
         if property_type and property_type.lower() != "all":
-            pt_req = property_type.lower().strip()
-            pt_deal = str(d.get("property_type") or "").lower()
-            if pt_req not in pt_deal and pt_deal not in pt_req:
-                # Allow Mehrfamilienhaus / Haus overlap cleanly if portal returned generic Haus
-                if not ("mehrfamilien" in pt_req and "haus" in pt_deal):
-                    return False
+            if not matches_property_type(property_type, str(d.get("property_type") or "")):
+                return False
 
         if max_price is not None and max_price > 0 and price > max_price:
             return False
@@ -99,6 +125,8 @@ def scrape_multi_portal_deals(
             from app.valuation import get_mietspiegel_size_benchmark, evaluate_property_valuation
             sqm = float(d.get("living_space") or 0.0)
             deal_city = d.get("city") or city
+            deal_plz = d.get("postal_code") or postal_code
+            deal_state = d.get("state")
             cur_rent = float(d.get("current_rent") or 0.0)
             is_rented_flag = bool(d.get("is_rented"))
             act_yield = round(((cur_rent * 12.0) / price) * 100.0, 2) if (is_rented_flag and cur_rent > 0 and price > 0) else 0.0
@@ -106,20 +134,24 @@ def scrape_multi_portal_deals(
             # 1. Erwartete Benchmark-Rendite
             exp_rent = float(d.get("expected_rent") or 0.0)
             if exp_rent <= 0 and price > 0 and sqm > 0:
-                val = evaluate_property_valuation(city=deal_city, living_space=sqm, purchase_price=price)
+                val = evaluate_property_valuation(city=deal_city, living_space=sqm, purchase_price=price, postal_code=deal_plz, state=deal_state)
                 exp_rent = float(val.get("expected_rent_monthly") or 0.0)
             expected_yield = round(((exp_rent * 12.0) / price) * 100.0, 2) if price > 0 else 0.0
 
             # 2. Größenadjustierte Mietspiegel-Rendite (Mietspiegel-Schutz)
             mietspiegel_size_yield = 0.0
             if price > 0 and sqm > 0:
-                ms = get_mietspiegel_size_benchmark(city=deal_city, living_space=sqm)
+                ms = get_mietspiegel_size_benchmark(city=deal_city, living_space=sqm, postal_code=deal_plz, state=deal_state)
                 ms_monthly = float(ms.get("expected_sqm_rent") or 0.0) * sqm
                 mietspiegel_size_yield = round(((ms_monthly * 12.0) / price) * 100.0, 2)
 
             yb = (yield_basis or "any").lower()
             if yb == "actual":
-                eff_yield = act_yield
+                # Keep rented card-teaser listings whose exact EUR rent is only revealed inside the full exposé
+                if is_rented_flag and cur_rent <= 0:
+                    eff_yield = max(act_yield, float(d.get("gross_yield") or 0.0), expected_yield)
+                else:
+                    eff_yield = act_yield
             elif yb == "potential":
                 eff_yield = max(expected_yield, mietspiegel_size_yield)
             else:  # "any" (Standard): Maximum aus Ist-Rendite, erwarteter Benchmark-Rendite und Mietspiegel-Rendite
@@ -193,8 +225,9 @@ def scrape_multi_portal_deals(
             if i < len(p_list):
                 all_raw_deals.append(p_list[i])
 
-    # Fallback to Kleinanzeigen alone if other portals were empty
-    if not all_raw_deals:
+    # Fallback only if Kleinanzeigen was requested AND failed/errored earlier (never override explicit portal filter)
+    kleinanzeigen_requested = any("kleinanzeigen" in p for p in target_portals)
+    if not all_raw_deals and kleinanzeigen_requested and "kleinanzeigen" not in portal_deals_dict:
         try:
             raw_k = scrape_kleinanzeigen_deals(
                 city=city,

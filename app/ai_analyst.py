@@ -173,10 +173,10 @@ def _should_treat_rent_as_annual(
         return True
     if is_global_annual and not has_monthly:
         return True
-    # Plausibilitäts-Wächter: > 30 €/m² bei gleichzeitig realistischer Monatsmiete nach ÷ 12 (3,0–25,0 €/m²)
-    if sqm and sqm > 0 and (amount / sqm) > 30.0:
+    # Plausibilitäts-Wächter: >= 28 €/m² bei gleichzeitig realistischer Monatsmiete nach ÷ 12 (2,2–25,0 €/m²)
+    if sqm and sqm > 0 and (amount / sqm) >= 28.0:
         monthly_sqm = (amount / 12.0) / sqm
-        if 3.0 <= monthly_sqm <= 25.0 and not has_monthly:
+        if 2.2 <= monthly_sqm <= 25.0 and not has_monthly:
             return True
     return False
 
@@ -602,18 +602,21 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         extracted_rent = stated_total_monthly
         rent_source = stated_total_src or "EXPOSE_STATED_RENT"
 
-    # 1. Warmmiete mit Nebenkosten-Aufschlüsselung
+    # 1. Warmmiete mit Nebenkosten-Aufschlüsselung (Hausgeld/Wohngeld/Rücklage ausschließen!)
     if not extracted_rent:
         warm_nk_patterns = [
             rf'zu\s*{num_pat}\s*(?:€|euro)?\s*inkl\.?\s*{num_pat}\s*(?:€|euro)?\s*(?:nebenkosten|betriebskosten|nk)[^\n\r]*vermietet',
             rf'vermietet\s*(?:zu|für)\s*{num_pat}\s*(?:€|euro)?\s*inkl\.?\s*{num_pat}\s*(?:€|euro)?\s*(?:nebenkosten|betriebskosten|nk)',
             rf'{num_pat}\s*(?:€|euro)?\s*(?:warm|brutto)\s*(?:inkl\.?|davon)\s*{num_pat}\s*(?:€|euro)?\s*(?:nebenkosten|betriebskosten|nk)',
             rf'(?:warmmiete|bruttomiete|pauschalmiete)[^\d\n\r]*{num_pat}\s*(?:€|euro)?[^\n\r]*(?:nebenkosten|betriebskosten|nk)[^\d\n\r]*{num_pat}\s*(?:€|euro)?',
-            rf'{num_pat}\s*(?:€|euro)?\s*inkl\.?\s*{num_pat}\s*(?:€|euro)?\s*(?:nebenkosten|betriebskosten|nk)'
+            rf'(?<!hausgeld\s)(?<!wohngeld\s){num_pat}\s*(?:€|euro)?\s*inkl\.?\s*{num_pat}\s*(?:€|euro)?\s*(?:nebenkosten|betriebskosten|nk)'
         ]
         for w_pat in warm_nk_patterns:
             w_match = re.search(w_pat, combined_text)
             if w_match:
+                pre_ctx = combined_text[max(0, w_match.start() - 45):w_match.end()].lower()
+                if any(bad in pre_ctx for bad in ("hausgeld", "wohngeld", "rücklage", "instandhaltungsrücklage", "wirtschaftsplan", "kaufpreis")):
+                    continue
                 warm_val = _clean_german_number(w_match.group(1))
                 nk_val = _clean_german_number(w_match.group(2))
                 if warm_val and nk_val and warm_val > nk_val:
@@ -623,23 +626,26 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
                         rent_source = "EXPOSE_STATED_COLD"
                         break
 
-    # 2. Direkte Kaltmieten-Patterns (mit per-Anno- & Plausibilitäts-Prüfung!)
+    # 2. Direkte Kaltmieten-Patterns (mit per-Anno-, Negations- & Plausibilitäts-Prüfung!)
     if not extracted_rent:
         rent_patterns = [
             (rf'{num_pat}\s*(?:€|euro)\s*kalt(?:\s*miet)?', "EXPOSE_STATED_COLD"),
             (rf'(?:aktuelle\s+|monatliche\s+)?kaltmiete[^\d\n\r]{{0,25}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
-            (rf'vermietet\s*für\s*(?:monatlich\s*)?{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
-            (rf'monatlich\s*{num_pat}\s*(?:€|euro)\s*vermietet', "EXPOSE_STATED_RENT"),
-            (rf'aktuell\s*vermietet\s*für\s*{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
+            (rf'(?<!un)(?<!nicht\s)\bvermietet\s*für\s*(?:monatlich\s*)?{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
+            (rf'monatlich\s*{num_pat}\s*(?:€|euro)\s*(?<!un)(?<!nicht\s)\bvermietet', "EXPOSE_STATED_RENT"),
+            (rf'aktuell\s*(?<!nicht\s)\bvermietet\s*für\s*{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
             (rf'ist-kaltmiete[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
             (rf'nettokaltmiete[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
             (rf'mieteinnahmen\s*(?:monatlich|im\s*monat|pro\s*monat)[^\d\n\r]{{0,20}}{num_pat}\s*(?:€|euro)', "EXPOSE_STATED_RENT"),
-            (rf'vermietet\s*(?:zu|an[^\n\r]+zu)\s*{num_pat}\s*(?:€|euro)?\s*(?:kalt|netto)?', "EXPOSE_STATED_RENT")
+            (rf'(?<!un)(?<!nicht\s)\bvermietet\s*(?:zu|an[^\n\r]+zu)\s*{num_pat}\s*(?:€|euro)?\s*(?:kalt|netto)', "EXPOSE_STATED_RENT")
         ]
 
         for pat, src_tag in rent_patterns:
             match = re.search(pat, combined_text)
             if match:
+                pre_ctx = combined_text[max(0, match.start() - 35):match.start()].lower()
+                if any(neg in pre_ctx for neg in ("hausgeld", "wohngeld", "kaution", "rücklage", "nicht ", "soll ", "mögl")):
+                    continue
                 val = _clean_german_number(match.group(1))
                 ctx_slice = combined_text[max(0, match.start() - 50):min(len(combined_text), match.end() + 50)]
                 is_ann = _should_treat_rent_as_annual(val or 0.0, prop_sqm, ctx_slice, is_global_annual)
@@ -690,10 +696,17 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         extracted_rent = round((purchase_price * (stated_yield / 100.0)) / 12.0, 2)
         rent_source = "DERIVED_FROM_STATED_YIELD"
 
-    # Kaufpreis-Extraktion aus Fließtext (zur Diskrepanz-Erkennung)
+    # Kaufpreis-Extraktion aus Fließtext (zur Diskrepanz-Erkennung — Stellplatz/Garage/Teilpreise ausschließen!)
     stated_purchase_price_in_text = None
-    kp_matches = re.finditer(r"(?:kaufpreis|angebotspreis|gesamtpreis|festpreis)\s*[:=]?\s*([\d\.]+)(?:,\d{1,2}|,-)?\s*(?:€|euro)", combined_text)
+    kp_matches = re.finditer(r"(?:kaufpreis|angebotspreis|gesamtkaufpreis|gesamtpreis|festpreis)\s*(?:des\s+hauses|der\s+wohnung|für\s+das\s+objekt)?\s*[:=]?\s*([\d\.]+)(?:,\d{1,2}|,-)?\s*(?:€|euro)", combined_text)
     for m in kp_matches:
+        around_ctx = combined_text[max(0, m.start() - 35):min(len(combined_text), m.end() + 45)].lower()
+        match_slice = m.group(0).lower()
+        if any(skip in around_ctx or skip in match_slice for skip in (
+            "stellplatz", "tiefgarage", "garage", "carport", "duplex", "zzgl", "zuzüglich",
+            "anteil", "kaution", "rücklage", "erbbaurecht", "makler", "modernisier", "sanierung", "pro m²", "/m²"
+        )):
+            continue
         raw_val = m.group(1).replace(".", "")
         try:
             val = float(raw_val)
@@ -703,21 +716,22 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         except ValueError:
             pass
 
-    # Vermietungsstatus (inkl. Teilleerstand bei MFH!)
+    # Vermietungsstatus (inkl. Teilleerstand & Negations-Schutz bei 'kein Leerstand'!)
     is_rented = False
     has_rented_phrase = bool(
-        re.search(r"\b(?:vermietete\w*|ist\s+vermietet|ungekündigt\s+vermietet|langjährig\s+vermietet|solide\s+vermietet|fest\s+vermietet)\b", combined_text)
+        re.search(r"(?<!un)(?<!nicht\s)\b(?:vermietete\w*|ist\s+vermietet|ungekündigt\s+vermietet|langjährig\s+vermietet|solide\s+vermietet|fest\s+vermietet)\b", combined_text)
         or re.search(r"\bseit\s+(?:\d{1,2}\s+jahren|\d{4})\s+(?:fest\s+|solide\s+|durchgehend\s+)?vermietet\b", combined_text)
-        or (re.search(r"\bvermietet\b", title_lower) and "unvermietet" not in title_lower and "nicht vermietet" not in title_lower)
+        or (re.search(r"(?<!un)\bvermietet\b", title_lower) and "unvermietet" not in title_lower and "nicht vermietet" not in title_lower)
     )
-    has_vacant_phrase = bool(re.search(r"\b(?:unvermietet|bezugsfrei|leerstand|leerstehend|sofort\s+frei|frei\s+werdend|nicht\s+vermietet|derzeit\s+leer)\b", combined_text))
+    cleaned_for_vacancy = re.sub(r"\b(?:kein(?:en|e)?|ohne)\s+leerstand\b", " ", combined_text)
+    has_vacant_phrase = bool(re.search(r"\b(?:unvermietet|bezugsfrei|leerstand|leerstehend|sofort\s+frei|frei\s+werdend|nicht\s+vermietet|derzeit\s+leer)\b", cleaned_for_vacancy))
     has_rented_units = len(extracted_units) >= 2 and any(u.get("is_rented") for u in extracted_units)
 
     if has_partial_vacancy or has_rented_units:
         is_rented = True
     elif has_rented_phrase and not has_vacant_phrase:
         is_rented = True
-    elif re.search(r"\bvermietet\b", combined_text) and not has_vacant_phrase:
+    elif re.search(r"(?<!un)\bvermietet\b", combined_text) and not re.search(r"\bnicht\s+vermietet\b", combined_text) and not has_vacant_phrase:
         is_rented = True
     elif extracted_rent is not None or stated_yield is not None:
         is_rented = True
@@ -854,35 +868,49 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
         except ValueError:
             pass
 
-    # Hausgeld (STRIKT nur Beträge vor € / Euro akzeptieren, NIEMALS m²-Flächen wie "70 m²"!)
+    # Hausgeld (STRIKT nur Beträge vor € / Euro akzeptieren, und Satz-Teilbeträge wie "davon X € Rücklage" nicht aufsummieren!)
     hausgeld = None
-    # 1. Check multi-unit lines like "Hausgeld Wohnung 1: 500,00 €" + "Hausgeld Wohnung 2: 700,00 €"
-    unit_hg_matches = re.findall(r"hausgeld\s*(?:wohnung|einheit|whg|etw)?\s*\d*[:\s]+(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(?:€|euro)", combined_text)
+    # 1. Check explicitly numbered multi-unit lines like "Hausgeld Wohnung 1: 500,00 €" + "Hausgeld Wohnung 2: 700,00 €"
+    unit_hg_matches = re.findall(r"hausgeld\s*(?:wohnung|einheit|whg|etw)\s*\d+[:\s]+(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(?:€|euro)", combined_text)
     if len(unit_hg_matches) >= 2:
         vals = [_clean_german_number(x) for x in unit_hg_matches]
         vals = [v for v in vals if v and 20.0 <= v <= 10000.0]
         if vals:
             hausgeld = round(sum(vals), 2)
     else:
-        # 2. Check full sentence containing "hausgeld"
-        hg_sentence = re.search(r"[^.\n\r]*hausgeld[^.\n\r]+", combined_text)
-        if hg_sentence:
-            sent = hg_sentence.group(0)
-            euro_amounts = re.findall(r"(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(?:€|euro)", sent)
-            parsed_hg = [_clean_german_number(x) for x in euro_amounts]
-            parsed_hg = [v for v in parsed_hg if v and 20.0 <= v <= 10000.0]
-            if parsed_hg:
-                hausgeld = round(sum(parsed_hg), 2)
+        # 2. Extract the primary single Hausgeld value right next to the keyword (no summing of 'davon'/'inkl.' breakdowns)
+        hg_direct = re.search(
+            r"(?:monatliches\s+|aktuelles\s+)?hausgeld(?:\s*\([^)]{0,40}\))?(?:\s*(?:beträgt|liegt\s+bei|ca\.?|monatlich))?[:\s]{0,12}(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(?:€|euro)",
+            combined_text,
+        )
+        if hg_direct:
+            val_hg = _clean_german_number(hg_direct.group(1))
+            if val_hg and 20.0 <= val_hg <= 10000.0:
+                hausgeld = round(val_hg, 2)
+        else:
+            hg_sentence = re.search(r"[^.\n\r]*hausgeld[^.\n\r]+", combined_text)
+            if hg_sentence:
+                sent = hg_sentence.group(0)
+                euro_amounts = re.findall(r"(\d+(?:\.\d{3})*(?:,\d{1,2})?)\s*(?:€|euro)", sent)
+                parsed_hg = [_clean_german_number(x) for x in euro_amounts]
+                parsed_hg = [v for v in parsed_hg if v and 20.0 <= v <= 10000.0]
+                if parsed_hg:
+                    hausgeld = round(parsed_hg[0], 2)
 
     # --------------------------------------------------------------------------
     # E. BAUSUBSTANZ & SANIERUNGSSTAND
     # --------------------------------------------------------------------------
     is_kernsaniert = any(w in combined_text for w in ["kernsaniert", "erstbezug nach sanierung", "vollsaniert", "luxussaniert"])
-    is_renoviert = any(w in combined_text for w in ["renoviert", "modernisiert", "gepflegt", "bezugsfertig"]) and not is_kernsaniert
     needs_renovation = any(w in combined_text for w in [
         "renovierungsbedürftig", "sanierungsbedürftig", "sanierungsstau",
-        "handwerkerobjekt", "für bastler", "ausbaufähig", "entkernt", "renovieren!!!!"
+        "handwerkerobjekt", "für bastler", "ausbaufähig", "entkernt", "renovieren!!!!",
+        "unsaniert", "unrenoviert", "nicht saniert", "nicht renoviert",
     ])
+    is_renoviert = (
+        not is_kernsaniert
+        and not needs_renovation
+        and bool(re.search(r"(?<!un)(?<!nicht\s)\b(?:renoviert|modernisiert|gepflegt|bezugsfertig)\b", combined_text))
+    )
 
     windows_type = "Standard Doppelverglasung"
     if "3-fach" in combined_text or "dreifach" in combined_text:
@@ -897,19 +925,29 @@ def extract_listing_insights(text: str, details: Dict[str, Any], property_data: 
     elevator = "aufzug" in combined_text or "fahrstuhl" in combined_text or "lift" in combined_text
     balcony = "balkon" in combined_text or "terrasse" in combined_text or "loggia" in combined_text
 
-    is_erbbaurecht = "erbbaurecht" in combined_text or "erbbauzins" in combined_text
-    is_denkmalschutz = "denkmalschutz" in combined_text or "denkmalgeschützt" in combined_text
+    is_erbbaurecht = (
+        ("erbbaurecht" in combined_text or "erbbauzins" in combined_text or "erbpacht" in combined_text)
+        and not re.search(r"\b(?:kein(?:e[nmrs]?)?|ohne|nicht)\s+(?:im\s+)?(?:erbbaurecht|erbpacht|erbbauzins)\b", combined_text)
+    )
+    is_denkmalschutz = (
+        ("denkmalschutz" in combined_text or "denkmalgeschützt" in combined_text)
+        and not re.search(r"\b(?:kein(?:e[nmrs]?)?|ohne|nicht)\s+(?:im\s+)?denkmalschutz\b", combined_text)
+    )
 
+    is_single_apt_type = any(k in prop_type_lower for k in ("eigentumswohnung", "etagenwohnung", "maisonette", "penthouse", "loft", "erdgeschosswohnung", "dachgeschosswohnung"))
     inferred_unit_count = (
         len(extracted_units)
         if len(extracted_units) >= 2
         else (
             units_count
-            if (units_count and units_count >= 2 and ("mehrfamilienhaus" in prop_type_lower or "mfh" in combined_text or is_package_deal))
+            if (units_count and units_count >= 2 and (not is_single_apt_type) and ("mehrfamilienhaus" in prop_type_lower or "mfh" in title_lower or "zinshaus" in combined_text or is_package_deal))
             else (2 if ("zwei wohnungen" in combined_text or "2 wohnungen" in combined_text or "2 vermietete wohneinheiten" in combined_text) else 1)
         )
     )
-    is_mfh = ("mehrfamilienhaus" in prop_type_lower) or ("mfh" in combined_text) or (inferred_unit_count >= 3 and not is_package_deal)
+    is_mfh = (
+        any(k in prop_type_lower for k in ("mehrfamilienhaus", "mfh", "zinshaus", "renditehaus", "wohn- und geschäftshaus"))
+        or (not is_single_apt_type and (("mfh" in title_lower or "mehrfamilienhaus" in title_lower or (inferred_unit_count >= 2 and not is_package_deal))))
+    )
     breakdown_text = _build_package_breakdown_text(extracted_units) if len(extracted_units) >= 2 else None
 
     return {
@@ -1259,6 +1297,8 @@ def _merge_llm_into_insights(base_insights: Dict[str, Any], llm: Dict[str, Any],
     """
     merged = dict(base_insights)
     prop_sqm = float(property_data.get("living_space") or llm.get("total_living_space") or 0.0)
+    if float(property_data.get("living_space") or 0.0) <= 0 and prop_sqm > 0:
+        merged["total_living_space"] = prop_sqm
     is_global_annual = bool(base_insights.get("is_global_annual_rent")) or str(llm.get("rent_period_stated") or "").lower() == "annual"
 
     # Package / MFH multi-unit info
@@ -1682,6 +1722,18 @@ def estimate_capex_and_hidden_costs(
             ),
             "description": "Austausch älterer Thermen gegen moderne Brennwerttechnik nach GEG-Anforderung."
         })
+    elif "Ölheizung" in heating and not insights.get("is_kernsaniert") and year_built < 2005:
+        p_idx = vis_heat.get("photo_indices", []) if has_interior_vis else []
+        is_mfh_heat = bool(insights.get("is_mfh") or int(insights.get("unit_count_in_offer") or 1) >= 2)
+        items.append({
+            "title": "Ölheizungs-Umrüstung / GEG-Heizungserneuerung",
+            "amount": 18000.0 if is_mfh_heat else 12000.0,
+            "urgency": "HOCH" if insights.get("energy_class") in ["F", "G", "H"] else "MITTEL",
+            "source_type": "FOTO_BELEG" if p_idx else "EXPOSE_TEXT",
+            "photo_indices": p_idx,
+            "evidence_source": "📄 Laut Exposé-Text: Ölheizung verbaut – GEG-Austauschpflicht & Tankentsorgung bei Altgeräten prüfen.",
+            "description": "Mittelfristige Umrüstung der Öl-Heizanlage auf Wärmepumpe/Hybrid inkl. Entsorgung Öltank."
+        })
     elif "Nachtspeicher" in heating:
         p_idx = vis_heat.get("photo_indices", []) if has_interior_vis else []
         items.append({
@@ -1697,7 +1749,7 @@ def estimate_capex_and_hidden_costs(
             "description": "Nachtspeicherheizungen sind extrem ineffizient und mindern die Vermietbarkeit drastisch. Umbau auf moderne Wärmepumpen- oder Split-Systeme erforderlich."
         })
 
-    # 3. Fenster (Mit KI-Bildanalyse abgleichen, um Fehl-Schätzungen wie bei Baujahr < 1985 zu vermeiden!)
+    # 3. Fenster (Mit KI-Bildanalyse & isolierverglaster Bestandserhaltung abgleichen)
     win = insights.get("windows_type", "")
     vis_win = _find_visual_evidence(
         image_analysis, ["fenster", "verglasung", "rollladen"], "windows", ["fenster", "verglasung", "kunststoffrahmen"]
@@ -1711,6 +1763,7 @@ def estimate_capex_and_hidden_costs(
         and float(vis_win_cat.get("score") or 0.0) >= 7.0
         and not vis_win_item
     )
+    has_2fach_intact = ("2-fach" in win or "isolierverglast" in win.lower()) and not insights.get("needs_renovation") and insights.get("energy_class") not in ["G", "H"]
     if vis_win_item and float(vis_win_item.get("cost") or 0.0) > 0:
         p_idx = vis_win.get("photo_indices") or []
         items.append({
@@ -1725,7 +1778,7 @@ def estimate_capex_and_hidden_costs(
             ),
             "description": vis_win_item.get("description") or "Austausch älterer Fensterflügel gegen isolierte Wärmeschutzfenster."
         })
-    elif not vis_win_ok and ("Einfachverglasung" in win or (year_built < 1985 and not insights.get("is_kernsaniert") and "3-fach" not in win)):
+    elif not vis_win_ok and not has_2fach_intact and ("Einfachverglasung" in win or (year_built < 1985 and not insights.get("is_kernsaniert") and "3-fach" not in win)):
         cost = round(max(3, round(sqm / 18)) * 850.0, 2)
         if "Einfachverglasung" in win:
             src_type = "EXPOSE_TEXT"
@@ -1770,12 +1823,13 @@ def estimate_capex_and_hidden_costs(
         and any(k in str(vis_elec_cat.get("findings", "")).lower() for k in ["fi-schalter", "unterverteilung", "modern", "neu"])
     )
     if not insights.get("electrics_modern") and not vis_elec_modern and (year_built < 1985 or insights.get("needs_renovation")):
+        desc_txt_l = str(property_data.get("description") or "").lower()
         if vis_elec_photos:
             p_refs = ", ".join(f"#{i}" for i in vis_elec_photos)
             src_type = "FOTO_BELEG"
             p_idx = vis_elec_photos
             ev_txt = f"📸 Beobachtet auf Foto {p_refs}: Veralteter Sicherungskasten bzw. älteres Schalterprogramm sichtbar."
-        elif "alt" in str((insights.get("raw_text") or "")).lower() and "elektrik" in str((insights.get("raw_text") or "")).lower():
+        elif "elektrik" in desc_txt_l and any(k in desc_txt_l for k in ("alt", "erneuern", "sanier", "überhol", "baujahr")):
             src_type = "EXPOSE_TEXT"
             p_idx = []
             ev_txt = "📄 Laut Exposé-Text: Hinweise auf veraltete Elektroinstallation."
@@ -1963,12 +2017,19 @@ def estimate_capex_and_hidden_costs(
                     continue
 
             is_holzdecke = "holz" in v_l and "decke" in v_l
+            trade_synonyms = [
+                ("bad", "sanitär", "wc", "dusche", "wanne", "waschbecken"),
+                ("fenster", "verglasung"),
+                ("elektrik", "unterverteilung", "sicherung", "fi-", "schalter", "leitung"),
+                ("boden", "laminat", "parkett", "teppich", "vinyl", "dielen", "fliesen", "estrich"),
+                ("maler", "wand", "wände", "tapete", "streich", "putz"),
+                ("heiz", "therme", "kessel", "ölheizung", "nachtspeicher", "brennwert"),
+                ("dach", "dachstuhl", "dachdeckung", "ziegel", "dämmung"),
+                ("fassade", "außenwand", "wdvs"),
+            ]
             already_covered = False if is_holzdecke else any(
-                (k in v_l and k in existing_keywords)
-                for k in [
-                    "bad", "sanitär", "fenster", "elektrik", "unterverteilung", "sicherung", "fi-",
-                    "boden", "maler", "wand", "wände", "heizung"
-                ]
+                any(s in v_l for s in grp) and any(s in existing_keywords for s in grp)
+                for grp in trade_synonyms
             )
             if not already_covered:
                 ai_indices = {int(p.get("index")) for p in (image_analysis.get("analyzed_photos") or []) if p.get("is_ai_generated") and p.get("index")}
@@ -2017,6 +2078,32 @@ def estimate_capex_and_hidden_costs(
                     "evidence_source": ev_raw or ("📄 Laut Exposé-Text: Aus Objektbeschreibung abgeleitet." if st_llm == "EXPOSE_TEXT" else f"⚠️ Baujahrs-/Zustands-Mutmaßung (Bj. {year_built})"),
                     "description": str(adj.get("description", ""))
                 })
+
+    # 6b. Dach & Fassade bei Häusern/MFH (wenn im Exposé ausdrücklich Sanierungsbedarf genannt)
+    prop_t_low = str(insights.get("corrected_property_type") or property_data.get("property_type") or "").lower()
+    desc_full_l = (str(property_data.get("description") or "") + " " + str(property_data.get("title") or "")).lower()
+    is_house_or_mfh = any(k in prop_t_low for k in ("haus", "mfh", "zinshaus", "villa", "bungalow")) or bool(insights.get("is_mfh"))
+    if is_house_or_mfh and not insights.get("is_kernsaniert"):
+        if re.search(r"dach[^.\n]{0,40}(?:sanierungsbed|renovierungsbed|alt|undicht|erneuern|dämmen)", desc_full_l) and "dach" not in existing_keywords:
+            items.append({
+                "title": "Dach-Sanierung / Neueindeckung & Dämmung",
+                "amount": 28000.0 if insights.get("is_mfh") else 18000.0,
+                "urgency": "HOCH",
+                "source_type": "EXPOSE_TEXT",
+                "photo_indices": [],
+                "evidence_source": "📄 Laut Exposé-Text: Hinweise auf Sanierungs-/Dämmbedarf am Dach.",
+                "description": "Einkalkuliertes Budget für Dacheindeckung bzw. GEG-konforme Dachdämmung."
+            })
+        if re.search(r"fassade[^.\n]{0,40}(?:sanierungsbed|renovierungsbed|riss|alt|streichen|dämmen)", desc_full_l) and "fassade" not in existing_keywords:
+            items.append({
+                "title": "Fassaden-Instandsetzung / Wärmedämmung",
+                "amount": 22000.0 if insights.get("is_mfh") else 14000.0,
+                "urgency": "MITTEL",
+                "source_type": "EXPOSE_TEXT",
+                "photo_indices": [],
+                "evidence_source": "📄 Laut Exposé-Text: Instandsetzungs-/Sanierungsbedarf an der Fassade erwähnt.",
+                "description": "Budget für Putz-, Riss- oder Fassadendämmarbeiten."
+            })
 
     total_capex = round(sum(i["amount"] for i in items), 2)
 
@@ -2073,12 +2160,12 @@ def _assess_visual_evidence(image_analysis: Optional[Dict[str, Any]]) -> Dict[st
     """
     if not isinstance(image_analysis, dict):
         return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
-    if image_analysis.get("vision_skipped") or image_analysis.get("vision_mode") == "SKIPPED_UNPROFITABLE":
+    if image_analysis.get("vision_skipped") or image_analysis.get("vision_failed") or image_analysis.get("vision_mode") == "SKIPPED_UNPROFITABLE":
         return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
 
     photos = image_analysis.get("analyzed_photos") or []
     raw_vis_score = image_analysis.get("overall_visual_score")
-    vision_ran = bool(photos) or raw_vis_score is not None
+    vision_ran = bool(photos) or raw_vis_score is not None or image_analysis.get("vision_mode") == "NO_PHOTOS"
     if not vision_ran:
         return {"vision_ran": False, "has_interior_photos": False, "visual_score": None}
 
@@ -2214,10 +2301,16 @@ def _compute_holistic_deal_verdict(
     metrics["all_in_gross_yield"] = round(all_in_gross_yield, 2)
 
     potential_cf = float(metrics.get("potential_monthly_cashflow", metrics.get("monthly_cashflow", 0.0)) or 0.0)
+    cf_with_capex = float(metrics.get("monthly_cashflow_with_capex", potential_cf) or potential_cf)
     has_visual_capex = bool(capex.get("visual_capex", 0) > 0 or any(it.get("source_type") == "FOTO_BELEG" for it in capex.get("items", [])))
 
-    # Economic Knockout: Yield < 2.5% AND cashflow < -300 €
-    is_economically_toxic = (gross_yield < 2.5 and potential_cf < -300.0 and not turns_profitable_miet)
+    # Economic Knockout & Severe Cashflow Guard:
+    # Toxic if yield < 2.5% AND cashflow < -300 €, OR severe negative cashflow without Mietspiegel turnaround
+    is_economically_toxic = (
+        (gross_yield < 2.5 and potential_cf < -300.0 and not turns_profitable_miet)
+        or (potential_cf < -750.0 and all_in_gross_yield < 3.5 and not turns_profitable_miet)
+    )
+    has_severe_negative_cf = (potential_cf < -350.0 and not turns_profitable_miet)
 
     # Apply Vision / Blind-Flight / Foreclosure Uncertainty Caps
     if vision_ran and not has_interior_photos:
@@ -2229,14 +2322,18 @@ def _compute_holistic_deal_verdict(
 
     if is_foreclosure and not rent_is_verified:
         score = min(score, 6.8)
+    if has_severe_negative_cf:
+        score = min(score, 6.2)
 
-    # Value-Add Recognition requires real interior visual evidence (when Vision ran) and no foreclosure blind-flight
+    # Value-Add Recognition requires real interior visual evidence, post-CaPEx viability, and no foreclosure blind-flight
     can_award_value_add = (not vision_ran or has_interior_photos) and not (is_foreclosure and not rent_is_verified)
     is_value_add = (
         can_award_value_add
         and len(critical_risks) == 0
+        and len(high_risks) < 3
         and not is_economically_toxic
-        and (turns_profitable_miet or (potential_cf >= -50.0 and all_in_gross_yield >= 4.5))
+        and not has_severe_negative_cf
+        and (turns_profitable_miet or (cf_with_capex >= -100.0 and potential_cf >= -50.0 and all_in_gross_yield >= 4.5))
         and (has_visual_capex or total_capex >= 5000.0 or market_dev < -10.0)
     )
 
@@ -2259,14 +2356,17 @@ def _compute_holistic_deal_verdict(
     elif vision_ran and visual_score is not None and visual_score < 4.0 and len(critical_risks) > 0:
         status = "RED"
         status_label = "🔴 Hohes Risiko / Bauschäden"
+    elif has_severe_negative_cf:
+        status = "YELLOW"
+        status_label = f"🟡 Prüfbedarf (Hoher negativer Cashflow von {fmt_de(potential_cf)} €/M)"
     elif is_value_add:
         score = max(score, 7.8)
         status = "GREEN"
         status_label = "🟢 Value-Add Empfehlung (Hoher Rendite-Hebel nach Sanierung)"
-    elif score >= 7.5 and len(critical_risks) == 0:
+    elif score >= 7.5 and len(critical_risks) == 0 and len(high_risks) < 2:
         status = "GREEN"
         status_label = "🟢 Kaufempfehlung / Solider Deal"
-    elif turns_profitable_miet and len(critical_risks) == 0:
+    elif turns_profitable_miet and len(critical_risks) == 0 and len(high_risks) < 2:
         status = "GREEN" if score >= 6.8 else "YELLOW"
         status_label = "🟢 Value-Add Deal (Rentabel bei Mietspiegel)" if score >= 6.8 else "🟡 Value-Add (Rentabel bei Mietspiegel)"
     elif score >= 5.0 and len(critical_risks) == 0:
@@ -2667,8 +2767,21 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         or (unit_count_in_offer >= 3 and not insights.get("is_package_deal"))
     )
 
+    val_cond = (
+        "Sanierungsbedürftig"
+        if insights.get("needs_renovation")
+        else ("Kernsaniert" if insights.get("is_kernsaniert") else ("Renoviert" if insights.get("is_renoviert") else property_data.get("condition", "Gepflegt")))
+    )
     benchmark = evaluate_property_valuation(
-        city, sqm, price, year_built=year_built, property_type=prop_type, postal_code=prop_plz, state=state
+        city,
+        sqm,
+        price,
+        year_built=year_built,
+        condition=val_cond,
+        is_rented=bool(insights.get("is_rented")),
+        property_type=prop_type,
+        postal_code=prop_plz,
+        state=state,
     )
     market_val = benchmark.get("estimated_market_value", price)
     market_val_sqm = benchmark.get("estimated_market_value_per_sqm", 2500.0)
@@ -2680,11 +2793,13 @@ def compute_investment_metrics(property_data: Dict[str, Any], insights: Dict[str
         is_package_deal=bool(insights.get("is_package_deal")),
         unit_count=unit_count_in_offer,
         units=units_list,
+        postal_code=prop_plz,
+        state=state,
     )
     mietspiegel_range_sqm = size_bm["range_label"]
     mietspiegel_size_label = size_bm["size_label"]
 
-    if unit_count_in_offer > 1 and size_bm.get("base_avg_sqm_rent") and size_bm.get("expected_sqm_rent"):
+    if size_bm.get("base_avg_sqm_rent") and size_bm.get("expected_sqm_rent"):
         size_ratio = float(size_bm["expected_sqm_rent"]) / float(size_bm["base_avg_sqm_rent"])
         expected_rent_sqm = round(expected_rent_sqm * size_ratio, 2)
     expected_market_rent = round(sqm * expected_rent_sqm, 2)
@@ -3330,8 +3445,8 @@ def generate_ai_due_diligence_report(
         insights=insights
     )
 
-    # Clean up temporary raw LLM arrays before storing cleanly in insights
-    clean_insights = {k: v for k, v in insights.items() if k not in ["llm_executive_summary", "llm_risk_highlights", "llm_capex_adjustments"]}
+    # Keep llm_capex_adjustments (trimmed narrative excluded) so subsequent image reconciliation preserves Text-AI CapEx items
+    clean_insights = {k: v for k, v in insights.items() if k not in ["llm_executive_summary", "llm_risk_highlights"]}
 
     interim_report = {
         "score": score,

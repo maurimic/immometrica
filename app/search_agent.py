@@ -50,13 +50,15 @@ def quick_ai_deal_precheck(deal: Dict[str, Any], full_description: str = "") -> 
     highlights: List[str] = []
     has_critical_risks = False
 
-    # 1. Critical Deal Killer: Erbbaurecht / Erbpacht
-    if any(k in combined_text for k in ["erbbaurecht", "erbbauzins", "erbbau", "erbpacht"]):
+    # 1. Critical Deal Killer: Erbbaurecht / Erbpacht (ignore explicit negations like "kein Erbbaurecht")
+    if re.search(r"\b(?:erbbaurecht|erbbauzins|erbpacht)\b", combined_text) and not re.search(
+        r"\b(?:kein(?:e[nmrs]?)?|ohne|nicht)\s+(?:im\s+)?(?:erbbaurecht|erbpacht|erbbauzins)\b", combined_text
+    ):
         risks.append("⚠️ Erbbaurecht / Erbpacht (monatlicher Erbbauzins schmälert Cashflow)")
         has_critical_risks = True
 
     # 2. Foreclosure / ZVG
-    if "zwangsversteigerung" in combined_text or "zvg" in combined_text:
+    if "zwangsversteigerung" in combined_text or re.search(r"\bzvg\b", combined_text):
         risks.append("⚖️ Zwangsversteigerung (Sonderbedingungen bei Erwerb beachten)")
 
     # 3. Denkmalschutz
@@ -152,7 +154,8 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
     city = profile.get("city", "").strip()
     postal_code = (profile.get("postal_code") or "").strip() or None
     search_query = profile.get("search_query", "").strip()
-    radius_km = int(profile.get("radius_km") or 25)
+    raw_r = profile.get("radius_km")
+    radius_km = int(raw_r) if raw_r is not None and str(raw_r).strip() != "" else 25
     max_price = float(profile.get("max_price") or 0.0)
     max_price_per_sqm = float(profile.get("max_price_per_sqm") or 0.0)
     min_yield = float(profile.get("min_yield") or 0.0)
@@ -203,8 +206,8 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         if not portal_url:
             continue
 
-        # Check deduplication first against seen listings and logged alerts
-        if portal_url in seen_urls or is_alert_already_logged(portal_url):
+        # Check deduplication first against seen listings and logged alerts (scoped by profile_id!)
+        if portal_url in seen_urls or is_alert_already_logged(portal_url, profile_id=profile_id):
             skipped_known_deals += 1
             continue
 
@@ -237,10 +240,12 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             filtered_stage1_2 += 1
             mark_listing_seen(portal_url, profile_id, "dropped_stage1_rooms")
             continue
-        if property_type != "all" and property_type not in p_type:
-            filtered_stage1_2 += 1
-            mark_listing_seen(portal_url, profile_id, "dropped_stage1_property_type")
-            continue
+        if property_type != "all":
+            from app.scraper import matches_property_type
+            if not matches_property_type(property_type, p_type):
+                filtered_stage1_2 += 1
+                mark_listing_seen(portal_url, profile_id, "dropped_stage1_property_type")
+                continue
 
         # Strikte Stadt-/Geo-Umkreisprüfung (gilt für radius_km == 0 UND radius_km > 0)
         if city or postal_code:
@@ -277,7 +282,9 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 else 0.0
             )
 
-            # 1. Erwartete Benchmark-Rendite (mit Baujahr & Zustand falls im Inserat vorhanden)
+            # 1. Erwartete Benchmark-Rendite (mit PLZ, Baujahr & Zustand falls im Inserat vorhanden)
+            deal_plz = deal.get("postal_code") or postal_code
+            deal_state = deal.get("state")
             exp_rent = float(deal.get("expected_rent") or 0.0)
             if exp_rent <= 0 and raw_price > 0 and raw_sqm > 0:
                 val = evaluate_property_valuation(
@@ -285,7 +292,9 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                     living_space=raw_sqm,
                     purchase_price=raw_price,
                     year_built=deal.get("year_built"),
-                    condition=deal.get("condition")
+                    condition=deal.get("condition"),
+                    postal_code=deal_plz,
+                    state=deal_state,
                 )
                 exp_rent = float(val.get("expected_rent_monthly") or 0.0)
             expected_yield = round(((exp_rent * 12.0) / raw_price) * 100.0, 2) if raw_price > 0 else 0.0
@@ -293,7 +302,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             # 2. Größenadjustierte Mietspiegel-Rendite
             mietspiegel_size_yield = 0.0
             if raw_price > 0 and raw_sqm > 0:
-                ms = get_mietspiegel_size_benchmark(city=deal_city, living_space=raw_sqm)
+                ms = get_mietspiegel_size_benchmark(city=deal_city, living_space=raw_sqm, postal_code=deal_plz, state=deal_state)
                 ms_monthly = float(ms.get("expected_sqm_rent") or 0.0) * raw_sqm
                 mietspiegel_size_yield = round(((ms_monthly * 12.0) / raw_price) * 100.0, 2)
 
@@ -360,15 +369,11 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             accumulated_cost_eur += (t_p * in_rate_t / 1_000_000.0) + (t_c * out_rate_t / 1_000_000.0)
         except Exception as e:
             logger.error(f"Error running full AI audit on property #{prop_id}: {e}")
-            ai_report = {}
-            metrics = {}
-            insights = {}
-            ai_report = {}
-            metrics = {}
-            insights = {}
+            continue
 
         audited_price = float(metrics.get("purchase_price") or raw_price)
         audited_sqm = float(metrics.get("living_space") or raw_sqm)
+        audited_rooms = float(metrics.get("rooms") or raw_rooms)
         audited_price_per_sqm = round(audited_price / audited_sqm) if audited_sqm > 0 else raw_price_per_sqm
         audited_yield = float(metrics.get("gross_yield") or deal.get("gross_yield") or 0.0)
         if metrics.get("actual_gross_yield") is not None:
@@ -382,7 +387,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         audited_potential_cf = float(metrics.get("potential_monthly_cashflow") if metrics.get("potential_monthly_cashflow") is not None else audited_cashflow)
         audited_rent_upside = float(metrics.get("rent_upside_percent") or 0.0)
         audited_market_dev = float(metrics.get("market_deviation_percent") if metrics.get("market_deviation_percent") is not None else deal.get("market_deviation_percent", 0.0))
-        audited_score = float(ai_report.get("score") or 7.0)
+        audited_score = float(ai_report.get("score") if ai_report.get("score") is not None else 0.0)
         audited_capex = float(ai_report.get("capex", {}).get("total_capex") or 0.0)
         audited_risks = ai_report.get("risks") or []
 
@@ -453,8 +458,15 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 allow_geocoder=False,
             )
 
+        from app.scraper import matches_property_type
+        audited_prop_type = str(insights.get("corrected_property_type") or deal.get("property_type") or "")
+        type_ok = (property_type == "all") or matches_property_type(property_type, audited_prop_type)
+        rooms_ok = (min_rooms <= 1.0) or (audited_rooms >= min_rooms)
+
         meets_profile_limits = (
             geo_within_radius
+            and type_ok
+            and rooms_ok
             and (max_price <= 0 or audited_price <= max_price)
             and (max_price_per_sqm <= 0 or audited_price_per_sqm <= max_price_per_sqm)
             and (min_living_space <= 0 or audited_sqm >= min_living_space)
@@ -471,6 +483,10 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             if not geo_within_radius:
                 dist_txt = f", ca. {geo_dist_km:.0f} km entfernt" if geo_dist_km is not None else ""
                 reasons.append(f"Standort ({audited_plz} {audited_city}{dist_txt}) außerhalb Suchradius ({radius_km} km um {city or postal_code})")
+            if not type_ok:
+                reasons.append(f"Objektart ('{audited_prop_type}') entspricht nicht Profilvorgabe ('{property_type}')")
+            if not rooms_ok:
+                reasons.append(f"Zimmeranzahl ({audited_rooms:.1f}) unter Profil-Minimum ({min_rooms:.1f})")
             if max_price > 0 and audited_price > max_price:
                 reasons.append(f"Kaufpreis ({audited_price:,.0f} €) übersteigt Profil-Maximum ({max_price:,.0f} €)")
             if max_price_per_sqm > 0 and audited_price_per_sqm > max_price_per_sqm:
@@ -496,7 +512,21 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
 
             rejection_text = "; ".join(reasons) if reasons else "Kriterien des Ankaufsprofils nicht erfüllt"
 
-            mark_listing_seen(portal_url, profile_id, "dropped_stage4_audit")
+            # Do not permanently poison seen_listings if Stage 3 hit a transient portal bot-block rather than real offline/junk
+            is_transient_block = False
+            if ai_report.get("knockout_reason") == "MISSING_DESCRIPTION":
+                try:
+                    c_chk = get_connection()
+                    cur_chk = c_chk.cursor()
+                    cur_chk.execute("SELECT availability_status FROM properties WHERE id = ?", (prop_id,))
+                    st_row = cur_chk.fetchone()
+                    c_chk.close()
+                    if st_row and st_row[0] == "unverified_bot_restricted":
+                        is_transient_block = True
+                except Exception:
+                    pass
+            if not is_transient_block:
+                mark_listing_seen(portal_url, profile_id, "dropped_stage4_audit")
             conn = get_connection()
             c = conn.cursor()
             if ai_report:
@@ -524,26 +554,37 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         # =====================================================================
         from app.routers.properties import run_property_image_analysis
         img_report = None
-        visual_score = 7.5
+        visual_score: Optional[float] = None
         visual_capex = 0.0
-        visual_condition = "Gepflegt"
+        visual_condition = "Nicht geprüft"
+        vision_failed_flag = False
 
         vision_ai_calls += 1
         try:
             img_res = run_property_image_analysis(prop_id)
             img_report = img_res.get("image_analysis") or {}
             if img_report:
-                visual_score = float(img_report.get("overall_visual_score") or 7.5)
+                raw_vs = img_report.get("overall_visual_score")
+                visual_score = float(raw_vs) if raw_vs is not None else None
                 visual_capex = float(img_report.get("total_visual_capex") or 0.0)
-                visual_condition = str(img_report.get("condition_rating") or "Gepflegt")
-                
-                # If capex was reconciled with image evidence, update financial figures
+                visual_condition = str(img_report.get("condition_rating") or "Nicht geprüft")
+                vision_failed_flag = bool(img_report.get("vision_failed") or img_report.get("error"))
+
+                # If capex was reconciled with image evidence, refresh all audited financial metrics
                 reconciled_ai = img_res.get("ai_audit") or {}
                 if reconciled_ai:
                     ai_report = reconciled_ai
                     metrics = ai_report.get("metrics") or metrics
-                    audited_score = float(ai_report.get("score") or audited_score)
+                    audited_score = float(ai_report.get("score") if ai_report.get("score") is not None else audited_score)
                     audited_capex = float(ai_report.get("capex", {}).get("total_capex") or visual_capex)
+                    audited_risks = ai_report.get("risks") or audited_risks
+                    audited_yield = float(metrics.get("gross_yield") or audited_yield)
+                    if metrics.get("actual_gross_yield") is not None:
+                        audited_actual_yield = float(metrics.get("actual_gross_yield") or 0.0)
+                    audited_potential_yield = float(metrics.get("potential_gross_yield") or audited_potential_yield)
+                    audited_cashflow = float(metrics.get("monthly_cashflow") if metrics.get("monthly_cashflow") is not None else audited_cashflow)
+                    audited_potential_cf = float(metrics.get("potential_monthly_cashflow") if metrics.get("potential_monthly_cashflow") is not None else audited_potential_cf)
+                    audited_market_dev = float(metrics.get("market_deviation_percent") if metrics.get("market_deviation_percent") is not None else audited_market_dev)
 
             tu_img = img_report.get("token_usage") or {}
             v_p = int(tu_img.get("prompt_tokens") or 0)
@@ -556,16 +597,21 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
             in_rate_v, out_rate_v = get_oneprovider_token_rates(img_report.get("ai_provider"))
             accumulated_cost_eur += (v_p * in_rate_v / 1_000_000.0) + (v_c * out_rate_v / 1_000_000.0)
         except Exception as e:
-            logger.warning(f"Automatic image analysis warning on Deal #{prop_id}: {e}")
+            logger.warning(f"Automatic image analysis failed on Deal #{prop_id}: {e}")
+            vision_failed_flag = True
+            visual_score = None
 
         # Final check after seeing photos:
         # If photos show catastrophic structural decay or ruinous CaPEx, reject to archiv!
-        visual_ruin = (visual_score < 4.0 or (audited_price > 0 and visual_capex > (audited_price * 0.45)))
+        visual_ruin = (
+            (visual_score is not None and visual_score < 4.0)
+            or (audited_price > 0 and visual_capex > (audited_price * 0.45))
+        )
         is_still_interesting_after_images = (not visual_ruin) and (audited_score >= 5.0)
 
         if not is_still_interesting_after_images:
             reasons_img = []
-            if visual_score < 4.0:
+            if visual_score is not None and visual_score < 4.0:
                 reasons_img.append(f"Visueller Zustand mangelhaft / Bauschäden auf Fotos erkennbar (Score {visual_score:.1f}/10)")
             if audited_price > 0 and visual_capex > (audited_price * 0.45):
                 reasons_img.append(f"Unwirtschaftlicher Sanierungsaufwand / CaPEx ({visual_capex:,.0f} € übersteigt 45% des Kaufpreises)")
@@ -601,14 +647,14 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
         if min_yield > 0:
             yield_passed = False
             if yield_basis == "actual":
-                yield_passed = (audited_yield >= min_yield)
+                yield_passed = (audited_actual_yield >= min_yield)
             elif yield_basis == "potential":
                 yield_passed = (audited_potential_yield >= min_yield)
             else: # "any"
-                yield_passed = (max(audited_yield, audited_potential_yield) >= min_yield)
+                yield_passed = (max(audited_actual_yield, audited_potential_yield, audited_yield) >= min_yield)
 
             if not yield_passed:
-                rej = f"Geprüfte Rendite verfehlt Mindestrendite ({audited_yield:.1f}% Ist / {audited_potential_yield:.1f}% Mietspiegel < {min_yield:.1f}%)"
+                rej = f"Geprüfte Rendite verfehlt Mindestrendite ({audited_actual_yield:.1f}% Ist / {audited_potential_yield:.1f}% Mietspiegel < {min_yield:.1f}%)"
                 mark_listing_seen(portal_url, profile_id, "dropped_final_yield")
                 conn = get_connection()
                 c = conn.cursor()
@@ -630,8 +676,17 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
                 continue
 
         mark_listing_seen(portal_url, profile_id, "qualified")
-        has_real_interior = bool(img_report.get("has_interior_photos")) if isinstance(img_report, dict) and ("has_interior_photos" in img_report) else True
-        can_promote_merkliste = has_real_interior and visual_score >= 6.0 and (audited_score >= 8.0 or visual_score >= 8.5)
+        has_real_interior = (
+            not vision_failed_flag
+            and isinstance(img_report, dict)
+            and bool(img_report.get("has_interior_photos"))
+        )
+        can_promote_merkliste = (
+            has_real_interior
+            and visual_score is not None
+            and visual_score >= 6.0
+            and (audited_score >= 8.0 or visual_score >= 8.5)
+        )
         target_stage = "merkliste" if can_promote_merkliste else "neu"
         qualification_text = f"Qualifiziert: Score {audited_score:.1f}/10, Rendite {audited_yield:.1f}%, Cashflow {audited_cashflow:+,.0f} €/M"
         conn = get_connection()
@@ -655,7 +710,7 @@ def execute_search_profile(profile_id: int, force: bool = False) -> Dict[str, An
 
         # Formulate verified AI Verdict based on Audit + Photo Inspection
         status_label = ai_report.get("status_label", "🟢 Solider Deal")
-        photo_tag = f"📸 Fotos: {visual_score:.1f}/10 ({visual_condition})"
+        photo_tag = f"📸 Fotos: {visual_score:.1f}/10 ({visual_condition})" if visual_score is not None else f"📸 Fotos: {visual_condition}"
         if audited_cashflow < 0 and (turns_profitable_mietspiegel or audited_potential_cf >= 0):
             ai_verdict = (
                 f"KI-Audit: Score {audited_score}/10 ({status_label} • 🚀 Mietspiegel-Hebel). {photo_tag}. "

@@ -123,7 +123,18 @@ CITY_TO_STATE = {
     "altötting": "Bayern",
     "altoetting": "Bayern",
     "garching": "Bayern",
+    "baden-baden": "Baden-Württemberg",
     "esslingen": "Baden-Württemberg",
+    "giessen": "Hessen",
+    "gießen": "Hessen",
+    "essenbach": "Bayern",
+    "halle (saale)": "Sachsen-Anhalt",
+    "halle (westfalen)": "Nordrhein-Westfalen",
+    "frankfurt (oder)": "Brandenburg",
+    "bad homburg": "Hessen",
+    "bad homburg vor der höhe": "Hessen",
+    "tuttlingen": "Baden-Württemberg",
+    "neu-ulm": "Bayern",
     "bergkamen": "Nordrhein-Westfalen",
     "wörth am rhein": "Rheinland-Pfalz",
     "woerth am rhein": "Rheinland-Pfalz",
@@ -222,6 +233,18 @@ CITY_COORDINATES = {
     "ingolstadt": (48.7665, 11.4258),
     "heidelberg": (49.3988, 8.6724),
     "ulm": (48.4011, 9.9876),
+    "neu-ulm": (48.3932, 10.0086),
+    "giessen": (50.5841, 8.6784),
+    "gießen": (50.5841, 8.6784),
+    "essenbach": (48.6136, 12.2122),
+    "halle (saale)": (51.4828, 11.9697),
+    "halle (westfalen)": (52.0604, 8.3596),
+    "halle westfalen": (52.0604, 8.3596),
+    "frankfurt (oder)": (52.3471, 14.5506),
+    "frankfurt am main": (50.1109, 8.6821),
+    "bad homburg": (50.2268, 8.6182),
+    "bad homburg vor der höhe": (50.2268, 8.6182),
+    "tuttlingen": (47.9850, 8.8178),
 }
 
 # 5-digit PLZ Coordinates for exact city-level precision
@@ -536,20 +559,71 @@ def _match_city_coord(name_clean: str) -> Optional[Tuple[float, float]]:
         return None
     if name_clean in CITY_COORDINATES:
         return CITY_COORDINATES[name_clean]
-    # Word-token / longest-key match (avoids short substrings matching wrong towns)
+    # Word-token / longest-key match ONLY (never blind substring match like 'essen' in 'giessen')
     best_match = None
     best_len = 0
     for k, coords in CITY_COORDINATES.items():
+        # Guard ambiguous short homonyms when qualifier contradicts the default city
+        if k == "halle" and ("westf" in name_clean or "westfalen" in name_clean):
+            continue
+        if k == "frankfurt" and "oder" in name_clean:
+            continue
+        if k == "essen" and "oldenburg" in name_clean:
+            continue
         if re.search(r"(?<![a-zäöüß])" + re.escape(k) + r"(?![a-zäöüß])", name_clean):
             if len(k) > best_len:
                 best_len = len(k)
                 best_match = coords
-    if best_match:
-        return best_match
-    for k, coords in sorted(CITY_COORDINATES.items(), key=lambda kv: -len(kv[0])):
-        if len(k) >= 4 and (k in name_clean or name_clean in k):
-            return coords
-    return None
+    return best_match
+
+
+def normalize_district_city(
+    search_city: Optional[str],
+    deal_city: Optional[str],
+    deal_postal_code: Optional[str] = None,
+) -> Tuple[str, Optional[str]]:
+    """
+    Reconciles a card's extracted locality (which may be a pure district like 'Körne' or 'Innenstadt-West')
+    with the searched target city without relabeling genuinely distinct cities (like 'Bochum').
+    Returns (resolved_city, district_note).
+    """
+    sc = str(search_city or "").strip()
+    dc = str(deal_city or "").strip()
+    if not dc:
+        return (sc.capitalize() if sc and sc.islower() else sc, None)
+    if not sc:
+        return (dc, None)
+
+    sc_low = sc.lower()
+    dc_low = dc.lower()
+    sc_out = sc.capitalize() if sc.islower() else sc
+
+    if dc_low == sc_low:
+        return (sc_out, None)
+    if re.search(rf"(?<![a-zäöüß]){re.escape(sc_low)}(?![a-zäöüß])", dc_low):
+        return (sc_out, dc)
+
+    # Check if card string explicitly names another known German city (do not swallow distinct neighbors like Bochum)
+    known_other = _match_city_coord(dc_low) or (dc_low in CITY_TO_STATE)
+    if known_other:
+        return (dc, None)
+
+    # If the card's PLZ (exact 5-digit or 2-digit Leitregion) resolves within 12 km of the search city, treat dc as an intra-city district
+    plz_clean = "".join(c for c in str(deal_postal_code or "") if c.isdigit())[:5]
+    plz_coords = PLZ_COORDINATES.get(plz_clean) if plz_clean else None
+    if not plz_coords and len(plz_clean) >= 2:
+        plz_coords = PLZ_PREFIX_COORDINATES.get(plz_clean[:2])
+    if plz_coords:
+        target_coords = _resolve_static_or_cached_coords(sc_low, None, allow_geocoder=False)
+        if target_coords:
+            d_km = haversine_km(target_coords[0], target_coords[1], plz_coords[0], plz_coords[1])
+            if d_km <= 12.0:
+                return (sc_out, dc)
+
+    if dc_low.startswith(("innenstadt", "stadtmitte", "altstadt", "nordstadt", "südstadt", "oststadt", "weststadt")):
+        return (sc_out, dc)
+
+    return (dc, None)
 
 
 def resolve_city_coordinates(
@@ -667,7 +741,10 @@ def resolve_location_and_tax(
             prefix3 = int(plz_clean[:3])
             if 637 <= prefix3 <= 639:
                 resolved_state = "Bayern"
-            elif 890 <= prefix3 <= 894:
+            elif prefix3 in (890, 891):
+                # Ulm / Alb-Donau liegt in Baden-Württemberg (5,0 % GrESt), Neu-Ulm ab 892xx in Bayern
+                resolved_state = "Baden-Württemberg"
+            elif 892 <= prefix3 <= 894:
                 resolved_state = "Bayern"
             elif prefix3 == 275:
                 resolved_state = "Bremen"
@@ -852,4 +929,5 @@ def is_within_search_radius(
         return (dist_km <= allowed_km, dist_km)
     if whole_city_match:
         return (True, None)
-    return (True, None)
+    # Do not blindly accept an unresolvable outside city when target radius filtering is active
+    return (not bool(d_city), None)

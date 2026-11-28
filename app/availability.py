@@ -86,7 +86,8 @@ def _extract_portal_location(soup: BeautifulSoup, raw_html: str) -> Dict[str, An
     loc_el = soup.find(id="viewad-locality") or soup.find(attrs={"itemprop": "addressLocality"})
     if loc_el:
         loc_txt = re.sub(r"\s+", " ", loc_el.get_text(" ", strip=True))
-        m_loc = re.search(r"(\d{5})\s*(?:Bayern|Nordrhein-Westfalen|Baden-Württemberg|Saarland|Hessen|Berlin|Hamburg|Bremen|Sachsen|Sachsen-Anhalt|Thüringen|Brandenburg|Mecklenburg-Vorpommern|Niedersachsen|Rheinland-Pfalz|Schleswig-Holstein)?\s*-?\s*(.+)", loc_txt)
+        # Omit city-states (Berlin, Hamburg, Bremen) from the stripped state prefix so "10115 Berlin - Mitte" retains "Berlin"
+        m_loc = re.search(r"(\d{5})\s*(?:Bayern|Nordrhein-Westfalen|Baden-Württemberg|Saarland|Hessen|Sachsen|Sachsen-Anhalt|Thüringen|Brandenburg|Mecklenburg-Vorpommern|Niedersachsen|Rheinland-Pfalz|Schleswig-Holstein)?\s*-?\s*(.+)", loc_txt)
         if m_loc:
             postal_code = m_loc.group(1).strip()
             locality = m_loc.group(2).strip()

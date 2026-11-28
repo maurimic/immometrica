@@ -74,7 +74,7 @@ def search_immoscout_deals(
     supports multiple property types (ETW/EFH/MFH/Grundstück), pagination (pages 1 to 3),
     and skips known candidate URLs.
     """
-    from app.geo_resolver import resolve_city_coordinates, resolve_location_and_tax
+    from app.geo_resolver import resolve_city_coordinates, resolve_location_and_tax, is_within_search_radius, normalize_district_city
     from app.calculator import calculate_cashflow
     from app.valuation import evaluate_property_valuation
     from app.scrapers.deal_fusion import normalize_portal_url
@@ -82,7 +82,8 @@ def search_immoscout_deals(
     api_targets = _map_immoscout_types(property_type)
     plz_clean = re.sub(r"\D", "", str(postal_code or ""))[:5]
     center_lat, center_lng = resolve_city_coordinates(city=city, postal_code=plz_clean or None)
-    eff_radius = max(1, int(radius_km if radius_km is not None and int(radius_km) > 0 else 15))
+    req_radius = int(radius_km) if radius_km is not None else 15
+    eff_radius = max(1, req_radius) if req_radius > 0 else 5
 
     url = f"{BASE_API_URL}/search/list"
     exclude_set = {normalize_portal_url(u) for u in exclude_urls} if exclude_urls else set()
@@ -102,7 +103,7 @@ def search_immoscout_deals(
                 "geocoordinates": f"{center_lat:.4f};{center_lng:.4f};{eff_radius}",
                 "pagesize": min(max_results * 2, 50),
                 "pagenumber": page,
-                "sorting": "firstactivation"
+                "sorting": "-firstactivation"
             }
 
             try:
@@ -114,7 +115,7 @@ def search_immoscout_deals(
                     timeout=6.0
                 )
                 if resp.status_code != 200:
-                    logger.warning(f"ImmoScout mobile API returned HTTP {resp.status_code}: {resp.text[:200]}")
+                    logger.warning(f"ImmoScout mobile API returned HTTP {resp.status_code} ({api_type}): {resp.text[:200]}")
                     break
 
                 data = resp.json()
@@ -123,6 +124,8 @@ def search_immoscout_deals(
                     break
 
                 for wrap in items:
+                    if wrap.get("type") == "NEW_HOME_BUILDER_RESULT":
+                        continue
                     it = wrap.get("item")
                     if not it or not it.get("id"):
                         continue
@@ -137,24 +140,30 @@ def search_immoscout_deals(
                         continue
                     seen_urls.add(portal_url)
 
-                    # Filter query keyword if provided
-                    if query and query.lower() not in title.lower():
-                        continue
-        
-                    # Extract price, sqm, rooms from attributes array
+                    # Extract price, sqm, rooms & optional stated rent from attributes array
                     price = 0.0
                     sqm = 0.0
                     rooms = 2.0
+                    card_rent = 0.0
+                    attr_chunks = []
                     for attr in it.get("attributes", []):
                         val = str(attr.get("value", "")).strip()
                         lbl = str(attr.get("label", "")).lower()
-                        if "€" in val and price <= 0 and "m²" not in val and "hausgeld" not in lbl and "miete" not in lbl:
+                        attr_chunks.append(f"{lbl} {val}")
+                        if "€" in val and ("miete" in lbl or "kaltmiete" in lbl) and "m²" not in val:
+                            no_dec = re.sub(r",\d{1,2}\b", "", val)
+                            clean_r = re.sub(r"[^\d]", "", no_dec)
+                            if clean_r:
+                                cand_r = float(clean_r)
+                                if 100.0 <= cand_r <= 250000.0 and card_rent <= 0:
+                                    card_rent = cand_r
+                        elif "€" in val and price <= 0 and "m²" not in val and "hausgeld" not in lbl and "miete" not in lbl and "stellplatz" not in lbl:
                             # Strip optional decimal cents (",00") before removing thousands separators
                             no_dec = re.sub(r",\d{1,2}\b", "", val)
                             clean_pr = re.sub(r"[^\d]", "", no_dec)
                             if clean_pr:
                                 price = float(clean_pr)
-                        elif "m²" in val and sqm <= 0 and "grundstück" not in lbl and "nutzfläche" not in lbl:
+                        elif "m²" in val and sqm <= 0 and "grundstück" not in lbl and "nutzfläche" not in lbl and "m²/" not in val:
                             m_sq = re.search(r"([\d,\.]+)", val)
                             if m_sq:
                                 raw_sq = m_sq.group(1)
@@ -175,31 +184,32 @@ def search_immoscout_deals(
                                     rooms = float(clean_rm)
                                 except ValueError:
                                     pass
-        
+
                     if price < 15000:
                         continue
-        
-                    if sqm <= 0:
-                        sqm = max(30.0, round(price / 3000.0, 1))
-        
-                    # Address & Coordinates
+
+                    # Address & Coordinates (keep multi-word city names like "Frankfurt am Main")
                     addr_obj = it.get("address") or {}
                     line = addr_obj.get("line") or f"{city or plz_clean}"
                     raw_lat = addr_obj.get("lat")
                     raw_lon = addr_obj.get("lon")
-        
-                    # Extract PLZ and City from line
-                    plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", line)
+
+                    # Filter query keyword against title + address + attributes
+                    query_corpus = f"{title} {line} {' '.join(attr_chunks)}".lower()
+                    if query and query.lower() not in query_corpus:
+                        continue
+
+                    plz_match = re.search(r"\b(\d{5})\s+([^,|(\n\r]+)", line)
                     if plz_match:
-                        extracted_plz = plz_match.group(1)
-                        extracted_city = plz_match.group(2)
+                        extracted_plz = plz_match.group(1).strip()
+                        extracted_city = re.sub(r"\s+", " ", plz_match.group(2)).strip(" -")
                     else:
                         extracted_plz = plz_clean or ""
                         extracted_city = city
-        
+
                     resolved_city = extracted_city or city
-                    geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
-                    resolved_state = geo_info["state"]
+                    if city:
+                        resolved_city, _ = normalize_district_city(city, resolved_city, extracted_plz)
 
                     if raw_lat is not None and raw_lon is not None and float(raw_lat) > 0:
                         prop_lat = float(raw_lat)
@@ -214,39 +224,76 @@ def search_immoscout_deals(
                             allow_geocoder=True
                         )
 
-                    # Refine property type from title when housebuy covers EFH and MFH
+                    if city or plz_clean:
+                        in_rad, _ = is_within_search_radius(
+                            target_city=city,
+                            target_postal_code=plz_clean or None,
+                            radius_km=req_radius,
+                            deal_city=resolved_city,
+                            deal_postal_code=extracted_plz,
+                            deal_lat=prop_lat,
+                            deal_lng=prop_lng,
+                            allow_geocoder=False,
+                        )
+                        if not in_rad:
+                            continue
+
+                    geo_info = resolve_location_and_tax(postal_code=extracted_plz, city=resolved_city)
+                    resolved_state = geo_info["state"]
+
+                    # Refine property type cleanly for housebuy / apartmentbuy
                     row_p_type = detected_p_type
                     row_b_type = detected_b_type
                     t_low = title.lower()
-                    if api_type == "housebuy" and any(k in t_low for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
-                        row_p_type = "Mehrfamilienhaus"
-                        row_b_type = "Mehrfamilienhaus"
-        
-                    # Image & Gallery
+                    if api_type == "housebuy":
+                        if any(k in t_low for k in ["gewerbeliegenschaft", "bürohaus", "lagerhalle", "gewerbeobjekt"]):
+                            row_p_type = "Gewerbeobjekt"
+                            row_b_type = "Gewerbe"
+                        elif any(k in t_low for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh", "wohneinheiten", "parteien", "wohn- und geschäftshaus"]):
+                            row_p_type = "Mehrfamilienhaus"
+                            row_b_type = "Mehrfamilienhaus"
+                        elif any(k in t_low for k in ["einfamilienhaus", "doppelhaushälfte", "doppelhaus", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus", "efh"]):
+                            row_p_type = "Einfamilienhaus"
+                            row_b_type = "Haus"
+                        elif detected_p_type == "Mehrfamilienhaus" and sqm > 0 and sqm < 180.0 and rooms < 6.0:
+                            row_p_type = "Einfamilienhaus"
+                            row_b_type = "Haus"
+                    elif api_type == "apartmentbuy":
+                        if "maisonette" in t_low:
+                            row_p_type = "Maisonette"
+                            row_b_type = "Maisonette"
+                        elif "penthouse" in t_low:
+                            row_p_type = "Penthouse"
+                            row_b_type = "Penthouse"
+
+                    if row_p_type == "Gewerbeobjekt":
+                        continue
+
+                    # Image & Gallery (never store Unsplash stock URLs inside gallery_images)
                     gallery = []
                     if it.get("pictures"):
                         for pic in it["pictures"]:
                             raw_p = pic.get("urlScaleAndCrop") or pic.get("url") or pic.get("full") or ""
                             if raw_p:
                                 gallery.append(raw_p.replace("%WIDTH%", "1200").replace("%HEIGHT%", "900"))
-        
+
                     tp = it.get("titlePicture") or {}
                     img_url = tp.get("full") or tp.get("preview")
                     if not img_url and gallery:
                         img_url = gallery[0]
-        
+                    if img_url and not gallery:
+                        gallery = [img_url]
+
                     if not img_url:
                         img_url = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
-        
-                    if not gallery and img_url:
-                        gallery = [img_url]
-        
+
                     # Benchmark, Rent & Cashflow
-                    benchmark = evaluate_property_valuation(resolved_city, sqm, price, property_type=row_p_type)
+                    eff_sqm = sqm if sqm > 0 else 50.0
+                    benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=row_p_type, postal_code=extracted_plz)
                     expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
-                    expected_rent = round(sqm * expected_rent_per_sqm, 2) if row_p_type != "Grundstück" else 0.0
-                    is_rented = 1 if ("vermietet" in t_low and "unvermietet" not in t_low) else 0
-                    current_rent = 0.0
+                    expected_rent = round(eff_sqm * expected_rent_per_sqm, 2) if (row_p_type != "Grundstück" and sqm > 0) else 0.0
+                    is_rented = 1 if (card_rent > 0 or ("vermietet" in t_low and "unvermietet" not in t_low and "nicht vermietet" not in t_low)) else 0
+                    current_rent = card_rent if card_rent > 0 else 0.0
                     gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
         
                     cf = calculate_cashflow(
@@ -255,7 +302,7 @@ def search_immoscout_deals(
                         city=resolved_city,
                         state=resolved_state,
                         postal_code=extracted_plz,
-                        living_space=sqm
+                        living_space=eff_sqm
                     )
                     monthly_cashflow = cf.get("monthly_cashflow", 0.0)
         
@@ -421,14 +468,29 @@ def fetch_immoscout_expose(url_or_id: str) -> Dict[str, Any]:
                         full_key = f"{list_title} - {lbl}" if list_title else lbl
                         details[full_key] = val
                         lbl_lower = lbl.lower()
-                        if price <= 0 and ("kaufpreis" in lbl_lower or "preis" in lbl_lower):
-                            m = re.search(r"([\d\.]+)", str(val))
+                        if (
+                            price <= 0
+                            and ("kaufpreis" in lbl_lower or lbl_lower == "preis")
+                            and "m²" not in lbl_lower
+                            and "stellplatz" not in lbl_lower
+                            and "garage" not in lbl_lower
+                            and "miete" not in lbl_lower
+                            and "hausgeld" not in lbl_lower
+                            and "/m²" not in str(val).lower()
+                        ):
+                            no_dec = re.sub(r",\d{1,2}\b", "", str(val))
+                            m = re.search(r"([\d\.]+)", no_dec)
                             if m:
                                 try:
                                     price = float(m.group(1).replace(".", ""))
                                 except ValueError:
                                     pass
-                        if living_space <= 0 and ("wohnfläche" in lbl_lower or "fläche" in lbl_lower):
+                        if (
+                            living_space <= 0
+                            and ("wohnfläche" in lbl_lower or lbl_lower == "fläche")
+                            and "grundstück" not in lbl_lower
+                            and "nutz" not in lbl_lower
+                        ):
                             m = re.search(r"([\d,\.]+)", str(val))
                             if m:
                                 try:

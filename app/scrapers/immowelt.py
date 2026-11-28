@@ -20,7 +20,8 @@ BROWSER_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Accept-Encoding": "gzip, deflate, br",
+    # Omit "br" because optional brotli decoder is not guaranteed in environment; requests handles gzip/deflate natively.
+    "Accept-Encoding": "gzip, deflate",
     "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
@@ -69,11 +70,25 @@ def fetch_immowelt_html(url: str, timeout: float = 12.0) -> requests.Response:
     return requests.get(url, headers=BROWSER_HEADERS, timeout=timeout)
 
 
+CITY_SLUG_ALIASES = {
+    "frankfurt": "frankfurt-am-main",
+    "halle": "halle-saale",
+    "halle (saale)": "halle-saale",
+    "bad homburg vor der hoehe": "bad-homburg-vor-der-hoehe",
+    "bad homburg vor der höhe": "bad-homburg-vor-der-hoehe",
+    "muelheim an der ruhr": "muelheim-a-d-ruhr",
+    "mülheim an der ruhr": "muelheim-a-d-ruhr",
+}
+
+
 def clean_city_slug(city: str) -> str:
     c = city.lower().strip()
+    if c in CITY_SLUG_ALIASES:
+        return CITY_SLUG_ALIASES[c]
     c = c.replace("ä", "ae").replace("ö", "oe").replace("ü", "ue").replace("ß", "ss")
     c = re.sub(r"[^a-z0-9\-]", "-", c)
-    return c
+    c = re.sub(r"-{2,}", "-", c).strip("-")
+    return CITY_SLUG_ALIASES.get(c, c)
 
 
 def clean_immowelt_title(raw_title: str, rooms: float, sqm: float, district: str, city: str, prop_type: str = "Wohnung") -> str:
@@ -151,6 +166,7 @@ def search_immowelt_deals(
     for path_seg, default_p_type, default_b_type in search_targets:
         if len(results) >= max_results:
             break
+        prev_page_urls = set()
         for page in range(1, 4):
             if len(results) >= max_results:
                 break
@@ -170,6 +186,13 @@ def search_immowelt_deals(
             expose_links = soup.find_all("a", href=re.compile(r"/expose/[a-f0-9\-]+", re.IGNORECASE))
             if not expose_links:
                 break
+            cur_page_urls = {
+                normalize_portal_url(("https://www.immowelt.de" + lk["href"] if not lk["href"].startswith("http") else lk["href"]).split("?")[0])
+                for lk in expose_links
+            }
+            if page > 1 and cur_page_urls and cur_page_urls == prev_page_urls:
+                break
+            prev_page_urls = cur_page_urls
 
             for link in expose_links:
                 raw_href = link["href"]
@@ -212,20 +235,27 @@ def search_immowelt_deals(
                     continue
 
                 # Extract Living space & Rooms
+                # Extract Living space & Rooms (exclude plot/land m² when residential)
                 sqm = 0.0
-                sqm_match = re.search(r"([\d,\.]+)\s*m²", card_text)
-                if sqm_match:
-                    raw_sq = sqm_match.group(1)
-                    try:
-                        if "," in raw_sq:
-                            norm_sq = raw_sq.replace(".", "").replace(",", ".")
-                        elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
-                            norm_sq = raw_sq.replace(".", "")
-                        else:
-                            norm_sq = raw_sq
-                        sqm = float(norm_sq)
-                    except ValueError:
-                        pass
+                for s in stripped_strings:
+                    if default_p_type != "Grundstück" and re.search(r"grundst|bauland|fläche des grund", s, re.IGNORECASE):
+                        continue
+                    sqm_match = re.search(r"([\d,\.]+)\s*m²", s)
+                    if sqm_match:
+                        raw_sq = sqm_match.group(1)
+                        try:
+                            if "," in raw_sq:
+                                norm_sqm = raw_sq.replace(".", "").replace(",", ".")
+                            elif re.match(r"^\d{1,3}(?:\.\d{3})+$", raw_sq):
+                                norm_sqm = raw_sq.replace(".", "")
+                            else:
+                                norm_sqm = raw_sq
+                            cand = float(norm_sqm)
+                            if 8.0 <= cand <= 50000.0:
+                                sqm = cand
+                                break
+                        except ValueError:
+                            pass
 
                 rooms = 2.0
                 room_match = re.search(r"([\d,\.]+)\s*Zi", card_text)
@@ -235,56 +265,32 @@ def search_immowelt_deals(
                     except ValueError:
                         pass
 
-                if sqm <= 0 and default_p_type != "Grundstück":
-                    sqm = max(30.0, round(price / 3000.0, 1))
-
-                # Extract postal code & location
+                # Extract postal code & location (supports both "District, City (44287)" and "44287 City")
                 extracted_plz = plz_clean
                 extracted_city = ""
-                plz_city_match = re.search(r"\b(\d{5})\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-\s]{1,35}?)(?:\s*\(|,|\||$)", card_text)
-                if plz_city_match:
-                    extracted_plz = plz_city_match.group(1)
-                    extracted_city = plz_city_match.group(2).strip()
-                else:
-                    plz_match = re.search(r"\b(\d{5})\b", card_text)
-                    if plz_match:
-                        extracted_plz = plz_match.group(1)
-
-                # Extract district
                 district = ""
-                if city:
+                city_paren_match = re.search(
+                    r"(?:^|\|\s*)(?:([^|,]{2,35}?),\s*)?([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-\.\s]{1,35}?)\s*\((\d{5})\)",
+                    card_text,
+                )
+                if city_paren_match:
+                    district = (city_paren_match.group(1) or "").strip()
+                    extracted_city = city_paren_match.group(2).strip()
+                    extracted_plz = city_paren_match.group(3).strip()
+                else:
+                    plz_city_match = re.search(r"\b(\d{5})\s+([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\-\s]{1,35}?)(?:\s*\(|,|\||$)", card_text)
+                    if plz_city_match:
+                        extracted_plz = plz_city_match.group(1)
+                        extracted_city = plz_city_match.group(2).strip()
+                    else:
+                        plz_match = re.search(r"\b(\d{5})\b", card_text)
+                        if plz_match:
+                            extracted_plz = plz_match.group(1)
+
+                if not district and city:
                     dist_match = re.search(r"([A-Za-zÄÖÜäöüß\s\-]+),\s*" + re.escape(city), card_text, re.IGNORECASE)
                     if dist_match:
                         district = dist_match.group(1).strip()
-
-                # Detect property type across ETW, Maisonette, Penthouse, EFH, MFH, Grundstück
-                ct_lower = card_text.lower()
-                p_type = default_p_type
-                b_type = default_b_type
-                if any(k in ct_lower for k in ["grundstück", "baugrundstück", "bauplatz"]) or default_p_type == "Grundstück":
-                    p_type = "Grundstück"
-                    b_type = "Grundstück"
-                elif any(k in ct_lower for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
-                    p_type = "Mehrfamilienhaus"
-                    b_type = "Mehrfamilienhaus"
-                elif any(k in ct_lower for k in ["einfamilienhaus", "doppelhaushälfte", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus"]):
-                    p_type = "Einfamilienhaus"
-                    b_type = "Haus"
-                elif "maisonette" in ct_lower:
-                    p_type = "Maisonette"
-                    b_type = "Maisonette"
-                elif "penthouse" in ct_lower:
-                    p_type = "Penthouse"
-                    b_type = "Penthouse"
-                elif "dachgeschoss" in ct_lower:
-                    b_type = "Dachgeschosswohnung"
-                elif "erdgeschoss" in ct_lower or " eg " in ct_lower:
-                    b_type = "Erdgeschosswohnung"
-
-                energy_class = ""
-                energy_match = re.search(r"\b([A-H])\b", card_text)
-                if energy_match and any(k in card_text for k in ["kWh", "Energie", "frei ab"]):
-                    energy_class = energy_match.group(1)
 
                 teasers = [
                     s for s in stripped_strings
@@ -292,17 +298,74 @@ def search_immowelt_deals(
                     and not any(k in s for k in ["€/m²", "provisionsfrei", "Herr ", "Frau ", "GmbH", "Immobilien"])
                 ]
                 desc_teaser = teasers[-1] if teasers else ""
+                non_teaser_header = " | ".join(
+                    s for s in stripped_strings
+                    if s != desc_teaser and len(s) <= 80
+                ).lower()
+                type_source = non_teaser_header or card_text.lower()
+
+                # Detect property type primarily from structured card badges/title, avoiding prose teaser contamination
+                ct_lower = card_text.lower()
+                p_type = default_p_type
+                b_type = default_b_type
+                if default_p_type == "Grundstück" or (
+                    any(k in type_source for k in ["grundstück zum kauf", "baugrundstück", "bauplatz"])
+                    and not any(k in type_source for k in ["wohnung", "maisonette", "penthouse", "einfamilienhaus", "doppelhaushälfte", "reihenhaus", "mehrfamilienhaus"])
+                ):
+                    p_type = "Grundstück"
+                    b_type = "Grundstück"
+                elif any(k in type_source for k in ["mehrfamilienhaus", "zinshaus", "renditehaus", "mfh"]):
+                    p_type = "Mehrfamilienhaus"
+                    b_type = "Mehrfamilienhaus"
+                elif any(k in type_source for k in ["einfamilienhaus", "doppelhaushälfte", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus", "haus zum kauf"]):
+                    p_type = "Einfamilienhaus"
+                    b_type = "Haus"
+                elif "maisonette" in type_source:
+                    p_type = "Maisonette"
+                    b_type = "Maisonette"
+                elif "penthouse" in type_source:
+                    p_type = "Penthouse"
+                    b_type = "Penthouse"
+                elif "dachgeschoss" in type_source:
+                    b_type = "Dachgeschosswohnung"
+                elif "erdgeschoss" in type_source or " eg " in type_source:
+                    b_type = "Erdgeschosswohnung"
+
+                energy_class = ""
+                energy_match = re.search(r"\b([A-H]\+?)\b", card_text)
+                if energy_match and any(k in card_text for k in ["kWh", "Energie", "frei ab", " · "]):
+                    energy_class = energy_match.group(1)
 
                 title_h = card.find(["h2", "h3", "h1"])
-                raw_title = title_h.text.strip() if (title_h and title_h.text.strip()) else desc_teaser
+                badge_titles = [
+                    s for s in stripped_strings
+                    if 8 <= len(s) <= 110 and any(k in s.lower() for k in ["zum kauf", "wohnung", "haus", "maisonette", "penthouse", "grundstück"]) and s != desc_teaser
+                ]
+                raw_title = (
+                    title_h.text.strip()
+                    if (title_h and title_h.text.strip())
+                    else (desc_teaser if len(desc_teaser) >= 20 else (badge_titles[0] if badge_titles else ""))
+                )
                 resolved_city = (extracted_city or city or extracted_plz or "Deutschland").strip()
-                if city and city.lower() in resolved_city.lower() and resolved_city.lower() != city.lower():
-                    if not district:
-                        district = resolved_city
-                    resolved_city = city.strip().capitalize()
+                if city:
+                    from app.geo_resolver import normalize_district_city, is_within_search_radius
+                    norm_city, norm_dist = normalize_district_city(city, resolved_city, extracted_plz)
+                    if norm_dist and not district:
+                        district = norm_dist
+                    resolved_city = norm_city
+                    in_radius, _ = is_within_search_radius(
+                        target_city=city,
+                        target_postal_code=plz_clean or None,
+                        radius_km=radius_km,
+                        deal_city=resolved_city,
+                        deal_postal_code=extracted_plz,
+                        allow_geocoder=False,
+                    )
+                    if not in_radius:
+                        continue
                 elif resolved_city and resolved_city.islower():
                     resolved_city = resolved_city.capitalize()
-                title = clean_immowelt_title(raw_title, rooms, sqm, district, resolved_city, p_type)
+                title = clean_immowelt_title(raw_title, rooms, sqm if sqm > 0 else 50.0, district, resolved_city, p_type)
 
                 if query and query.lower() not in title.lower() and query.lower() not in ct_lower:
                     continue
@@ -323,21 +386,27 @@ def search_immowelt_deals(
                 main_img = None
                 for im in card_imgs:
                     src = im.get("src") or im.get("data-src")
-                    if src and "immowelt" in src and not src.startswith("data:"):
-                        high_res = re.sub(r"\?.*$", "?w=626&h=470", src)
-                        if high_res not in gallery_images:
-                            gallery_images.append(high_res)
-                        if not main_img:
-                            main_img = high_res
+                    if not src or "immowelt" not in src or src.startswith("data:"):
+                        continue
+                    # Skip small broker portraits / logos (e.g. ?h=50 or avatar/logo URLs)
+                    if re.search(r"[?&](?:h|height)=(?:[1-9]\d?|1[01]\d)\b", src, re.IGNORECASE):
+                        continue
+                    if any(skip_kw in src.lower() for skip_kw in ["logo", "avatar", "portrait", "makler", "agent"]):
+                        continue
+                    high_res = re.sub(r"\?.*$", "?w=626&h=470", src)
+                    if high_res not in gallery_images:
+                        gallery_images.append(high_res)
+                    if not main_img:
+                        main_img = high_res
 
                 if not main_img:
                     main_img = "https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"
 
                 eff_sqm = sqm if sqm > 0 else 50.0
-                benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=p_type)
+                benchmark = evaluate_property_valuation(resolved_city, eff_sqm, price, property_type=p_type, postal_code=extracted_plz)
                 expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
-                expected_rent = round(eff_sqm * expected_rent_per_sqm, 2) if p_type != "Grundstück" else 0.0
-                is_rented = 1 if ("vermietet" in ct_lower and "unvermietet" not in ct_lower) else 0
+                expected_rent = round(eff_sqm * expected_rent_per_sqm, 2) if (p_type != "Grundstück" and sqm > 0) else 0.0
+                is_rented = 1 if ("vermietet" in ct_lower and "unvermietet" not in ct_lower and "nicht vermietet" not in ct_lower) else 0
                 current_rent = 0.0
                 gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
 
@@ -533,8 +602,14 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
             full_desc = re.sub(r'<br\s*/?>', '\n', full_desc_raw, flags=re.IGNORECASE)
             full_desc = re.sub(r'<[^>]+>', '', full_desc).strip()
 
-            # B. Title
-            raw_title = classified.get("title") or ""
+            # B. Title (prefer concise hardFacts heading over multi-paragraph description classified.title)
+            hardfacts = sections.get("hardFacts") or sections.get("hardfacts") or {}
+            hf_title = str(hardfacts.get("title") or "").strip() if isinstance(hardfacts, dict) else ""
+            raw_title_cand = str(classified.get("title") or "").strip()
+            if hf_title and (not raw_title_cand or len(raw_title_cand) > 120):
+                raw_title = hf_title
+            else:
+                raw_title = raw_title_cand or hf_title
             clean_t = re.sub(r'<[^>]+>', ' ', raw_title).strip()
             if len(clean_t) > 110:
                 first_s = re.split(r'[\.\!\?]\s+', clean_t)[0]
@@ -542,22 +617,27 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
             else:
                 title = clean_t or f"Immowelt Exposé #{expose_id[:8]}"
 
-            # C. Gallery Images
+            # C. Gallery Images (skip small broker portraits/logos)
             images_raw = classified.get("domains", {}).get("medias", {}).get("images", [])
             gallery_images = []
             for im in images_raw:
                 u = im.get("url")
-                if u and "immowelt" in u:
-                    clean_u = re.sub(r'\?.*$', '', u)
-                    if clean_u not in gallery_images:
-                        gallery_images.append(clean_u)
+                if not u or "immowelt" not in u:
+                    continue
+                if re.search(r"[?&](?:h|height)=(?:[1-9]\d?|1[01]\d)\b", u, re.IGNORECASE):
+                    continue
+                if any(skip_kw in u.lower() for skip_kw in ["logo", "avatar", "portrait", "makler", "agent"]):
+                    continue
+                clean_u = re.sub(r'\?.*$', '', u)
+                if clean_u not in gallery_images:
+                    gallery_images.append(clean_u)
             main_image = gallery_images[0] if gallery_images else ""
 
             # D. Hardfacts (Price, Sqm, Rooms) - Supports both camelCase 'hardFacts' and lowercase 'hardfacts'
-            hardfacts = sections.get("hardFacts") or sections.get("hardfacts") or {}
             facts = hardfacts.get("facts") or []
             price_val = 0.0
             sqm_val = 0.0
+            land_area_val = 0.0
             rooms_val = 0.0
             year_built_val = None
 
@@ -589,13 +669,29 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                             except Exception:
                                 pass
 
-            # D2. Living Space
+            # D2. Living Space vs Plot Space (never let plotSpace overwrite livingSpace!)
             for f in facts:
                 f_type = str(f.get("type", "")).lower()
+                f_label = str(f.get("label", "")).lower()
                 f_val = str(f.get("value", ""))
                 f_split = str(f.get("splitValue", ""))
-                if "livingspace" in f_type or "living" in f_type or "area" in f_type or "m²" in f_val:
-                    cand_text = f_split if f_split else f_val
+                cand_text = f_split if f_split else f_val
+                cand_low = f"{f_type} {f_label} {f_val} {f_split}".lower()
+
+                is_plot = any(k in cand_low for k in ("plot", "grundst", "land", "bauland"))
+                is_aux = any(k in cand_low for k in ("nutzfl", "garten", "balkon", "terrasse", "stellplatz", "keller"))
+                if is_plot:
+                    m_land = re.search(r'([\d,\.]+)', cand_text)
+                    if m_land and land_area_val <= 0:
+                        try:
+                            land_area_val = float(m_land.group(1).replace(".", "").replace(",", "."))
+                        except Exception:
+                            pass
+                    continue
+                if is_aux:
+                    continue
+
+                if sqm_val <= 0 and ("livingspace" in f_type or "living" in f_type or "wohnfl" in cand_low or ("m²" in f_val and "nutz" not in cand_low)):
                     m_sqm = re.search(r'([\d,\.]+)', cand_text)
                     if m_sqm:
                         try:
@@ -715,6 +811,19 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                 ]
             }
 
+            street_str = str(addr_obj.get("street") or "").strip()
+            addr_display = ", ".join(p for p in [street_str, f"{plz} {city}".strip(), district] if p)
+            details_dict = {
+                "Kaufpreis": f"{price_val:,.0f} €".replace(",", ".") if price_val else "",
+                "Wohnfläche": f"{sqm_val:.1f} m²" if sqm_val else "",
+                "Grundstücksfläche": f"{land_area_val:.1f} m²" if land_area_val else "",
+                "Zimmer": str(rooms_val) if rooms_val else "",
+                "Baujahr": str(year_built_val) if year_built_val else "",
+                "Heizungsart": heating_type or "",
+                "energy_certificate": energy_data,
+            }
+            details_dict = {k: v for k, v in details_dict.items() if v}
+
             return {
                 "success": True,
                 "expose_id": expose_id,
@@ -722,15 +831,18 @@ def fetch_immowelt_expose(url: str) -> Dict[str, Any]:
                 "description": full_desc,
                 "price": price_val or 0.0,
                 "living_space": sqm_val or 0.0,
+                "land_area": land_area_val or 0.0,
                 "rooms": rooms_val or 1.0,
                 "city": city,
                 "postal_code": plz,
                 "district": district,
+                "address": addr_display,
                 "year_built": year_built_val,
                 "heating_type": heating_type,
                 "images": gallery_images,
                 "image_url": main_image,
                 "energy_certificate": energy_data,
+                "details": details_dict,
                 "portal": "Immowelt"
             }
 

@@ -371,7 +371,7 @@ def get_property(property_id: int):
     finally:
         conn.close()
 
-    benchmark = get_city_benchmark(prop["city"])
+    benchmark = get_city_benchmark(prop["city"], postal_code=prop.get("postal_code"), state=prop.get("state"))
     prop["city_benchmark"] = benchmark
 
     return prop
@@ -612,11 +612,21 @@ def run_property_ai_audit(
         except Exception:
             existing_ai = None
 
-    # Invalidate stale audit that erroneously gave high/green score to an offline or empty property
+    # Invalidate stale audit cache on state changes (recovery from offline/stub, new Vision run, or missing images)
     is_offline_now = (prop.get("is_online", 1) == 0 or str(prop.get("availability_status", "")).lower() == "offline")
     desc_len_now = len((prop.get("description") or "").strip())
-    if (is_offline_now or desc_len_now < 50) and existing_ai and existing_ai.get("score", 0.0) > 2.0:
-        existing_ai = None
+    if existing_ai:
+        if (is_offline_now or desc_len_now < 50) and existing_ai.get("score", 0.0) > 2.0:
+            existing_ai = None
+        elif existing_ai.get("knockout_reason") in ("OFFLINE", "MISSING_DESCRIPTION") and not is_offline_now and desc_len_now >= 50:
+            existing_ai = None
+        elif not skip_images:
+            cached_img = existing_ai.get("image_analysis")
+            if not cached_img or (isinstance(cached_img, dict) and cached_img.get("vision_skipped")):
+                if img_report and not img_report.get("vision_skipped"):
+                    existing_ai = None
+                elif prop.get("gallery_images") or prop.get("image_url"):
+                    existing_ai = None
 
     has_llm_key = bool(api_key and str(api_key).strip())
     if (
@@ -669,7 +679,13 @@ def run_property_ai_audit(
     # bei fehlender description oder bei explizitem force_refresh:
     # immer die vollständigen Exposé-Daten und alle Galeriebilder live von der Portal-URL laden.
     has_existing_ai = bool(prop.get("ai_analysis"))
-    if not description or force_refresh or not has_existing_ai:
+    needs_live_fetch = (
+        not description
+        or len(description.strip()) < 120
+        or force_refresh
+        or (not has_existing_ai and not prop.get("gallery_images"))
+    )
+    if needs_live_fetch:
         portal_url = prop.get("portal_url", "")
         source_portal = prop.get("source_portal", "")
         city = prop.get("city", "")
@@ -726,7 +742,7 @@ def run_property_ai_audit(
                         update_fields.append("purchase_price = ?")
                         update_vals.append(scout_res["price"])
                         prop["purchase_price"] = scout_res["price"]
-                    if scout_res.get("living_space", 0) > 0 and prop.get("living_space", 0) <= 0:
+                    if scout_res.get("living_space", 0) > 0 and (prop.get("living_space", 0) <= 0 or force_refresh or abs(scout_res["living_space"] - prop.get("living_space", 0)) > 1.0):
                         update_fields.append("living_space = ?")
                         update_vals.append(scout_res["living_space"])
                         prop["living_space"] = scout_res["living_space"]
@@ -799,10 +815,14 @@ def run_property_ai_audit(
                         upd_vals.append(iw_res["year_built"])
                         prop["year_built"] = iw_res["year_built"]
 
-                    if iw_res.get("living_space") and prop.get("living_space", 0) <= 0:
+                    if iw_res.get("living_space") and (prop.get("living_space", 0) <= 0 or force_refresh or abs(float(iw_res["living_space"]) - float(prop.get("living_space") or 0)) > 1.0):
                         upd_fields.append("living_space = ?")
                         upd_vals.append(iw_res["living_space"])
                         prop["living_space"] = iw_res["living_space"]
+                    if iw_res.get("land_area") and float(iw_res.get("land_area") or 0) > 0 and (prop.get("land_area", 0) <= 0 or force_refresh):
+                        upd_fields.append("land_area = ?")
+                        upd_vals.append(float(iw_res["land_area"]))
+                        prop["land_area"] = float(iw_res["land_area"])
 
                     if iw_res.get("rooms") and prop.get("rooms", 0) <= 0:
                         upd_fields.append("rooms = ?")
@@ -1258,14 +1278,18 @@ def run_property_image_analysis(
         sanitize_image_report_tags(img_report)
 
         img_json = json.dumps(img_report, ensure_ascii=False)
-        analyzed_urls = [p["url"] for p in img_report.get("analyzed_photos", []) if p.get("url")]
+        analyzed_urls = [
+            p["url"] for p in img_report.get("analyzed_photos", [])
+            if p.get("url") and "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(p["url"])
+        ]
         gallery_json = json.dumps(analyzed_urls, ensure_ascii=False) if analyzed_urls else None
 
         # Also update ai_analysis if present (inkl. Upgrade von Fallback-Audits, CaPEx-Abgleich & Checkliste!)
+        # Do not overwrite ai_analysis when Vision was explicitly skipped!
         ai_analysis_val = prop.get("ai_analysis")
         updated_ai_obj = None
         refreshed_property_updates = None
-        if ai_analysis_val:
+        if ai_analysis_val and not img_report.get("vision_skipped"):
             try:
                 ai_data = json.loads(ai_analysis_val)
                 was_fallback = not bool(ai_data.get("used_llm"))
@@ -1565,6 +1589,9 @@ def trigger_live_scrape(payload: Dict[str, Any] = Body(...), request: Request = 
     if not city:
         raise HTTPException(status_code=400, detail="City name is required")
 
+    raw_r = payload.get("radius_km")
+    eff_radius_km = int(raw_r) if raw_r is not None and str(raw_r).strip() != "" else 25
+
     deals = scrape_multi_portal_deals(
         city=city,
         query=query,
@@ -1574,7 +1601,7 @@ def trigger_live_scrape(payload: Dict[str, Any] = Body(...), request: Request = 
         min_price=min_price,
         max_price=max_price,
         postal_code=(payload.get("postal_code") or "").strip() or None,
-        radius_km=int(payload.get("radius_km") or 25),
+        radius_km=eff_radius_km,
         property_type=(payload.get("property_type") or "all").strip()
     )
     new_ids = import_scraped_deals_returning_ids(deals)
@@ -1707,31 +1734,34 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
             img_url = gallery_images[0]
         details = scout_res.get("details") or {}
         for k, v in details.items():
-            if price <= 0 and any(x in k.lower() for x in ["kaufpreis", "preis"]):
-                m = re.search(r"([\d\.]+)", str(v))
+            kl = k.lower()
+            vl = str(v).lower()
+            if price <= 0 and ("kaufpreis" in kl or kl == "preis") and "m²" not in kl and "stellplatz" not in kl and "garage" not in kl and "miete" not in kl and "/m²" not in vl:
+                no_dec = re.sub(r",\d{1,2}\b", "", str(v))
+                m = re.search(r"([\d\.]+)", no_dec)
                 if m:
                     try:
                         price = float(m.group(1).replace(".", ""))
                     except ValueError:
                         pass
-            elif sqm <= 0 and any(x in k.lower() for x in ["wohnfläche", "fläche"]):
+            elif sqm <= 0 and ("wohnfläche" in kl or kl == "fläche") and "grundstück" not in kl and "nutz" not in kl:
                 m = re.search(r"([\d,\.]+)", str(v))
                 if m:
                     try:
                         sqm = float(m.group(1).replace(".", "").replace(",", "."))
                     except ValueError:
                         pass
-            elif rooms <= 0 and "zimmer" in k.lower():
+            elif rooms <= 0 and "zimmer" in kl:
                 m = re.search(r"([\d,\.]+)", str(v))
                 if m:
                     try:
                         rooms = float(m.group(1).replace(",", "."))
                     except ValueError:
                         pass
-        plz_m = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]+)", addr_str)
+        plz_m = re.search(r"\b(\d{5})\s+([^,|(\n\r]+)", addr_str)
         if plz_m:
-            postal_code = plz_m.group(1)
-            city = plz_m.group(2)
+            postal_code = plz_m.group(1).strip()
+            city = re.sub(r"\s+", " ", plz_m.group(2)).strip(" -")
 
     elif "immowelt.de" in url_lower:
         source_portal = "Immowelt"
@@ -1792,21 +1822,24 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
                 img_url = gallery_images[0]
         details = live_check.get("details") or {}
         for k, v in details.items():
-            if "preis" in k.lower():
-                m = re.search(r"([\d\.]+)", str(v))
+            kl = k.lower()
+            vl = str(v).lower()
+            if ("preis" in kl or "kaufpreis" in kl) and "m²" not in kl and "stellplatz" not in kl and "garage" not in kl and "/m²" not in vl:
+                no_dec = re.sub(r",\d{1,2}\b", "", str(v))
+                m = re.search(r"([\d\.]+)", no_dec)
                 if m:
                     try:
                         price = float(m.group(1).replace(".", ""))
                     except ValueError:
                         pass
-            elif "wohnfläche" in k.lower():
+            elif "wohnfläche" in kl and "grundstück" not in kl and "nutz" not in kl:
                 m = re.search(r"([\d,\.]+)", str(v))
                 if m:
                     try:
                         sqm = float(m.group(1).replace(".", "").replace(",", "."))
                     except ValueError:
                         pass
-            elif "zimmer" in k.lower():
+            elif "zimmer" in kl:
                 m = re.search(r"([\d,\.]+)", str(v))
                 if m:
                     try:
@@ -1833,10 +1866,10 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
                 pass
 
     if not city:
-        plz_match = re.search(r"\b(\d{5})\s+([A-Za-zäöüÄÖÜß\-]{2,30})", combined_all)
+        plz_match = re.search(r"\b(\d{5})\s+([^,|(\n\r]{2,40})", combined_all)
         if plz_match:
-            postal_code = plz_match.group(1)
-            city = plz_match.group(2)
+            postal_code = plz_match.group(1).strip()
+            city = re.sub(r"\s+", " ", plz_match.group(2)).strip(" -")
 
     # 4. Strict Validation: Fail fast with clear error message instead of dummy fallbacks
     missing_fields = []
@@ -1869,15 +1902,36 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     # Ensure title is never a generic placeholder
     title = extract_clean_listing_title(raw_url, title, description, city, rooms, sqm)
 
-    benchmark = evaluate_property_valuation(city, sqm, price)
-    expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
-    expected_rent = round(sqm * expected_rent_per_sqm, 2)
-    gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if price > 0 else 0.0
+    # Detect actual property & building type instead of hardcoding Eigentumswohnung
+    details_str = " ".join(f"{k} {v}" for k, v in details.items()).lower()
+    type_probe = f"{title} {url_lower} {details_str}".lower()
+    detected_prop_type = "Eigentumswohnung"
+    detected_bldg_type = "Etagenwohnung"
+    if any(k in type_probe for k in ("mehrfamilienhaus", "zinshaus", "renditehaus", "mfh", "wohn- und geschäftshaus")):
+        detected_prop_type = "Mehrfamilienhaus"
+        detected_bldg_type = "Mehrfamilienhaus"
+    elif any(k in type_probe for k in ("einfamilienhaus", "doppelhaushälfte", "doppelhaus", "reihenhaus", "bungalow", "stadthaus", "zweifamilienhaus", "efh")):
+        detected_prop_type = "Einfamilienhaus"
+        detected_bldg_type = "Haus"
+    elif any(k in type_probe for k in ("baugrundstück", "bauplatz", "grundstück zum kauf")) and not any(w in type_probe for w in ("wohnung", "haus", "maisonette", "penthouse")):
+        detected_prop_type = "Grundstück"
+        detected_bldg_type = "Grundstück"
+    elif "maisonette" in type_probe:
+        detected_prop_type = "Maisonette"
+        detected_bldg_type = "Maisonette"
+    elif "penthouse" in type_probe:
+        detected_prop_type = "Penthouse"
+        detected_bldg_type = "Penthouse"
 
-    cf = calculate_cashflow(price=price, rent=expected_rent, city=city, state=state, living_space=sqm)
+    benchmark = evaluate_property_valuation(city, sqm, price, property_type=detected_prop_type, postal_code=postal_code, state=state)
+    expected_rent_per_sqm = benchmark.get("expected_rent_per_sqm", 11.50)
+    expected_rent = round(sqm * expected_rent_per_sqm, 2) if detected_prop_type != "Grundstück" else 0.0
+    gross_yield = round(((expected_rent * 12.0) / price) * 100.0, 2) if (price > 0 and expected_rent > 0) else 0.0
+
+    cf = calculate_cashflow(price=price, rent=expected_rent, city=city, state=state, postal_code=postal_code, living_space=sqm)
     monthly_cashflow = cf.get("monthly_cashflow", 0.0)
 
-    is_private = 1 if ("provisionsfrei" in combined_all.lower() or "privat" in combined_all.lower()) else 0
+    is_private = 1 if ("provisionsfrei" in combined_all.lower() or "privatverkauf" in combined_all.lower() or "von privat" in combined_all.lower() or "ohne provision" in combined_all.lower()) else 0
     comm_pct = 0.0 if is_private else 3.57
 
     tags = ["URL Import", source_portal, state]
@@ -1917,7 +1971,7 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
             )
         """, (
             title, address, postal_code, city, state, "DE",
-            "Eigentumswohnung", "Etagenwohnung",
+            detected_prop_type, detected_bldg_type,
             rooms, sqm, 0.0, year_built, "Gepflegt",
             price, price, 0.0, 0.0, comm_pct,
             0.0, expected_rent, gross_yield, monthly_cashflow,
@@ -1938,10 +1992,10 @@ def import_property_from_url(payload: Dict[str, Any] = Body(...), request: Reque
     finally:
         conn_ins.close()
 
-    # 4. Trigger full AI Due Diligence Audit immediately (without holding an outer DB lock open)
+    # 4. Trigger full AI Due Diligence Audit immediately (already fetched description & gallery above!)
     audit_res = {}
     try:
-        audit_res = run_property_ai_audit(new_prop_id, force_refresh=True, request=request)
+        audit_res = run_property_ai_audit(new_prop_id, force_refresh=False, request=request)
     except Exception as e:
         print(f"Error running initial AI audit on imported deal #{new_prop_id}: {e}")
 

@@ -223,7 +223,7 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         profile_id INTEGER,
         property_id INTEGER,
-        portal_url TEXT UNIQUE NOT NULL,
+        portal_url TEXT NOT NULL,
         title TEXT NOT NULL,
         city TEXT NOT NULL,
         price REAL NOT NULL,
@@ -237,10 +237,56 @@ def init_db():
         sent_to_telegram INTEGER DEFAULT 0,
         telegram_error TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(profile_id, portal_url),
         FOREIGN KEY (profile_id) REFERENCES search_profiles (id) ON DELETE SET NULL,
         FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE
     )
     """)
+
+    # Migrate legacy deal_alerts tables where portal_url had a global UNIQUE constraint blocking cross-profile alerts
+    try:
+        cursor.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='deal_alerts'")
+        da_schema_row = cursor.fetchone()
+        if da_schema_row and da_schema_row[0] and "portal_url text unique" in da_schema_row[0].lower():
+            cursor.execute("ALTER TABLE deal_alerts RENAME TO _deal_alerts_legacy")
+            cursor.execute("""
+            CREATE TABLE deal_alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER,
+                property_id INTEGER,
+                portal_url TEXT NOT NULL,
+                title TEXT NOT NULL,
+                city TEXT NOT NULL,
+                price REAL NOT NULL,
+                living_space REAL NOT NULL,
+                price_per_sqm REAL NOT NULL,
+                gross_yield REAL NOT NULL,
+                market_discount_pct REAL DEFAULT 0.0,
+                monthly_cashflow REAL DEFAULT 0.0,
+                ai_verdict TEXT,
+                has_critical_risks INTEGER DEFAULT 0,
+                sent_to_telegram INTEGER DEFAULT 0,
+                telegram_error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(profile_id, portal_url),
+                FOREIGN KEY (profile_id) REFERENCES search_profiles (id) ON DELETE SET NULL,
+                FOREIGN KEY (property_id) REFERENCES properties (id) ON DELETE CASCADE
+            )
+            """)
+            cursor.execute("""
+            INSERT INTO deal_alerts (
+                id, profile_id, property_id, portal_url, title, city, price, living_space,
+                price_per_sqm, gross_yield, market_discount_pct, monthly_cashflow,
+                ai_verdict, has_critical_risks, sent_to_telegram, telegram_error, created_at
+            )
+            SELECT id, profile_id, property_id, portal_url, title, city, price, living_space,
+                price_per_sqm, gross_yield, market_discount_pct, monthly_cashflow,
+                ai_verdict, has_critical_risks, sent_to_telegram, telegram_error, created_at
+            FROM _deal_alerts_legacy
+            """)
+            cursor.execute("DROP TABLE _deal_alerts_legacy")
+    except Exception:
+        pass
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS deal_notes (
@@ -943,11 +989,14 @@ def get_deal_alerts(limit: int = 50, profile_id: Optional[int] = None) -> List[D
         conn.close()
 
 
-def is_alert_already_logged(portal_url: str) -> bool:
+def is_alert_already_logged(portal_url: str, profile_id: Optional[int] = None) -> bool:
     conn = get_connection()
     try:
         c = conn.cursor()
-        c.execute("SELECT id FROM deal_alerts WHERE portal_url = ?", (portal_url,))
+        if profile_id is not None:
+            c.execute("SELECT id FROM deal_alerts WHERE portal_url = ? AND profile_id = ?", (portal_url, profile_id))
+        else:
+            c.execute("SELECT id FROM deal_alerts WHERE portal_url = ?", (portal_url,))
         row = c.fetchone()
         return bool(row)
     finally:
@@ -966,6 +1015,18 @@ def record_deal_alert(alert_data: Dict[str, Any]) -> int:
                 price_per_sqm, gross_yield, market_discount_pct, monthly_cashflow,
                 ai_verdict, has_critical_risks, sent_to_telegram, telegram_error, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id, portal_url) DO UPDATE SET
+                property_id = excluded.property_id,
+                price = excluded.price,
+                living_space = excluded.living_space,
+                price_per_sqm = excluded.price_per_sqm,
+                gross_yield = excluded.gross_yield,
+                market_discount_pct = excluded.market_discount_pct,
+                monthly_cashflow = excluded.monthly_cashflow,
+                ai_verdict = excluded.ai_verdict,
+                has_critical_risks = excluded.has_critical_risks,
+                sent_to_telegram = MAX(deal_alerts.sent_to_telegram, excluded.sent_to_telegram),
+                telegram_error = excluded.telegram_error
         """, (
             alert_data.get("profile_id"),
             alert_data.get("property_id"),

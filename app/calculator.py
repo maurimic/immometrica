@@ -94,7 +94,10 @@ def calculate_cashflow(
                 repayment_rate=repayment_rate,
                 renovation_costs=renovation_costs,
                 commission_percent=commission_percent,
-                buy_costs_from_equity=buy_costs_from_equity
+                buy_costs_from_equity=buy_costs_from_equity,
+                city=city,
+                state=state,
+                fixed_commission=fixed_commission,
             )
             interest_rate = float(drklein_quote.get("nominal_rate", 3.93))
         except Exception:

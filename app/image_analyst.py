@@ -272,7 +272,13 @@ def is_ai_generated_photo(
     if any(k in t for k in ("ki-visualisierung", "virtual staging", "ki-generiert", "ai-generated")):
         return True
     combined = f"{description or ''} {' '.join(findings or [])}"
-    return bool(_AI_STAGING_REGEX.search(combined))
+    cleaned = re.sub(
+        r"\b(?:kein(?:e[nmrs]?)?|nicht|ohne)\s+(?:virtual\s*staging|ki[-\s]?visualisierung\w*|ki[-\s]?generiert\w*|ai[-\s]?generated|fotomontage\w*|retuschiert\w*|einrichtungsbeispiel\w*|visualisierung\w*)\b",
+        " ",
+        combined,
+        flags=re.IGNORECASE,
+    )
+    return bool(_AI_STAGING_REGEX.search(cleaned))
 
 
 def refine_photo_tag(
@@ -1105,9 +1111,32 @@ def analyze_property_images(
     if not image_urls and fallback_img:
         image_urls = [fallback_img]
 
-    # If still empty, use fallback image
+    # Never inject or analyze Unsplash placeholder stock photos as real property photos!
+    image_urls = [u for u in (image_urls or []) if u and "images.unsplash.com/photo-1560448204-e02f11c3d0e2" not in str(u)]
+
     if not image_urls:
-        image_urls = ["https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=800"]
+        return {
+            "timestamp": get_berlin_now_str(),
+            "property_id": property_data.get("id"),
+            "ai_provider": "Keine Objektfotos vorhanden",
+            "token_usage": {"prompt_tokens": 0, "candidates_tokens": 0, "total_tokens": 0},
+            "photos_analyzed_count": 0,
+            "has_interior_photos": False,
+            "blueprints_count": 0,
+            "ai_generated_photos_count": 0,
+            "notice": "Hinweis: Das Inserat enthält keine echten Objektfotos. Eine visuelle Zustandsprüfung ist nicht möglich (Blindflug-Risiko).",
+            "overall_visual_score": None,
+            "condition_rating": "KEINE_FOTOS",
+            "condition_label": "⚠️ Keine Objektfotos vorhanden (Blindflug-Risiko)",
+            "categories": {},
+            "analyzed_photos": [],
+            "detected_findings": ["Keine Objektfotos im Inserat hinterlegt – Zustand vor Ort prüfen."],
+            "visual_capex_items": [],
+            "total_visual_capex": 0.0,
+            "vision_mode": "NO_PHOTOS",
+            "vision_skipped": False,
+            "investor_summary": "Im Inserat liegen keine echten Objektfotos vor; es wird ausdrücklich vor einem Blindflug ohne Vor-Ort-Besichtigung gewarnt."
+        }
 
     # Vollständige Galerie-Analyse: Alle vorhandenen Bilder analysieren (keine Begrenzung auf Schlüsselbilder)
     # image_urls bleibt vollständig erhalten
@@ -1701,6 +1730,27 @@ def analyze_property_images(
             if "keinem der 8 fotos" in inv_sum.lower() or "keinem der fotos" in inv_sum.lower():
                 inv_sum = re.sub(r"(?i)auf keinem der \d+ fotos", f"auf den {len(analyzed_photos)} Fotos", inv_sum)
 
+            # Fold obvious defect findings discovered on photos 9+ (extra batches) into clean_findings & visual_capex if missed
+            for p_extra in analyzed_photos:
+                if int(p_extra.get("index") or 0) <= 8 or p_extra.get("is_blueprint") or p_extra.get("is_ai_generated"):
+                    continue
+                extra_txt = (str(p_extra.get("description", "")) + " " + " ".join(p_extra.get("findings") or [])).lower()
+                if any(def_k in extra_txt for def_k in ("schimmel", "feuchtigkeit", "wasserschaden", "sanierungsbedürftig", "stark beschädigt")):
+                    note = f"📸 Zusätzlicher Befund auf Foto #{p_extra['index']} ({p_extra.get('tag', 'Raum')}): {p_extra.get('description', '')}"
+                    if note not in clean_findings:
+                        clean_findings.append(note)
+
+            raw_overall = gemini_res.get("overall_visual_score")
+            if raw_overall is not None:
+                try:
+                    computed_overall = round(float(raw_overall), 1)
+                except (TypeError, ValueError):
+                    computed_overall = 5.0
+            else:
+                computed_overall = 5.0
+            if not has_interior_real:
+                computed_overall = min(computed_overall, 5.0)
+
             return {
                 "timestamp": get_berlin_now_str(),
                 "property_id": property_data.get("id"),
@@ -1715,9 +1765,9 @@ def analyze_property_images(
                 "blueprints_count": blueprints_count,
                 "ai_generated_photos_count": len(ai_photo_indices),
                 "notice": gem_notice,
-                "overall_visual_score": round(float(gemini_res.get("overall_visual_score", 7.0)), 1),
-                "condition_rating": gemini_res.get("condition_rating", "GEPFLEGT"),
-                "condition_label": gemini_res.get("condition_label", "🟢 Gepflegter Zustand"),
+                "overall_visual_score": computed_overall,
+                "condition_rating": gemini_res.get("condition_rating", "GEPFLEGT" if has_interior_real else "KEINE_INNENFOTOS"),
+                "condition_label": gemini_res.get("condition_label", "🟢 Gepflegter Zustand" if has_interior_real else "🟡 Keine echten Innenfotos"),
                 "categories": gem_categories,
                 "analyzed_photos": analyzed_photos,
                 "detected_findings": clean_findings,
@@ -1748,7 +1798,7 @@ def analyze_property_images(
                 "total_tokens": total_tokens
             },
             "photos_analyzed_count": len(analyzed_photos),
-            "has_interior_photos": has_interior_photos,
+            "has_interior_photos": False,
             "blueprints_count": blueprints_count,
             "notice": f"⚠️ Achtung: Die multimodale KI-Bildanalyse konnte nicht ausgeführt werden ({vision_error_msg or 'API-Timeout'}).",
             "overall_visual_score": None,

@@ -458,7 +458,10 @@ def get_property_mortgage_interest_quote(
     repayment_rate: float = 2.0,
     renovation_costs: float = 0.0,
     commission_percent: float = 3.57,
-    buy_costs_from_equity: bool = True
+    buy_costs_from_equity: bool = True,
+    city: Optional[str] = None,
+    state: Optional[str] = None,
+    fixed_commission: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Convenience method calculating loan amount and returning the tailored Dr. Klein quote.
@@ -471,17 +474,18 @@ def get_property_mortgage_interest_quote(
 
     capex = max(0.0, float(renovation_costs or 0))
     commission = max(0.0, float(commission_percent or 0))
+    fixed_comm = max(0.0, float(fixed_commission or 0))
 
     tax_rate = 6.0
     try:
         from app.geo_resolver import resolve_location_and_tax
-        geo = resolve_location_and_tax(postal_code=postal_code)
+        geo = resolve_location_and_tax(postal_code=postal_code, city=city, state=state)
         tax_rate = float(geo.get("tax_rate") or 6.0)
     except Exception:
         pass
 
     nebenkosten_pct = tax_rate + 2.0 + commission
-    nebenkosten_eur = round(p * (nebenkosten_pct / 100.0), 2)
+    nebenkosten_eur = round(p * (nebenkosten_pct / 100.0) + fixed_comm, 2)
     
     if buy_costs_from_equity:
         loan = max(5000.0, round((p - eq) + capex, 2))
